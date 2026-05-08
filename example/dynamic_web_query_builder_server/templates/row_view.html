@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Row View - Qornix</title>
+    <link rel="icon" type="image/svg+xml"
+          href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90' font-family='Arial, sans-serif'%3E🦅%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .row-view-layout {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: #95a5a6;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            transition: background-color 0.2s;
+        }
+        .back-btn:hover {
+            background: #7f8c8d;
+        }
+        .detail-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+        .field-row {
+            display: flex;
+            padding: 16px 0;
+            border-bottom: 1px solid #ecf0f1;
+            gap: 16px;
+            align-items: flex-start;
+            transition: background-color 0.2s;
+        }
+        .field-row:last-child {
+            border-bottom: none;
+        }
+        .field-row.modified {
+            background: #fff3cd;
+            border-left: 3px solid #f39c12;
+            padding-left: 8px;
+            margin-left: -11px;
+        }
+        .field-row.key-field {
+            background: #e8f4f8;
+            border-left: 3px solid #3498db;
+            padding-left: 8px;
+            margin-left: -11px;
+        }
+        .field-label {
+            font-weight: 600;
+            color: #7f8c8d;
+            min-width: 200px;
+            flex-shrink: 0;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding-top: 2px;
+        }
+        .field-separator {
+            color: #bdc3c7;
+            flex-shrink: 0;
+            padding-top: 2px;
+        }
+        .field-value {
+            color: #2c3e50;
+            flex: 1;
+            word-break: break-word;
+            font-size: 15px;
+        }
+        .field-value.null {
+            color: #95a5a6;
+            font-style: italic;
+        }
+        .field-value.string {
+            color: #27ae60;
+            font-family: 'Courier New', monospace;
+        }
+        .field-value.number {
+            color: #e67e22;
+            font-weight: 600;
+        }
+        .field-value.boolean {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .field-value.boolean-true {
+            background: #d4edda;
+            color: #155724;
+        }
+        .field-value.boolean-false {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .field-value.json {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            border: 1px solid #ecf0f1;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .field-value.date {
+            color: #9b59b6;
+            font-weight: 500;
+        }
+        .field-value.edit-input,
+        .field-value.edit-textarea,
+        .field-value.edit-select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 2px solid #3498db;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            box-sizing: border-box;
+            background: white;
+        }
+        .field-value.edit-textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        .field-value.edit-input:focus,
+        .field-value.edit-textarea:focus,
+        .field-value.edit-select:focus {
+            outline: none;
+            border-color: #2980b9;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+        .action-bar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-edit { background: #3498db; color: white; }
+        .btn-edit:hover { background: #2980b9; }
+        .btn-save { background: #27ae60; color: white; }
+        .btn-save:hover { background: #229954; }
+        .btn-cancel { background: #95a5a6; color: white; }
+        .btn-cancel:hover { background: #7f8c8d; }
+        .btn-delete { background: #e74c3c; color: white; }
+        .btn-delete:hover { background: #c0392b; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #3498db;
+            font-style: italic;
+        }
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .edit-mode-indicator {
+            background: #fff3cd;
+            color: #856404;
+            padding: 10px 15px;
+            border-radius: 5px;
+            border-left: 4px solid #f39c12;
+            font-size: 14px;
+            display: none;
+        }
+        .edit-mode-indicator.active { display: block; }
+        .field-hint {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-top: 4px;
+            font-style: italic;
+        }
+        @media (max-width: 600px) {
+            .field-row {
+                flex-direction: column;
+                gap: 4px;
+            }
+            .field-label {
+                min-width: unset;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <nav class="navbar">
+        <span class="nav-brand">🦅 Qornix</span>
+        <a href="/" class="nav-link">📋 Главная</a>
+        <a href="/query-builder" class="nav-link">🔧 Query Builder</a>
+        <a href="/table" class="nav-link">📊 Table Browser</a>
+        <a href="/schema-manager" class="nav-link">📄 Schema Manager</a>
+    </nav>
+
+    <div class="header">
+        <h1>🦅 Qornix Row View</h1>
+        <p id="pageTitle">Детальное представление записи</p>
+    </div>
+
+    <div class="row-view-layout">
+        <!-- Back button and action bar -->
+        <div class="action-bar">
+            <button class="back-btn" onclick="goBack()">
+                ← Назад к таблице
+            </button>
+            <div style="flex: 1;"></div>
+            <button class="btn btn-edit" id="editBtn" style="display: none;" onclick="startEdit()">
+                ✏️ Редактировать
+            </button>
+            <button class="btn btn-save" id="saveBtn" style="display: none;" onclick="saveChanges()">
+                💾 Сохранить
+            </button>
+            <button class="btn btn-cancel" id="cancelBtn" style="display: none;" onclick="cancelEdit()">
+                ❌ Отмена
+            </button>
+            <button class="btn btn-delete" id="deleteBtn" style="display: none;" onclick="deleteRecord()">
+                🗑️ Удалить
+            </button>
+        </div>
+
+        <!-- Edit mode indicator -->
+        <div class="edit-mode-indicator" id="editIndicator">
+            🔧 Режим редактирования: измените значения полей. Изменённые поля выделяются жёлтым.
+        </div>
+
+        <!-- Detail view -->
+        <div class="detail-card" id="detailCard">
+            <h2 id="detailTitle">Загрузка...</h2>
+            <div id="loading" class="loading">Загрузка данных...</div>
+            <div id="errorContainer" style="display: none;"></div>
+            <div id="successContainer" style="display: none;"></div>
+            <div id="fieldsContainer" style="display: none;"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentTable = '';
+let currentId = '';
+let originalData = null;
+let currentData = null;
+let isEditMode = false;
+let primaryKeyField = 'id';
+let fieldLabels = {};
+
+document.addEventListener('DOMContentLoaded', function() {
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    if (pathParts.length >= 3) {
+        currentTable = decodeURIComponent(pathParts[1]);
+        currentId = decodeURIComponent(pathParts[2]);
+        document.getElementById('pageTitle').textContent = `Детальное представление: ${currentTable} (id=${currentId})`;
+        document.getElementById('detailTitle').textContent = `📋 ${currentTable} [id=${currentId}]`;
+        loadRowData();
+    } else {
+        showError('Неверный URL. Ожидался формат /table/{table}/{id}');
+    }
+});
+
+function goBack() { window.history.back(); }
+
+function showSuccess(message) {
+    const successContainer = document.getElementById('successContainer');
+    const errorContainer = document.getElementById('errorContainer');
+    errorContainer.style.display = 'none';
+    successContainer.style.display = 'block';
+    successContainer.innerHTML = `<div class="success-message">${message}</div>`;
+    setTimeout(() => { successContainer.style.display = 'none'; }, 5000);
+}
+
+function detectPrimaryKey(fields) {
+    const lowerFields = fields.map(f => f.toLowerCase());
+    const patterns = ['id', 'pk', 'primarykey', 'key'];
+    for (const pattern of patterns) {
+        const found = lowerFields.find(f => f.toLowerCase() === pattern);
+        if (found) return found;
+    }
+    if (lowerFields[0] && lowerFields[0].includes('id')) return fields[0];
+    return fields.includes('id') ? 'id' : fields[0];
+}
+
+function isLargeField(value) {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'object') return true;
+    const strValue = String(value);
+    return strValue.length > 100 || strValue.includes('\n');
+}
+
+function formatValueForEdit(value) {
+    const valueEl = document.createElement('div');
+    valueEl.className = 'field-value';
+
+    if (value === null || value === undefined) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'edit-input';
+        input.value = '';
+        input.placeholder = 'NULL';
+        input.addEventListener('input', () => onFieldChange(input.dataset.field));
+        valueEl.appendChild(input);
+    } else if (typeof value === 'object') {
+        const textarea = document.createElement('textarea');
+        textarea.className = 'edit-textarea';
+        textarea.value = JSON.stringify(value, null, 2);
+        textarea.addEventListener('input', () => onFieldChange(textarea.dataset.field));
+        valueEl.appendChild(textarea);
+        const hint = document.createElement('div');
+        hint.className = 'field-hint';
+        hint.textContent = 'JSON формат';
+        valueEl.appendChild(hint);
+    } else if (typeof value === 'boolean') {
+        const select = document.createElement('select');
+        select.className = 'edit-select';
+        select.addEventListener('change', () => onFieldChange(select.dataset.field));
+        
+        const optTrue = document.createElement('option');
+        optTrue.value = 'true'; optTrue.textContent = 'true';
+        if (value) optTrue.selected = true;
+        select.appendChild(optTrue);
+        
+        const optFalse = document.createElement('option');
+        optFalse.value = 'false'; optFalse.textContent = 'false';
+        if (!value) optFalse.selected = true;
+        select.appendChild(optFalse);
+        
+        valueEl.appendChild(select);
+    } else {
+        const input = isLargeField(value)
+            ? document.createElement('textarea')
+            : document.createElement('input');
+        input.type = isLargeField(value) ? 'textarea' : 'text';
+        input.className = isLargeField(value) ? 'edit-textarea' : 'edit-input';
+        input.value = String(value);
+        input.addEventListener('input', () => onFieldChange(input.dataset.field));
+        valueEl.appendChild(input);
+    }
+    return valueEl;
+}
+
+function startEdit() {
+    if (!currentData || isEditMode) return;
+    isEditMode = true;
+    originalData = JSON.parse(JSON.stringify(currentData));
+
+    document.getElementById('editBtn').style.display = 'none';
+    document.getElementById('deleteBtn').style.display = 'none';
+    document.getElementById('saveBtn').style.display = 'inline-flex';
+    document.getElementById('cancelBtn').style.display = 'inline-flex';
+    document.getElementById('editIndicator').classList.add('active');
+
+    const fieldsContainer = document.getElementById('fieldsContainer');
+    const fields = Object.keys(currentData);
+    fieldsContainer.innerHTML = '';
+
+    fields.forEach(key => {
+        const fieldRow = document.createElement('div');
+        fieldRow.className = 'field-row';
+        fieldRow.dataset.field = key;
+
+        if (key.toLowerCase() === primaryKeyField.toLowerCase()) {
+            fieldRow.classList.add('key-field');
+        }
+
+        const labelEl = document.createElement('div');
+        labelEl.className = 'field-label';
+        labelEl.textContent = key;
+
+        const separatorEl = document.createElement('div');
+        separatorEl.className = 'field-separator';
+        separatorEl.textContent = ':';
+
+        const valueEl = formatValueForEdit(currentData[key]);
+        valueEl.querySelectorAll('.edit-input, .edit-textarea, .edit-select').forEach(el => {
+            el.dataset.field = key;
+        });
+
+        fieldRow.appendChild(labelEl);
+        fieldRow.appendChild(separatorEl);
+        fieldRow.appendChild(valueEl);
+        fieldsContainer.appendChild(fieldRow);
+    });
+}
+
+function onFieldChange(fieldName) {
+    const fieldRow = document.querySelector(`.field-row[data-field="${fieldName}"]`);
+    const input = fieldRow.querySelector('.edit-input, .edit-textarea');
+    const select = fieldRow.querySelector('.edit-select');
+    const newValue = select ? select.value : (input ? input.value : null);
+
+    const originalValue = originalData[fieldName];
+    const hasChanged = String(newValue) !== String(originalValue);
+
+    if (hasChanged) {
+        fieldRow.classList.add('modified');
+        currentData[fieldName] = newValue;
+    } else {
+        fieldRow.classList.remove('modified');
+        currentData[fieldName] = originalValue;
+    }
+}
+
+async function saveChanges() {
+    if (!currentData || !isEditMode) return;
+    const saveBtn = document.getElementById('saveBtn');
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '⏳ Сохранение...';
+
+    try {
+        const patchData = {};
+        const fields = Object.keys(currentData);
+        fields.forEach(key => {
+            if (JSON.stringify(currentData[key]) !== JSON.stringify(originalData[key])) {
+                patchData[key] = currentData[key];
+            }
+        });
+
+        if (Object.keys(patchData).length === 0) {
+            showSuccess('Нет изменений для сохранения');
+            cancelEdit();
+            return;
+        }
+
+        const response = await fetch(`/api/dynamic/${encodeURIComponent(currentTable)}/${encodeURIComponent(currentId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patchData)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `Ошибка ${response.status}`);
+        }
+
+        await loadRowData();
+        showSuccess('✅ Изменения успешно сохранены');
+    } catch (error) {
+        showError(`Ошибка сохранения: ${error.message}`);
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '💾 Сохранить';
+    }
+}
+
+function cancelEdit() {
+    isEditMode = false;
+    originalData = null;
+    currentData = null;
+    document.getElementById('editBtn').style.display = 'inline-flex';
+    document.getElementById('deleteBtn').style.display = 'inline-flex';
+    document.getElementById('saveBtn').style.display = 'none';
+    document.getElementById('cancelBtn').style.display = 'none';
+    document.getElementById('editIndicator').classList.remove('active');
+    loadRowData();
+}
+
+async function deleteRecord() {
+    if (!currentData) return;
+    const confirmed = confirm(`Вы уверены, что хотите удалить запись ${currentTable} [id=${currentId}]?\n\nЭто действие нельзя отменить!`);
+    if (!confirmed) return;
+
+    const deleteBtn = document.getElementById('deleteBtn');
+    deleteBtn.disabled = true;
+    deleteBtn.innerHTML = '⏳ Удаление...';
+
+    try {
+        const response = await fetch(`/api/dynamic/${encodeURIComponent(currentTable)}/${encodeURIComponent(currentId)}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `Ошибка ${response.status}`);
+        }
+        showSuccess('✅ Запись успешно удалена');
+        setTimeout(() => { window.location.href = '/table'; }, 2000);
+    } catch (error) {
+        showError(`Ошибка удаления: ${error.message}`);
+        deleteBtn.disabled = false;
+        deleteBtn.innerHTML = '🗑️ Удалить';
+    }
+}
+
+async function loadFieldLabels() {
+    try {
+        const response = await fetch(`/api/dynamic/meta/${encodeURIComponent(currentTable)}/fields-info`, { method: 'GET' });
+        if (!response.ok) {
+            console.warn('Failed to load field labels:', response.status);
+            return {};
+        }
+        const fieldsInfo = await response.json();
+        const labels = {};
+        fieldsInfo.forEach(f => {
+            labels[f.name] = f.verboseName;
+        });
+        return labels;
+    } catch (error) {
+        console.warn('Error loading field labels:', error);
+        return {};
+    }
+}
+
+async function loadRowData() {
+    const loadingEl = document.getElementById('loading');
+    const errorContainer = document.getElementById('errorContainer');
+    const successContainer = document.getElementById('successContainer');
+    const fieldsContainer = document.getElementById('fieldsContainer');
+
+    if (isEditMode) {
+        isEditMode = false;
+        originalData = null;
+        document.getElementById('editIndicator').classList.remove('active');
+        document.getElementById('editBtn').style.display = 'inline-flex';
+        document.getElementById('deleteBtn').style.display = 'inline-flex';
+        document.getElementById('saveBtn').style.display = 'none';
+        document.getElementById('cancelBtn').style.display = 'none';
+    }
+
+    loadingEl.style.display = 'block';
+    errorContainer.style.display = 'none';
+    successContainer.style.display = 'none';
+    fieldsContainer.style.display = 'none';
+
+    try {
+        // Load field labels in parallel with row data
+        const labelsPromise = loadFieldLabels();
+        const response = await fetch(`/api/dynamic/${encodeURIComponent(currentTable)}/${encodeURIComponent(currentId)}`, { method: 'GET' });
+        loadingEl.style.display = 'none';
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            showError(errorData.message || `Ошибка ${response.status}: не удалось загрузить запись`);
+            return;
+        }
+
+        const data = await response.json();
+        // The API returns an array [{...}], extract the first element
+        const rowData = Array.isArray(data) && data.length > 0 ? data[0] : data;
+        if (!rowData || typeof rowData !== 'object') {
+            showError(`Запись не найдена: ${currentTable} [id=${currentId}]`);
+            return;
+        }
+
+        currentData = rowData;
+        fieldLabels = await labelsPromise;
+        primaryKeyField = detectPrimaryKey(Object.keys(rowData));
+        displayRowData(rowData);
+
+        document.getElementById('editBtn').style.display = 'inline-flex';
+        document.getElementById('deleteBtn').style.display = 'inline-flex';
+    } catch (error) {
+        loadingEl.style.display = 'none';
+        showError(`Ошибка загрузки: ${error.message}`);
+    }
+}
+
+function displayRowData(data) {
+    const errorContainer = document.getElementById('errorContainer');
+    const successContainer = document.getElementById('successContainer');
+    const fieldsContainer = document.getElementById('fieldsContainer');
+
+    errorContainer.style.display = 'none';
+    successContainer.style.display = 'none';
+    fieldsContainer.style.display = 'block';
+    fieldsContainer.innerHTML = '';
+
+    if (!data || typeof data !== 'object') {
+        fieldsContainer.innerHTML = '<p style="color: #7f8c8d;">Данные в неверном формате</p>';
+        return;
+    }
+
+    const fields = Object.keys(data);
+    if (fields.length === 0) {
+        fieldsContainer.innerHTML = '<p style="color: #7f8c8d;">Нет данных для отображения</p>';
+        return;
+    }
+
+    fields.forEach(key => {
+        const fieldRow = document.createElement('div');
+        fieldRow.className = 'field-row';
+        if (key.toLowerCase() === primaryKeyField.toLowerCase()) {
+            fieldRow.classList.add('key-field');
+        }
+
+        const labelEl = document.createElement('div');
+        labelEl.className = 'field-label';
+        // Use verbose name if available, otherwise use column name
+        labelEl.textContent = fieldLabels[key] || key;
+
+        const separatorEl = document.createElement('div');
+        separatorEl.className = 'field-separator';
+        separatorEl.textContent = ':';
+
+        const valueEl = document.createElement('div');
+        valueEl.className = 'field-value';
+        const value = data[key];
+
+        if (value === null || value === undefined) {
+            valueEl.classList.add('null');
+            valueEl.textContent = 'NULL';
+        } else if (typeof value === 'boolean') {
+            valueEl.classList.add('boolean', value ? 'boolean-true' : 'boolean-false');
+            valueEl.textContent = value ? 'true' : 'false';
+        } else if (typeof value === 'number') {
+            valueEl.classList.add('number');
+            valueEl.textContent = value.toLocaleString('ru-RU');
+        } else if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(value)) {
+            valueEl.classList.add('date');
+            valueEl.textContent = formatDateTime(value);
+        } else if (typeof value === 'object') {
+            valueEl.classList.add('json');
+            valueEl.textContent = JSON.stringify(value, null, 2);
+        } else {
+            valueEl.classList.add('string');
+            valueEl.textContent = value;
+        }
+
+        fieldRow.appendChild(labelEl);
+        fieldRow.appendChild(separatorEl);
+        fieldRow.appendChild(valueEl);
+        fieldsContainer.appendChild(fieldRow);
+    });
+}
+
+function formatDateTime(dateStr) {
+    try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return dateStr;
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
+    } catch {
+        return dateStr;
+    }
+}
+
+function showError(message) {
+    const loadingEl = document.getElementById('loading');
+    const errorContainer = document.getElementById('errorContainer');
+    const fieldsContainer = document.getElementById('fieldsContainer');
+    loadingEl.style.display = 'none';
+    fieldsContainer.style.display = 'none';
+    errorContainer.style.display = 'block';
+    errorContainer.innerHTML = `<div class="error-message">${message}</div>`;
+}
+</script>
+</body>
+</html>

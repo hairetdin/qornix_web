@@ -1,0 +1,635 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+    <!-- Определение корневого элемента.
+         schemaFormatVersion is the XML contract version used by qornix_orm.
+         It is optional for backward compatibility with existing schemas; omitted
+         values are treated as 1.0.
+    -->
+    <xs:element name="Application">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="Name" type="xs:string"/>
+                <xs:element name="Version" type="xs:string"/>
+                <xs:element name="Description" type="xs:string" minOccurs="0"/>
+                <xs:element name="Configuration" type="ConfigurationType"/>
+                <xs:element name="DataStructure" type="DataStructureType"/>
+                <xs:element name="DatabaseMapping" type="DatabaseMappingType" minOccurs="0"/>
+            </xs:sequence>
+            <xs:attribute name="schemaFormatVersion" type="SchemaFormatVersionType" use="optional" default="1.0"/>
+        </xs:complexType>
+
+        <!-- Application-level semantic constraints used by schema_app.xsd fixtures. -->
+        <xs:unique name="uniqueEntityNames">
+            <xs:selector xpath="DataStructure/Entity"/>
+            <xs:field xpath="@name"/>
+        </xs:unique>
+        <xs:key name="entityTableNameKey">
+            <xs:selector xpath="DataStructure/Entity"/>
+            <xs:field xpath="@tableName"/>
+        </xs:key>
+        <xs:keyref name="foreignKeyReferencesEntityTableName" refer="entityTableNameKey">
+            <xs:selector xpath="DataStructure/Entity/ForeignKeyField"/>
+            <xs:field xpath="@references"/>
+        </xs:keyref>
+    </xs:element>
+
+    <xs:simpleType name="SchemaFormatVersionType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="1.0"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Тип для конфигурации приложения -->
+    <xs:complexType name="ConfigurationType">
+        <xs:sequence>
+            <xs:element name="DbConnectionString" type="xs:string"/>
+            <xs:element name="LogLevel" type="LogLevelType"/>
+            <xs:element name="Timeout" type="xs:integer"/>
+            <xs:element name="DatabaseEngine" type="DatabaseEngineType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Перечисление поддерживаемых СУБД -->
+    <xs:simpleType name="DatabaseEngineType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="postgresql"/>
+            <xs:enumeration value="mysql"/>
+            <xs:enumeration value="sqlite"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Перечисление уровней логирования -->
+    <xs:simpleType name="LogLevelType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="DEBUG"/>
+            <xs:enumeration value="INFO"/>
+            <xs:enumeration value="WARN"/>
+            <xs:enumeration value="ERROR"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:complexType name="OptionsType">
+        <xs:sequence>
+            <xs:element name="Option" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:attribute name="key" type="xs:string" use="required"/>
+                    <xs:attribute name="value" type="xs:string" use="required"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Define partitioning types -->
+    <xs:complexType name="PartitioningType">
+        <xs:sequence>
+            <xs:element name="Strategy" type="PartitionStrategyType"/>
+            <xs:element name="Columns" type="ColumnListType"/>
+            <xs:element name="Expression" type="xs:string" minOccurs="0"/>
+            <xs:element name="Bounds" type="PartitionBoundsType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:simpleType name="PartitionStrategyType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="RANGE"/>
+            <xs:enumeration value="LIST"/>
+            <xs:enumeration value="HASH"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:complexType name="ColumnListType">
+        <xs:sequence>
+            <xs:element name="Column" type="xs:string" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="PartitionBoundsType">
+        <xs:sequence>
+            <xs:element name="Bound" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="PartitionName" type="xs:string"/>
+                        <xs:element name="LowerBound" type="xs:string" minOccurs="0"/>
+                        <xs:element name="UpperBound" type="xs:string" minOccurs="0"/>
+                        <xs:element name="Values" type="ValueListType" minOccurs="0"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="ValueListType">
+        <xs:sequence>
+            <xs:element name="Value" type="xs:string" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Тип для структуры данных -->
+    <xs:complexType name="DataStructureType">
+        <xs:sequence>
+            <xs:element name="Entity" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:choice maxOccurs="unbounded">
+                            <xs:element name="Field" type="FieldType"/>
+                            <xs:element name="ForeignKeyField" type="ForeignKeyFieldType"/>
+                        </xs:choice>
+                        <xs:element name="Index" type="IndexType" minOccurs="0" maxOccurs="unbounded"/>
+                        <xs:element name="Constraint" type="ConstraintType" minOccurs="0" maxOccurs="unbounded"/>
+                        <xs:element name="EntityFunctions" type="FunctionsType" minOccurs="0"/>
+                        <xs:element name="Tablespace" type="xs:string" minOccurs="0"/>
+                        <xs:element name="Options" type="OptionsType" minOccurs="0"/>
+                        <xs:element name="Partitions" type="PartitioningType" minOccurs="0"/>
+                    </xs:sequence>
+                    <xs:attribute name="name" type="xs:string" use="required"/>
+                    <xs:attribute name="tableName" type="xs:string" use="required"/>
+                    <xs:attribute name="verboseName" type="xs:string" use="optional"/>
+                    <xs:attribute name="verboseNamePlural" type="xs:string" use="optional"/>
+                    <xs:attribute name="description" type="xs:string" use="optional"/>
+                    <xs:attribute name="tablespace" type="xs:string" use="optional"/>
+                    <xs:attribute name="isPartitioned" type="xs:boolean" default="false"/>
+                </xs:complexType>
+                <xs:unique name="uniqueFieldNamesPerEntity">
+                    <xs:selector xpath="Field"/>
+                    <xs:field xpath="@name"/>
+                </xs:unique>
+                <xs:unique name="uniqueForeignKeyFieldNamesPerEntity">
+                    <xs:selector xpath="ForeignKeyField"/>
+                    <xs:field xpath="@name"/>
+                </xs:unique>
+                <xs:unique name="uniqueIndexNamesPerEntity">
+                    <xs:selector xpath="Index"/>
+                    <xs:field xpath="@name"/>
+                </xs:unique>
+                <xs:unique name="uniqueConstraintNamesPerEntity">
+                    <xs:selector xpath="Constraint"/>
+                    <xs:field xpath="@constraintName"/>
+                </xs:unique>
+            </xs:element>
+            <xs:element name="Views" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="View" type="ViewType" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="MaterializedViews" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="MaterializedView" type="MaterializedViewType" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="DatabaseFunctions" type="DatabaseFunctionsType" minOccurs="0"/>
+            <xs:element name="StoredProcedures" type="StoredProceduresType" minOccurs="0"/>
+            <xs:element name="Triggers" type="TriggersType" minOccurs="0"/>
+            <xs:element name="Sequences" type="SequencesType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Базовый тип для всех полей -->
+    <xs:complexType name="FieldType">
+        <xs:sequence>
+            <!-- sequence to accommodate enum values -->
+            <xs:element name="EnumValues" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Value" type="xs:string" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+        <xs:attribute name="name" type="xs:string" use="required"/>
+        <xs:attribute name="type" type="DatabaseTypeEnum" use="required"/>
+        <xs:attribute name="nullable" type="xs:boolean" default="false"/>
+        <xs:attribute name="primaryKey" type="xs:boolean" default="false"/>
+        <xs:attribute name="unique" type="xs:boolean" default="false"/>
+        <xs:attribute name="maxLength" type="xs:int" use="optional"/>
+        <xs:attribute name="defaultValue" type="xs:string" use="optional"/>
+        <xs:attribute name="verboseName" type="xs:string" use="optional"/>
+        <xs:attribute name="description" type="xs:string" use="optional"/>
+        <xs:attribute name="autoIncrement" type="xs:boolean" default="false"/>
+        <xs:attribute name="collation" type="xs:string" use="optional"/>
+        <xs:attribute name="computedExpression" type="xs:string" use="optional"/>
+        <xs:attribute name="isComputed" type="xs:boolean" default="false"/>
+        <xs:attribute name="precision" type="xs:string" use="optional"/>
+        <xs:attribute name="scale" type="xs:string" use="optional"/>
+    </xs:complexType>
+
+    <!-- Специализированный тип для поля внешнего ключа -->
+    <xs:complexType name="ForeignKeyFieldType">
+        <xs:complexContent>
+            <xs:extension base="FieldType">
+                <xs:attribute name="references" type="xs:string" use="required"/>
+                <xs:attribute name="onDelete" type="ForeignKeyActionType" default="NO_ACTION"/>
+                <xs:attribute name="onUpdate" type="ForeignKeyActionType" default="NO_ACTION"/>
+                <xs:attribute name="toField" type="xs:string" default="id"/>
+                <xs:attribute name="relatedName" type="xs:string" use="optional"/>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
+
+    <!-- Перечисление действий для внешних ключей -->
+    <xs:simpleType name="ForeignKeyActionType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="NO_ACTION"/>
+            <xs:enumeration value="CASCADE"/>
+            <xs:enumeration value="SET_NULL"/>
+            <xs:enumeration value="SET NULL"/>
+            <xs:enumeration value="SET_DEFAULT"/>
+            <xs:enumeration value="SET DEFAULT"/>
+            <xs:enumeration value="RESTRICT"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Хранимые процедуры БД -->
+    <xs:complexType name="StoredProceduresType">
+        <xs:sequence>
+            <xs:element name="StoredProcedure" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Name" type="xs:string"/>
+                        <xs:element name="Description" type="xs:string" minOccurs="0"/>
+                        <xs:element name="Parameters" minOccurs="0">
+                            <xs:complexType>
+                                <xs:sequence>
+                                    <xs:element name="Parameter" maxOccurs="unbounded">
+                                        <xs:complexType>
+                                            <xs:attribute name="name" type="xs:string" use="required"/>
+                                            <xs:attribute name="type" type="DataTypeEnum" use="required"/>
+                                            <xs:attribute name="mode" type="ParameterModeType" default="IN"/>
+                                            <xs:attribute name="required" type="xs:boolean" default="false"/>
+                                        </xs:complexType>
+                                    </xs:element>
+                                </xs:sequence>
+                            </xs:complexType>
+                        </xs:element>
+                        <xs:element name="ReturnType" type="DataTypeEnum" minOccurs="0"/>
+                        <xs:element name="Code" type="xs:string" minOccurs="0"/>
+                    </xs:sequence>
+                    <xs:attribute name="procedureName" type="xs:string" use="required"/>
+                    <xs:attribute name="language" type="FunctionLanguageType" default="sql"/>
+                    <xs:attribute name="security" type="SecurityModeType" default="DEFINER"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:simpleType name="ParameterModeType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="IN"/>
+            <xs:enumeration value="OUT"/>
+            <xs:enumeration value="INOUT"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:simpleType name="SecurityModeType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="DEFINER"/>
+            <xs:enumeration value="INVOKER"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- DB views -->
+    <xs:complexType name="ViewType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Description" type="xs:string" minOccurs="0"/>
+            <xs:element name="Query" type="xs:string"/>
+            <xs:element name="Fields" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Field" maxOccurs="unbounded">
+                            <xs:complexType>
+                                <xs:attribute name="name" type="xs:string" use="required"/>
+                                <xs:attribute name="type" type="DataTypeEnum" use="required"/>
+                                <xs:attribute name="nullable" type="xs:boolean" default="true"/>
+                            </xs:complexType>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+        <xs:attribute name="viewName" type="xs:string" use="required"/>
+        <xs:attribute name="isUpdatable" type="xs:boolean" default="false"/>
+    </xs:complexType>
+
+    <!-- DB materialized views -->
+    <xs:complexType name="MaterializedViewType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Description" type="xs:string" minOccurs="0"/>
+            <xs:element name="Query" type="xs:string"/>
+            <xs:element name="Fields" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Field" maxOccurs="unbounded">
+                            <xs:complexType>
+                                <xs:attribute name="name" type="xs:string" use="required"/>
+                                <xs:attribute name="type" type="DataTypeEnum" use="required"/>
+                                <xs:attribute name="nullable" type="xs:boolean" default="true"/>
+                            </xs:complexType>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="RefreshStrategy" type="RefreshStrategyType" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="viewName" type="xs:string" use="required"/>
+        <xs:attribute name="withData" type="xs:boolean" default="true"/>
+    </xs:complexType>
+
+    <xs:simpleType name="RefreshStrategyType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="MANUAL"/>
+            <xs:enumeration value="SCHEDULED"/>
+            <xs:enumeration value="ON_COMMIT"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:simpleType name="TriggerEventType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="INSERT"/>
+            <xs:enumeration value="UPDATE"/>
+            <xs:enumeration value="DELETE"/>
+            <xs:enumeration value="TRUNCATE"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:simpleType name="TriggerTimingType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="BEFORE"/>
+            <xs:enumeration value="AFTER"/>
+            <xs:enumeration value="INSTEAD_OF"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- DB triggers -->
+    <xs:complexType name="TriggersType">
+        <xs:sequence>
+            <xs:element name="Trigger" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Name" type="xs:string"/>
+                        <xs:element name="Description" type="xs:string" minOccurs="0"/>
+                        <xs:element name="Event" type="TriggerEventType"/>
+                        <xs:element name="Timing" type="TriggerTimingType"/>
+                        <xs:element name="Function" type="xs:string"/>
+                        <xs:element name="Condition" type="xs:string" minOccurs="0"/>
+                    </xs:sequence>
+                    <xs:attribute name="triggerName" type="xs:string" use="required"/>
+                    <xs:attribute name="tableName" type="xs:string" use="required"/>
+                    <xs:attribute name="enabled" type="xs:boolean" default="true"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- DB sequences -->
+    <xs:complexType name="SequencesType">
+        <xs:sequence>
+            <xs:element name="Sequence" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:attribute name="name" type="xs:string" use="required"/>
+                    <xs:attribute name="tableName" type="xs:string" use="optional"/>
+                    <xs:attribute name="columnName" type="xs:string" use="optional"/>
+                    <xs:attribute name="startValue" type="xs:long" default="1"/>
+                    <xs:attribute name="increment" type="xs:long" default="1"/>
+                    <xs:attribute name="minValue" type="xs:long" default="1"/>
+                    <xs:attribute name="maxValue" type="xs:long" use="optional"/>
+                    <xs:attribute name="cycle" type="xs:boolean" default="false"/>
+                    <xs:attribute name="cache" type="xs:long" default="1"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:simpleType name="ConstraintTypeEnum">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="CHECK"/>
+            <xs:enumeration value="EXCLUDE"/>
+            <xs:enumeration value="UNIQUE"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- DB Constraint -->
+    <xs:complexType name="ConstraintType">
+        <xs:sequence>
+            <xs:element name="Name" type="xs:string"/>
+            <xs:element name="Description" type="xs:string" minOccurs="0"/>
+            <xs:element name="Expression" type="xs:string"/>
+        </xs:sequence>
+        <xs:attribute name="constraintName" type="xs:string" use="required"/>
+        <xs:attribute name="type" type="ConstraintTypeEnum" use="required"/>
+    </xs:complexType>
+
+    <xs:simpleType name="VolatileType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="IMMUTABLE"/>
+            <xs:enumeration value="STABLE"/>
+            <xs:enumeration value="VOLATILE"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- DB Functions -->
+    <xs:complexType name="DatabaseFunctionsType">
+        <xs:sequence>
+            <xs:element name="DatabaseFunction" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Name" type="xs:string"/>
+                        <xs:element name="Description" type="xs:string" minOccurs="0"/>
+                        <xs:element name="Parameters" minOccurs="0">
+                            <xs:complexType>
+                                <xs:sequence>
+                                    <xs:element name="Parameter" maxOccurs="unbounded">
+                                        <xs:complexType>
+                                            <xs:attribute name="name" type="xs:string"/>
+                                            <xs:attribute name="type" type="DataTypeEnum" use="required"/>
+                                        </xs:complexType>
+                                    </xs:element>
+                                </xs:sequence>
+                            </xs:complexType>
+                        </xs:element>
+                        <xs:element name="ReturnType" type="DataTypeEnum"/>
+                        <xs:element name="Code" type="xs:string"/>
+                    </xs:sequence>
+                    <xs:attribute name="functionName" type="xs:string" use="required"/>
+                    <xs:attribute name="language" type="FunctionLanguageType" default="sql"/>
+                    <xs:attribute name="volatile" type="VolatileType" default="VOLATILE"/>
+                    <xs:attribute name="security" type="SecurityModeType" default="DEFINER"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Тип для функций сущности -->
+    <xs:complexType name="FunctionsType">
+        <xs:sequence>
+            <xs:element name="Function" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Name" type="xs:string"/>
+                        <xs:element name="Description" type="xs:string" minOccurs="0"/>
+                        <xs:element name="Parameters" minOccurs="0">
+                            <xs:complexType>
+                                <xs:sequence>
+                                    <xs:element name="Parameter" maxOccurs="unbounded">
+                                        <xs:complexType>
+                                            <xs:attribute name="name" type="xs:string" use="required"/>
+                                            <xs:attribute name="type" type="DataTypeEnum" use="required"/>
+                                            <xs:attribute name="required" type="xs:boolean" default="false"/>
+                                        </xs:complexType>
+                                    </xs:element>
+                                </xs:sequence>
+                            </xs:complexType>
+                        </xs:element>
+                        <xs:element name="ReturnType" type="DataTypeEnum" minOccurs="0"/>
+                        <xs:element name="Code" type="xs:string" minOccurs="0"/>
+                    </xs:sequence>
+                    <xs:attribute name="name" type="xs:string" use="optional"/>
+                    <xs:attribute name="fileName" type="xs:string" use="optional"/>
+                    <xs:attribute name="language" type="FunctionLanguageType" default="python"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Перечисление языков программирования для функций -->
+    <xs:simpleType name="FunctionLanguageType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="python"/>
+            <xs:enumeration value="javascript"/>
+            <xs:enumeration value="cpp"/>
+            <xs:enumeration value="sql"/>
+            <xs:enumeration value="plpgsql"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Тип для индекса -->
+    <xs:complexType name="IndexType">
+        <xs:sequence>
+            <xs:element name="FieldName" type="xs:string" maxOccurs="unbounded"/>
+        </xs:sequence>
+        <xs:attribute name="name" type="xs:string" use="required"/>
+        <xs:attribute name="unique" type="xs:boolean" default="false"/>
+        <xs:attribute name="type" type="IndexTypeEnum" default="BTREE"/>
+        <xs:attribute name="concurrently" type="xs:boolean" default="false"/>
+        <xs:attribute name="tablespace" type="xs:string" use="optional"/>
+    </xs:complexType>
+
+    <xs:simpleType name="IndexTypeEnum">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="BTREE"/>
+            <xs:enumeration value="HASH"/>
+            <xs:enumeration value="GIST"/>
+            <xs:enumeration value="GIN"/>
+            <xs:enumeration value="BRIN"/>
+            <xs:enumeration value="SPGIST"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Тип для маппинга между приложением и базой данных -->
+    <xs:complexType name="DatabaseMappingType">
+        <xs:sequence>
+            <xs:element name="EntityMapping" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="FieldMapping" maxOccurs="unbounded">
+                            <xs:complexType>
+                                <xs:attribute name="fieldName" type="xs:string" use="required"/>
+                                <xs:attribute name="columnName" type="xs:string" use="required"/>
+                                <xs:attribute name="postgresqlType" type="DatabaseTypeEnum" use="optional"/>
+                                <xs:attribute name="mysqlType" type="DatabaseTypeEnum" use="optional"/>
+                                <xs:attribute name="sqliteType" type="DatabaseTypeEnum" use="optional"/>
+                            </xs:complexType>
+                        </xs:element>
+                    </xs:sequence>
+                    <xs:attribute name="entityName" type="xs:string" use="required"/>
+                    <xs:attribute name="tableName" type="xs:string" use="required"/>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="TypeMapping" type="TypeMappingType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Тип для маппинга типов данных -->
+    <xs:complexType name="TypeMappingType">
+        <xs:sequence>
+            <xs:element name="TypeMap" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:attribute name="appType" type="DataTypeEnum" use="required"/>
+                    <xs:attribute name="postgresqlType" type="DatabaseTypeEnum" use="optional"/>
+                    <xs:attribute name="mysqlType" type="DatabaseTypeEnum" use="optional"/>
+                    <xs:attribute name="sqliteType" type="DatabaseTypeEnum" use="optional"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Перечисление типов данных приложения -->
+    <xs:simpleType name="DataTypeEnum">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="INTEGER"/>
+            <xs:enumeration value="VARCHAR"/>
+            <xs:enumeration value="DATE"/>
+            <xs:enumeration value="BOOLEAN"/>
+            <xs:enumeration value="DECIMAL"/>
+            <xs:enumeration value="TIME"/>
+            <xs:enumeration value="DATETIME"/>
+            <xs:enumeration value="JSON"/>
+            <xs:enumeration value="UUID"/>
+            <xs:enumeration value="TEXT"/>
+            <xs:enumeration value="TIMESTAMP"/>
+            <xs:enumeration value="FLOAT"/>
+            <xs:enumeration value="VOID"/>
+            <xs:enumeration value="FOREIGN_KEY"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Перечисление типов данных базы данных -->
+    <xs:simpleType name="DatabaseTypeEnum">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="INTEGER"/>
+            <xs:enumeration value="BIGINT"/>
+            <xs:enumeration value="VARCHAR"/>
+            <xs:enumeration value="TEXT"/>
+            <xs:enumeration value="DATE"/>
+            <xs:enumeration value="TIMESTAMP"/>
+            <xs:enumeration value="BOOLEAN"/>
+            <xs:enumeration value="DECIMAL"/>
+            <xs:enumeration value="FLOAT"/>
+            <xs:enumeration value="DOUBLE"/>
+            <xs:enumeration value="TIME"/>
+            <xs:enumeration value="DATETIME"/>
+            <xs:enumeration value="JSON"/>
+            <xs:enumeration value="JSONB"/>
+            <xs:enumeration value="UUID"/>
+            <xs:enumeration value="BLOB"/>
+            <xs:enumeration value="TINYINT"/>
+            <xs:enumeration value="SMALLINT"/>
+            <xs:enumeration value="MEDIUMINT"/>
+            <xs:enumeration value="INT"/>
+            <xs:enumeration value="REAL"/>
+            <xs:enumeration value="CHAR"/>
+            <xs:enumeration value="TINYTEXT"/>
+            <xs:enumeration value="MEDIUMTEXT"/>
+            <xs:enumeration value="LONGTEXT"/>
+            <xs:enumeration value="YEAR"/>
+            <xs:enumeration value="ENUM"/>
+            <xs:enumeration value="SET"/>
+            <xs:enumeration value="TINYBLOB"/>
+            <xs:enumeration value="MEDIUMBLOB"/>
+            <xs:enumeration value="LONGBLOB"/>
+            <xs:enumeration value="SERIAL"/>
+            <xs:enumeration value="BIGSERIAL"/>
+            <xs:enumeration value="BYTEA"/>
+            <xs:enumeration value="INET"/>
+            <xs:enumeration value="CIDR"/>
+            <xs:enumeration value="MACADDR"/>
+            <xs:enumeration value="FOREIGN_KEY"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+</xs:schema>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application schemaFormatVersion="1.0">
+    <Name>Shop Schema</Name>
+    <Version>1.0.0</Version>
+    <Description>Valid schema with entities, fields, indexes and foreign keys.</Description>
+    <Configuration>
+        <DbConnectionString>sqlite://./shop.sqlite</DbConnectionString>
+        <LogLevel>INFO</LogLevel>
+        <Timeout>30</Timeout>
+        <DatabaseEngine>sqlite</DatabaseEngine>
+    </Configuration>
+    <DataStructure>
+        <Entity name="Category" tableName="categories">
+            <Field name="id" type="INTEGER" primaryKey="true" autoIncrement="true"/>
+            <Field name="name" type="VARCHAR" maxLength="120" nullable="false"/>
+            <Index name="idx_categories_name" unique="true">
+                <FieldName>name</FieldName>
+            </Index>
+        </Entity>
+        <Entity name="Product" tableName="products">
+            <Field name="id" type="INTEGER" primaryKey="true" autoIncrement="true"/>
+            <Field name="name" type="VARCHAR" maxLength="160" nullable="false"/>
+            <Field name="price" type="DECIMAL" precision="12" scale="2" nullable="false"/>
+            <ForeignKeyField name="category_id" type="INTEGER" nullable="false" references="categories" toField="id" onDelete="RESTRICT" onUpdate="CASCADE"/>
+            <Index name="idx_products_category_id">
+                <FieldName>category_id</FieldName>
+            </Index>
+        </Entity>
+    </DataStructure>
+</Application>

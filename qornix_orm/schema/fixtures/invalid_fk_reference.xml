@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application schemaFormatVersion="1.0">
+    <Name>Invalid FK Reference</Name>
+    <Version>1.0.0</Version>
+    <Configuration>
+        <DbConnectionString>sqlite://:memory:</DbConnectionString>
+        <LogLevel>INFO</LogLevel>
+        <Timeout>30</Timeout>
+        <DatabaseEngine>sqlite</DatabaseEngine>
+    </Configuration>
+    <DataStructure>
+        <Entity name="Product" tableName="products">
+            <Field name="id" type="INTEGER" primaryKey="true"/>
+            <ForeignKeyField name="category_id" type="INTEGER" references="missing_categories" toField="id"/>
+        </Entity>
+    </DataStructure>
+</Application>

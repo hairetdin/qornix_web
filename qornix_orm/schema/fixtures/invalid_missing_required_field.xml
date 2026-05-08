@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application schemaFormatVersion="1.0">
+    <Name>Invalid Missing Required Field</Name>
+    <Version>1.0.0</Version>
+    <Configuration>
+        <DbConnectionString>sqlite://:memory:</DbConnectionString>
+        <LogLevel>INFO</LogLevel>
+        <Timeout>30</Timeout>
+        <DatabaseEngine>sqlite</DatabaseEngine>
+    </Configuration>
+    <DataStructure>
+        <Entity name="Broken" tableName="broken">
+            <Field name="id" primaryKey="true"/>
+        </Entity>
+    </DataStructure>
+</Application>

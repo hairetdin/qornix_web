@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qornix Table Browser</title>
+  <link rel="stylesheet" href="/static/dynamic_api.css">
+</head>
+<body data-qdb-page="table">
+<div class="qdx-shell">
+  <header class="qdx-topbar">
+    <a class="qdx-brand" href="/">
+      <span class="qdx-brand-mark">Qx</span>
+      <span>
+        <strong>Qornix Web</strong>
+        <small>Table Browser</small>
+      </span>
+    </a>
+    <nav class="qdx-nav">
+      <a href="/">Home</a>
+      <a href="/schema-manager">Schema Manager</a>
+      <a href="/query-builder">Query Builder</a>
+      <a href="/table">Table Browser</a>
+      <a href="/api-playground">API Playground</a><a href="/docs">Docs</a><a href="/instructions">Next steps</a>
+      <a href="/openapi.json" target="_blank" rel="noreferrer">OpenAPI</a>
+    </nav>
+  </header>
+
+  <section class="qdx-card qdx-page-intro">
+    <p class="qdx-kicker">Dynamic Data Explorer</p>
+    <h1>Table Browser</h1>
+    <p class="qdx-lead">Choose a table, add fields, filters, and sorting — Qornix will build a structured query and show the result as a table.</p>
+  </section>
+
+  <section class="qdx-grid qdx-grid-3">
+    <article class="qdx-card">
+      <h2>1. Table</h2>
+      <p>Tables are loaded from the metadata endpoint <code>/api/dynamic/meta/tables</code>.</p>
+      <div class="qdx-actions qdb-toolbar">
+        <button id="qdb-load-tables" type="button">Refresh tables</button>
+        <button id="qdb-create-demo-rows" type="button" class="qdx-btn-secondary">Demo rows</button>
+      </div>
+      <div id="qdb-tables-list" class="qdb-pill-list"></div>
+      <div class="qdx-form-row">
+        <label for="qdb-table-browser-table">Table</label>
+        <input id="qdb-table-browser-table" list="qdb-table-browser-suggestions" placeholder="products">
+        <datalist id="qdb-table-browser-suggestions"></datalist>
+      </div>
+      <div class="qdx-form-row">
+        <label for="qdb-table-browser-limit">LIMIT</label>
+        <input id="qdb-table-browser-limit" type="number" min="1" value="100">
+      </div>
+    </article>
+
+    <article class="qdx-card">
+      <h2>2. Query parameters</h2>
+      <div class="qdx-form-row">
+        <label>Fields</label>
+        <div class="qdb-inline-control">
+          <input id="qdb-field-input" list="qdb-field-suggestions" placeholder="field">
+          <datalist id="qdb-field-suggestions"></datalist>
+          <button id="qdb-add-field" type="button">+</button>
+        </div>
+        <div id="qdb-fields-list" class="qdb-chip-list"></div>
+      </div>
+      <div class="qdx-form-row">
+        <label>Filter</label>
+        <div class="qdb-filter-grid qdb-filter-grid-compact">
+          <input id="qdb-where-field" list="qdb-where-field-suggestions" placeholder="field">
+          <datalist id="qdb-where-field-suggestions"></datalist>
+          <select id="qdb-where-op">
+            <option value="eq">=</option>
+            <option value="ne">!=</option>
+            <option value="gt">&gt;</option>
+            <option value="gte">&gt;=</option>
+            <option value="lt">&lt;</option>
+            <option value="lte">&lt;=</option>
+            <option value="like">LIKE</option>
+          </select>
+          <input id="qdb-where-value" placeholder="value">
+          <button id="qdb-add-where" type="button">+</button>
+        </div>
+        <div id="qdb-where-list" class="qdb-chip-list"></div>
+      </div>
+    </article>
+
+    <article class="qdx-card">
+      <h2>3. Sort and run</h2>
+      <div class="qdx-form-row">
+        <label>ORDER BY</label>
+        <div class="qdb-inline-control">
+          <input id="qdb-order-field" list="qdb-order-field-suggestions" placeholder="field">
+          <datalist id="qdb-order-field-suggestions"></datalist>
+          <select id="qdb-order-direction">
+            <option value="ASC">ASC</option>
+            <option value="DESC">DESC</option>
+          </select>
+          <button id="qdb-add-order" type="button">+</button>
+        </div>
+        <div id="qdb-order-list" class="qdb-chip-list"></div>
+      </div>
+      <div class="qdx-actions qdb-toolbar">
+        <button id="qdb-execute" type="button">Show data</button>
+        <button id="qdb-copy-json" type="button" class="qdx-btn-secondary">JSON</button>
+      </div>
+      <div id="qdb-status" class="qdb-status muted">Ready.</div>
+    </article>
+  </section>
+
+  <section class="qdx-grid qdx-grid-2">
+    <article class="qdx-card">
+      <h2>Structured query</h2>
+      <pre id="qdb-json-preview" class="qdx-code qdx-scroll"></pre>
+    </article>
+    <article class="qdx-card">
+      <h2>Raw response</h2>
+      <pre id="qdb-result-json" class="qdx-code qdx-scroll">The response will appear here.</pre>
+    </article>
+  </section>
+
+  <section class="qdx-card">
+    <h2>Data</h2>
+    <div id="qdb-result-table"><div class="qdb-empty">Click “Show data”.</div></div>
+  </section>
+
+  <footer class="qdx-footer">
+    <span>Want to copy the request for your frontend?</span>
+    <a href="/query-builder">Open Query Builder</a>
+  </footer>
+</div>
+<script src="/static/dynamic_api_browser.js"></script>
+</body>
+</html>

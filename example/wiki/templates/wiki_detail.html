@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{TITLE}} — WikiSpace</title>
+  <link rel="stylesheet" href="/static/wiki.css" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232563eb'/%3E%3Ctext x='50' y='66' text-anchor='middle' font-size='58' font-weight='700' fill='white'%3EW%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <div class="detail-layout">
+    <header class="detail-topbar">
+      <a href="/" class="back-link">
+        <span class="back-arrow">←</span>
+        <span>Назад к списку статей</span>
+      </a>
+      <div class="detail-topbar-actions">
+        <span class="status-badge {{STATUS_CLASS}}">{{STATUS}}</span>
+        <span class="detail-meta-inline">Категория: <strong>{{CATEGORY}}</strong></span>
+      </div>
+    </header>
+
+    <main class="detail-main">
+      <article class="detail-article">
+        <div class="detail-header">
+          <h1>{{TITLE}}</h1>
+          <div class="detail-meta">
+            <div class="detail-meta-item">
+              <span class="meta-label">Автор</span>
+              <span class="meta-value">{{AUTHOR}}</span>
+            </div>
+            <div class="detail-meta-item">
+              <span class="meta-label">Обновлено</span>
+              <span class="meta-value">{{UPDATED_AT}}</span>
+            </div>
+            <div class="detail-meta-item">
+              <span class="meta-label">Время чтения</span>
+              <span class="meta-value">{{READING_TIME}} мин</span>
+            </div>
+            <div class="detail-meta-item">
+              <span class="meta-label">Просмотры</span>
+              <span class="meta-value">{{VIEWS}}</span>
+            </div>
+            <div class="detail-meta-item">
+              <span class="meta-label">Шаблон</span>
+              <span class="meta-value">{{TEMPLATE}}</span>
+            </div>
+          </div>
+          <div class="detail-tags">{{TAGS}}</div>
+        </div>
+
+        <div class="detail-summary">
+          <h3>Описание</h3>
+          <p>{{SUMMARY}}</p>
+        </div>
+
+        <div class="detail-content">
+          {{CONTENT}}
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

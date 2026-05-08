@@ -1,0 +1,25 @@
+server:
+  address: 127.0.0.1
+  port: 8008
+logging:
+  enabled: true
+  level: info
+  to_file: false
+database:
+  driver: sqlite
+  database: app.sqlite3
+dynamic_api:
+  enabled: true
+  route_prefix: /api/dynamic
+  schema_prefix: /api/dynamic/schema
+  schema:
+    file: schema/app.schema.xml
+    history_file: schema/schema_history.jsonl
+    allow_destructive_apply: false
+  query:
+    default_limit: 100
+    max_limit: 1000
+    allow_raw_filter: false
+    allow_raw_join: false
+    allow_delete_without_filter: false
+    allow_update_without_filter: false

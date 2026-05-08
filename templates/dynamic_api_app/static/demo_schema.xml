@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application schemaFormatVersion="1.0">
+  <Name>Qornix Dynamic API Demo</Name>
+  <Version>1.0.0</Version>
+  <Description>Bundled first-run demo schema for Qornix Web Dynamic API. Apply it from Schema Manager, seed demo rows, then explore Query Builder and Table Browser.</Description>
+  <Configuration>
+    <DbConnectionString>app.sqlite3</DbConnectionString>
+    <LogLevel>INFO</LogLevel>
+    <Timeout>30</Timeout>
+    <DatabaseEngine>sqlite</DatabaseEngine>
+  </Configuration>
+  <DataStructure>
+    <Entity name="Categories" tableName="categories">
+      <Field name="id" type="INTEGER" nullable="false" primaryKey="true" unique="false" autoIncrement="true" />
+      <Field name="name" type="TEXT" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="description" type="TEXT" nullable="true" primaryKey="false" unique="false" autoIncrement="false" />
+    </Entity>
+    <Entity name="Customers" tableName="customers">
+      <Field name="id" type="INTEGER" nullable="false" primaryKey="true" unique="false" autoIncrement="true" />
+      <Field name="name" type="TEXT" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="email" type="TEXT" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="phone" type="TEXT" nullable="true" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="city" type="TEXT" nullable="true" primaryKey="false" unique="false" autoIncrement="false" />
+    </Entity>
+    <Entity name="Products" tableName="products">
+      <Field name="id" type="INTEGER" nullable="false" primaryKey="true" unique="false" autoIncrement="true" />
+      <Field name="category_id" type="INTEGER" nullable="true" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="name" type="TEXT" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="description" type="TEXT" nullable="true" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="price" type="REAL" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="stock" type="INTEGER" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <ForeignKeyField name="category_id" type="FOREIGN_KEY" nullable="true" primaryKey="false" unique="false" references="categories" toField="id" onDelete="SET NULL" onUpdate="NO_ACTION" />
+    </Entity>
+    <Entity name="Orders" tableName="orders">
+      <Field name="id" type="INTEGER" nullable="false" primaryKey="true" unique="false" autoIncrement="true" />
+      <Field name="customer_id" type="INTEGER" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="product_id" type="INTEGER" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="quantity" type="INTEGER" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="status" type="TEXT" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <Field name="total_amount" type="REAL" nullable="false" primaryKey="false" unique="false" autoIncrement="false" />
+      <ForeignKeyField name="customer_id" type="FOREIGN_KEY" nullable="false" primaryKey="false" unique="false" references="customers" toField="id" onDelete="NO_ACTION" onUpdate="NO_ACTION" />
+      <ForeignKeyField name="product_id" type="FOREIGN_KEY" nullable="false" primaryKey="false" unique="false" references="products" toField="id" onDelete="NO_ACTION" onUpdate="NO_ACTION" />
+    </Entity>
+  </DataStructure>
+</Application>

@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://example.com/db-schema"
+           xmlns:db="http://example.com/db-schema"
+           elementFormDefault="qualified">
+
+    <xs:simpleType name="DataType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="VARCHAR"/>
+            <xs:enumeration value="INTEGER"/>
+            <xs:enumeration value="BIGINT"/>
+            <xs:enumeration value="DECIMAL"/>
+            <xs:enumeration value="BOOLEAN"/>
+            <xs:enumeration value="DATE"/>
+            <xs:enumeration value="TIMESTAMP"/>
+            <xs:enumeration value="TEXT"/>
+            <xs:enumeration value="BLOB"/>
+            <xs:enumeration value="SMALLINT"/>
+            <xs:enumeration value="REAL"/>
+            <xs:enumeration value="DOUBLE"/>
+            <xs:enumeration value="CHAR"/>
+            <xs:enumeration value="TIME"/>
+            <xs:enumeration value="JSON"/>
+            <xs:enumeration value="JSONB"/>
+            <xs:enumeration value="INTERVAL"/>
+            <xs:enumeration value="UUID"/>
+            <xs:enumeration value="SERIAL"/>
+            <xs:enumeration value="BIGSERIAL"/>
+            <xs:enumeration value="BYTEA"/>
+            <xs:enumeration value="INET"/>
+            <xs:enumeration value="CIDR"/>
+            <xs:enumeration value="MACADDR"/>
+            <xs:enumeration value="MONEY"/>
+            <xs:enumeration value="TSVECTOR"/>
+            <xs:enumeration value="TSQUERY"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Перечисление поддерживаемых СУБД -->
+    <xs:simpleType name="DatabaseEngine">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="postgresql"/>
+            <xs:enumeration value="mysql"/>
+            <xs:enumeration value="sqlite"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Тип для маппинга типов данных -->
+    <xs:complexType name="TypeMapping">
+        <xs:attribute name="genericType" type="db:DataType" use="required"/>
+        <xs:attribute name="postgresql" type="xs:string" use="optional"/>
+        <xs:attribute name="mysql" type="xs:string" use="optional"/>
+        <xs:attribute name="sqlite" type="xs:string" use="optional"/>
+    </xs:complexType>
+
+    <!-- Тип для ограничений колонок -->
+    <xs:complexType name="ColumnConstraint">
+        <xs:sequence>
+            <xs:element name="primaryKey" type="xs:boolean" default="false" minOccurs="0"/>
+            <xs:element name="nullable" type="xs:boolean" default="true" minOccurs="0"/>
+            <xs:element name="unique" type="xs:boolean" default="false" minOccurs="0"/>
+            <xs:element name="defaultValue" type="xs:string" minOccurs="0"/>
+            <xs:element name="checkConstraint" type="xs:string" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Тип для индексов -->
+    <xs:complexType name="Index">
+        <xs:sequence>
+            <xs:element name="columnName" type="xs:string" maxOccurs="unbounded"/>
+        </xs:sequence>
+        <xs:attribute name="name" type="xs:string" use="required"/>
+        <xs:attribute name="unique" type="xs:boolean" default="false"/>
+    </xs:complexType>
+
+    <!-- Тип для внешних ключей -->
+    <xs:complexType name="ForeignKey">
+        <xs:sequence>
+            <xs:element name="columnName" type="xs:string"/>
+            <xs:element name="referencedTable" type="xs:string"/>
+            <xs:element name="referencedColumn" type="xs:string"/>
+            <xs:element name="onDelete" minOccurs="0">
+                <xs:simpleType>
+                    <xs:restriction base="xs:string">
+                        <xs:enumeration value="CASCADE"/>
+                        <xs:enumeration value="SET_NULL"/>
+                        <xs:enumeration value="RESTRICT"/>
+                        <xs:enumeration value="NO_ACTION"/>
+                        <xs:enumeration value="SET_DEFAULT"/>
+                    </xs:restriction>
+                </xs:simpleType>
+            </xs:element>
+            <xs:element name="onUpdate" minOccurs="0">
+                <xs:simpleType>
+                    <xs:restriction base="xs:string">
+                        <xs:enumeration value="CASCADE"/>
+                        <xs:enumeration value="SET_NULL"/>
+                        <xs:enumeration value="RESTRICT"/>
+                        <xs:enumeration value="NO_ACTION"/>
+                        <xs:enumeration value="SET_DEFAULT"/>
+                    </xs:restriction>
+                </xs:simpleType>
+            </xs:element>
+        </xs:sequence>
+        <xs:attribute name="name" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <!-- Тип для триггеров -->
+    <xs:complexType name="Trigger">
+        <xs:sequence>
+            <xs:element name="name" type="xs:string"/>
+            <xs:element name="timing">
+                <xs:simpleType>
+                    <xs:restriction base="xs:string">
+                        <xs:enumeration value="BEFORE"/>
+                        <xs:enumeration value="AFTER"/>
+                        <xs:enumeration value="INSTEAD_OF"/>
+                    </xs:restriction>
+                </xs:simpleType>
+            </xs:element>
+            <xs:element name="event">
+                <xs:simpleType>
+                    <xs:restriction base="xs:string">
+                        <xs:enumeration value="INSERT"/>
+                        <xs:enumeration value="UPDATE"/>
+                        <xs:enumeration value="DELETE"/>
+                    </xs:restriction>
+                </xs:simpleType>
+            </xs:element>
+            <xs:element name="body" type="xs:string"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Тип для хранимых процедур -->
+    <xs:complexType name="StoredProcedure">
+        <xs:sequence>
+            <xs:element name="name" type="xs:string"/>
+            <xs:element name="parameters" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="name" type="xs:string"/>
+                        <xs:element name="type" type="db:DataType"/>
+                        <xs:element name="mode" minOccurs="0">
+                            <xs:simpleType>
+                                <xs:restriction base="xs:string">
+                                    <xs:enumeration value="IN"/>
+                                    <xs:enumeration value="OUT"/>
+                                    <xs:enumeration value="INOUT"/>
+                                </xs:restriction>
+                            </xs:simpleType>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="body" type="xs:string"/>
+            <xs:element name="language" type="xs:string" default="sql"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Тип для колонок таблицы -->
+    <xs:complexType name="Column">
+        <xs:sequence>
+            <xs:element name="name" type="xs:string"/>
+            <xs:element name="type" type="db:DataType"/>
+            <xs:element name="size" type="xs:positiveInteger" minOccurs="0"/>
+            <xs:element name="precision" type="xs:positiveInteger" minOccurs="0"/>
+            <xs:element name="scale" type="xs:nonNegativeInteger" minOccurs="0"/>
+            <xs:element name="constraints" type="db:ColumnConstraint" minOccurs="0"/>
+            <xs:element name="comment" type="xs:string" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Тип для таблиц -->
+    <xs:complexType name="Table">
+        <xs:sequence>
+            <xs:element name="name" type="xs:string"/>
+            <xs:element name="column" type="db:Column" maxOccurs="unbounded"/>
+            <xs:element name="primaryKey" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="columnName" type="xs:string" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                    <xs:attribute name="name" type="xs:string"/>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="index" type="db:Index" minOccurs="0" maxOccurs="unbounded"/>
+            <xs:element name="foreignKeys" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="foreignKey" type="db:ForeignKey" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="triggers" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="trigger" type="db:Trigger" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="comment" type="xs:string" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Тип для представлений (views) -->
+    <xs:complexType name="View">
+        <xs:sequence>
+            <xs:element name="name" type="xs:string"/>
+            <xs:element name="query" type="xs:string"/>
+            <xs:element name="column" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="name" type="xs:string"/>
+                        <xs:element name="type" type="db:DataType" minOccurs="0"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="comment" type="xs:string" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Тип для схемы базы данных -->
+    <xs:complexType name="DatabaseSchema">
+        <xs:sequence>
+            <xs:element name="name" type="xs:string"/>
+            <xs:element name="version" type="xs:string" minOccurs="0"/>
+            <xs:element name="engine" type="db:DatabaseEngine" minOccurs="0"/>
+            <xs:element name="typeMappings" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="typeMapping" type="db:TypeMapping" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="tables" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="table" type="db:Table" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="views" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="view" type="db:View" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="procedures" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="procedure" type="db:StoredProcedure" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- Корневой элемент -->
+    <xs:element name="databaseSchema" type="db:DatabaseSchema"/>
+
+</xs:schema>

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qornix Web - schema-driven backend platform</title>
+  <link rel="stylesheet" href="/static/dynamic_api.css">
+</head>
+<body data-qdb-page="home">
+<div class="qdx-shell">
+  <header class="qdx-topbar">
+    <a class="qdx-brand" href="/">
+      <span class="qdx-brand-mark">Qx</span>
+      <span><strong>Qornix Web</strong><small>Schema-driven backend platform</small></span>
+    </a>
+    <nav class="qdx-nav">
+      <a href="/">Home</a>
+      <a href="/schema-manager">Schema Manager</a>
+      <a href="/query-builder">Query Builder</a>
+      <a href="/table">Table Browser</a>
+      <a href="/api-playground">API Playground</a>
+      <a href="/docs">Docs</a>
+      <a href="/instructions">Next steps</a>
+    </nav>
+  </header>
+
+  <section class="qdx-hero-panel">
+    <div class="qdx-hero-copy">
+      <p class="qdx-kicker">Qornix Web application</p>
+      <h1>Launch a schema-driven C++ backend with API, data browser and docs out of the box</h1>
+      <p class="qdx-lead">
+        This app was generated with <code>--with-dynamic-api</code> and includes a bundled demo schema. Load it on the first run, compare it with the empty database, apply the live plan, seed rows, then explore the Dynamic API through Query Builder, Table Browser, Row View, recipes and generated OpenAPI docs.
+      </p>
+      <div class="qdx-actions-row">
+        <a class="qdx-btn" href="/schema-manager">Start with Schema Manager</a>
+        <a class="qdx-btn qdx-btn-secondary" href="/query-builder">Try Query Builder</a>
+        <a class="qdx-btn qdx-btn-secondary" href="/table">Browse tables</a>
+      </div>
+      <div class="qdx-badges">
+        <span>Schema diff and plan</span>
+        <span>Dynamic CRUD/query API</span>
+        <span>Visual Query Builder</span>
+        <span>OpenAPI viewer</span>
+      </div>
+    </div>
+    <aside class="qdx-hero-side qdx-card">
+      <h2>Application status</h2>
+      <p>Check whether the database already has schema-backed tables. Use the wizard to apply the bundled demo schema and seed rows.</p>
+      <div id="qdb-home-status" class="qdb-status-card">Checking status...</div>
+      <div class="qdx-actions qdb-toolbar">
+        <button id="qdb-home-load-status" type="button">Refresh status</button>
+        <button id="qdb-apply-default-schema" type="button" class="qdx-btn-secondary">Initialize demo database</button>
+        <button id="qdb-create-demo-rows" type="button" class="qdx-btn-secondary">Reinitialize demo data</button>
+        <button id="qdb-reset-demo-db" type="button" class="qdx-btn-secondary">Reset demo DB only</button>
+      </div>
+      <div id="qdb-status" class="qdb-status muted">Ready. Click Initialize demo database for a guided first run.</div>
+    </aside>
+  </section>
+
+  <section class="qdx-grid qdx-grid-3">
+    <article class="qdx-card">
+      <p class="qdx-section-label">01</p>
+      <h2>Schema Manager</h2>
+      <p>Validate XML, compare desired schema with the current database, inspect risk labels and SQL preview, then apply only a confirmed plan.</p>
+      <p><a href="/schema-manager">Open /schema-manager</a></p>
+    </article>
+    <article class="qdx-card">
+      <p class="qdx-section-label">02</p>
+      <h2>Query Builder</h2>
+      <p>Build a schema-aware structured query, execute it, inspect JSON response and copy a frontend-ready payload or curl command.</p>
+      <p><a href="/query-builder">Open /query-builder</a></p>
+    </article>
+    <article class="qdx-card">
+      <p class="qdx-section-label">03</p>
+      <h2>Table Browser and Row View</h2>
+      <p>Browse table data, add filters and sorting, then open a single row for inline update or delete through the same Dynamic API.</p>
+      <p><a href="/table">Open /table</a></p>
+    </article>
+  </section>
+
+  <section class="qdx-grid qdx-grid-2">
+    <article class="qdx-card">
+      <h2>Promoted endpoints</h2>
+      <div class="qdx-endpoints">
+        <a href="/api/dynamic/meta/tables" target="_blank" rel="noreferrer">GET /api/dynamic/meta/tables</a>
+        <a href="/api/dynamic/meta/allowlist" target="_blank" rel="noreferrer">GET /api/dynamic/meta/allowlist</a>
+        <a href="/api/dynamic/schema/export" target="_blank" rel="noreferrer">GET /api/dynamic/schema/export</a>
+        <a href="/openapi.json" target="_blank" rel="noreferrer">GET /openapi.json</a>
+        <a href="/docs/schema">GET /docs/schema</a>
+      </div>
+    </article>
+    <article class="qdx-card">
+      <h2>First run path</h2>
+      <ol class="qdx-list qdx-list-ordered">
+        <li>Click <strong>Initialize demo database</strong>, or open <a href="/schema-manager">Schema Manager</a> and click <strong>Load demo schema</strong>.</li>
+        <li>Click <strong>Reinitialize demo data</strong> to create sample categories, products and customers.</li>
+        <li>Open <a href="/query-builder">Query Builder</a> to assemble structured requests.</li>
+        <li>Open <a href="/table">Table Browser</a> and click any row id to view and edit it.</li>
+      </ol>
+    </article>
+  </section>
+
+  <section class="qdx-card">
+    <h2>Generated app showcase</h2>
+    <div class="qdx-feature-strip">
+      <a href="/api-playground"><strong>API Playground</strong><span>Run recipes for list, filter, create, update and delete.</span></a>
+      <a href="/docs"><strong>OpenAPI Docs</strong><span>Read generated paths without opening raw JSON.</span></a>
+      <a href="/docs/schema"><strong>Schema Guide</strong><span>Learn the XML schema contract and Schema Manager workflow.</span></a>
+      <a href="/instructions"><strong>Next steps</strong><span>Follow the recommended workflow for your own schema.</span></a>
+    </div>
+  </section>
+
+  <footer class="qdx-footer">
+    <span>Qornix Web - generated dynamic API application</span>
+    <a href="/api-playground">Open API Playground</a>
+  </footer>
+</div>
+<script src="/static/dynamic_api_browser.js"></script>
+</body>
+</html>

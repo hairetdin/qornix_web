@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qornix API Playground</title>
+  <link rel="stylesheet" href="/static/dynamic_api.css">
+</head>
+<body data-qdb-page="api-playground">
+<div class="qdx-shell">
+  <header class="qdx-topbar">
+    <a class="qdx-brand" href="/"><span class="qdx-brand-mark">Qx</span><span><strong>Qornix Web</strong><small>API Playground</small></span></a>
+    <nav class="qdx-nav"><a href="/">Home</a><a href="/schema-manager">Schema Manager</a><a href="/query-builder">Query Builder</a><a href="/table">Table Browser</a><a href="/docs">Docs</a><a href="/instructions">Next steps</a></nav>
+  </header>
+
+  <section class="qdx-card qdx-page-intro">
+    <p class="qdx-kicker">Interactive API recipes</p>
+    <h1>Explore every important Dynamic API endpoint</h1>
+    <p class="qdx-lead">Pick a recipe on the left. The request body, curl command, JSON response and table preview stay visible on the right, so a new user can immediately understand what each endpoint does.</p>
+  </section>
+
+  <section class="qdb-recipe-layout">
+    <aside class="qdx-card qdb-recipe-sidebar">
+      <h2>Recipes</h2>
+      <p class="qdx-help-text">Run these after applying the demo schema and seeding demo rows.</p>
+      <div id="qdb-recipe-list" class="qdb-recipe-list">
+        <button type="button" data-recipe="metadata-tables"><strong>Metadata: tables</strong><span>GET /api/dynamic/meta/tables</span></button>
+        <button type="button" data-recipe="metadata-fields"><strong>Metadata: fields</strong><span>GET /api/dynamic/meta/products/fields</span></button>
+        <button type="button" data-recipe="metadata-fields-info"><strong>Metadata: fields info</strong><span>GET /api/dynamic/meta/products/fields-info</span></button>
+        <button type="button" data-recipe="allowlist"><strong>Metadata: allowlist</strong><span>Readable/writable/filterable schema map</span></button>
+        <button type="button" data-recipe="list-products"><strong>List products</strong><span>Structured GET body via POST /api/dynamic</span></button>
+        <button type="button" data-recipe="filter-products"><strong>Filter + sort products</strong><span>where + order_by + limit</span></button>
+        <button type="button" data-recipe="join-orders"><strong>JOIN orders/products</strong><span>join + raw filter + order_by</span></button>
+        <button type="button" data-recipe="aggregate-orders"><strong>Group + having</strong><span>group_by + having</span></button>
+        <button type="button" data-recipe="create-category"><strong>Create category</strong><span>POST /api/dynamic/categories</span></button>
+        <button type="button" data-recipe="create-product"><strong>Create product</strong><span>POST /api/dynamic/products</span></button>
+        <button type="button" data-recipe="update-product"><strong>Update product</strong><span>PUT /api/dynamic/products/1</span></button>
+        <button type="button" data-recipe="schema-history"><strong>Schema history</strong><span>GET /api/dynamic/schema/history</span></button>
+      </div>
+    </aside>
+
+    <main class="qdb-recipe-main">
+      <article class="qdx-card qdb-sticky-card">
+        <div class="qdb-recipe-header"><div><p class="qdx-kicker" id="qdb-recipe-kicker">Recipe</p><h2 id="qdb-recipe-title">Choose a recipe</h2></div><a class="qdx-btn qdx-btn-secondary" href="/query-builder">Visual builder</a></div>
+        <p id="qdb-recipe-description" class="qdx-help-text">Choose a recipe from the left column.</p>
+        <div class="qdx-grid qdx-grid-2 qdb-compact-grid"><div class="qdx-form-row"><label for="qdb-recipe-method">Method</label><select id="qdb-recipe-method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select></div><div class="qdx-form-row"><label for="qdb-recipe-endpoint">Endpoint</label><input id="qdb-recipe-endpoint" value="/api/dynamic"></div></div>
+        <div class="qdx-form-row"><label for="qdb-recipe-body">JSON body</label><textarea id="qdb-recipe-body" spellcheck="false"></textarea></div>
+        <div class="qdx-actions qdb-toolbar"><button id="qdb-run-recipe" type="button">Run request</button><button id="qdb-copy-recipe" type="button" class="qdx-btn-secondary">Copy curl</button><button id="qdb-copy-recipe-json" type="button" class="qdx-btn-secondary">Copy JSON</button></div>
+        <div id="qdb-status" class="qdb-status muted">Choose a recipe.</div>
+      </article>
+
+      <section class="qdx-grid qdx-grid-2 qdb-playground">
+        <article class="qdx-card"><h2>Response JSON</h2><pre id="qdb-result-json" class="qdx-code qdx-scroll">Response will appear here.</pre></article>
+        <article class="qdx-card"><h2>Table preview</h2><div id="qdb-result-table"><div class="qdb-empty">Run a request to preview rows.</div></div></article>
+      </section>
+    </main>
+  </section>
+
+  <footer class="qdx-footer"><span>Need raw OpenAPI?</span><a href="/docs">Open Docs</a></footer>
+</div>
+<script src="/static/dynamic_api_browser.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# Qornix dynamic_entity_server configuration (YAML format, roadmap v0.0.3)
+
+db:
+  driver: sqlite
+  connection_string: dynamic_entity_demo.sqlite3
+
+# Other settings
+app:
+  name: dynamic_entity_server
+  version: 1.0.0

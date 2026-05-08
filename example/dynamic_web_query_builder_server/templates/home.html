@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qornix Dynamic Web Query Builder API</title>
+    <link rel="icon" type="image/svg+xml"
+          href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90' font-family='Arial, sans-serif'%3E🦅%3C/text%3E%3C/svg%3E">
+    <!-- HTMX CDN -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/material-darker.min.css">
+    <!--Include local styles-->
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div class="container">
+    <nav class="navbar">
+        <span class="nav-brand">🦅 Qornix</span>
+        <a href="/" class="nav-link active">📋 Главная</a>
+        <a href="/query-builder" class="nav-link">🔧 Query Builder</a>
+        <a href="/table" class="nav-link">📊 Table Browser</a>
+        <a href="/schema-manager" class="nav-link">📄 Schema Manager</a>
+    </nav>
+
+    <div class="header">
+        <h1>🦅 Qornix Dynamic Web Query Builder API</h1>
+        <p>Автоматическая генерация REST API для любых таблиц базы данных</p>
+        <a href="/query-builder" class="btn btn-primary" style="display: inline-block; margin-top: 15px;">
+            Перейти в Qornix Query Builder Interface
+        </a>
+        <a href="/schema-manager" class="btn btn-secondary" style="display: inline-block; margin-top: 15px; text-decoration: none;">
+            Управление XML-схемой
+        </a>
+    </div>
+
+    <div class="card">
+        <h2>🎯 Описание API</h2>
+        <p>Этот сервис предоставляет универсальный REST API для работы с таблицами базы данных.</p>
+    </div>
+
+    <div class="main-layout">
+        <!--Left column: available endpoints-->
+        <div class="left-column">
+            <div class="card">
+                <h2>📋 Доступные endpoint'ы</h2>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <code>/api/dynamic</code>
+                    <p>Динамический запрос с указанием таблицы в query параметрах</p>
+                </div>
+
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <code>/api/dynamic/{table}</code>
+                    <p>Получить все записи из таблицы с фильтрацией через query параметры</p>
+                </div>
+
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <code>/api/dynamic/{table}/{id}</code>
+                    <p>Получить конкретную запись по ID</p>
+                </div>
+
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <code>/api/dynamic/</code>
+                    <p>Создать новую запись в таблице</p>
+                </div>
+
+                <div class="endpoint">
+                    <span class="method put">PATCH</span>
+                    <code>/api/dynamic/</code>
+                    <p>Частичное обновление существующей записи</p>
+                </div>
+
+                <div class="endpoint">
+                    <span class="method put">PUT</span>
+                    <code>/api/dynamic/</code>
+                    <p>Обновить существующую запись</p>
+                </div>
+
+                <div class="endpoint">
+                    <span class="method delete">DELETE</span>
+                    <code>/api/dynamic/</code>
+                    <p>Удалить запись из таблицы</p>
+                </div>
+
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <code>/api/dynamic/schema.xml</code>
+                    <p>Экспорт XML-схемы текущей demo SQLite базы</p>
+                </div>
+            </div>
+        </div>
+
+        <!--Right column: interactive API testing-->
+        <div class="right-column">
+            <div class="card">
+                <h2>🔍 Интерактивное тестирование API</h2>
+
+                <!--Form for GET requests-->
+                <div class="query-type">
+                    <h3>Получение данных (GET)</h3>
+                    <form id="get-form">
+                        <div class="editor-container">
+                            <textarea id="get-editor"></textarea>
+                        </div>
+                        <br>
+                        <button type="button" onclick="sendRequest('POST', {editor: getEditor, validateJson: true, endpoint: '/api/dynamic/', loadingElementId: 'get-loading', resultElementId: 'get-result'})">Выполнить GET запрос</button>
+                    </form>
+                    <div id="get-loading" class="htmx-indicator loading">Загрузка...</div>
+                    <div id="get-result" class="result-container"></div>
+                </div>
+
+                <!--Form for POST requests-->
+                <div class="query-type">
+                    <h3>Создание данных (POST)</h3>
+                    <form id="post-form">
+                        <div class="editor-container">
+                            <textarea id="post-editor"></textarea>
+                        </div>
+                        <br>
+                        <button type="button" onclick="sendRequest('POST', {editor: postEditor, validateJson: true, endpoint: '/api/dynamic/'})">Выполнить POST запрос</button>
+                    </form>
+                    <div id="post-loading" class="htmx-indicator loading">Отправка...</div>
+                    <div id="post-result" class="result-container"></div>
+                </div>
+
+                <!--Form for PUT requests-->
+                <div class="query-type">
+                    <h3>Обновление данных (PUT)</h3>
+                    <form id="put-form">
+                        <input type="hidden" name="endpoint" value="/api/dynamic/">
+                        <div class="editor-container">
+                            <textarea id="put-editor"></textarea>
+                        </div>
+                        <br>
+                        <button type="button" onclick="sendRequest(
+                            'PUT', {editor: putEditor, validateJson: true, endpoint: '/api/dynamic/'}
+                            )">
+                            Выполнить PUT запрос
+                        </button>
+                    </form>
+                    <div id="put-loading" class="htmx-indicator loading">Обновление...</div>
+                    <div id="put-result" class="result-container"></div>
+                </div>
+
+                <!--Form for PATCH requests-->
+                <div class="query-type">
+                    <h3>Обновление данных (PATCH)</h3>
+                    <form id="patch-form">
+                        <input type="hidden" name="endpoint" value="/api/dynamic/">
+                        <div class="editor-container">
+                            <textarea id="patch-editor"></textarea>
+                        </div>
+                        <br>
+                        <button type="button" onclick="sendRequest(
+                            'PATCH', {editor: patchEditor, validateJson: true, endpoint: '/api/dynamic/', loadingElementId: 'patch-loading', resultElementId: 'patch-result'}
+                            )">
+                            Выполнить PATCH запрос
+                        </button>
+                    </form>
+                    <div id="patch-loading" class="htmx-indicator loading">Обновление...</div>
+                    <div id="patch-result" class="result-container"></div>
+                </div>
+
+                <!--Form for DELETE requests-->
+                <div class="query-type">
+                    <h3>Удаление данных (DELETE)</h3>
+                    <form id="delete-form">
+                        <input type="hidden" name="endpoint" value="/api/dynamic/">
+                        <div class="editor-container">
+                            <textarea id="delete-editor"></textarea>
+                        </div>
+                        <br>
+                        <button type="button" onclick="sendRequest('DELETE', {editor: deleteEditor, validateJson: true, endpoint: '/api/dynamic/'})">Выполнить DELETE запрос</button>
+                    </form>
+                    <div id="delete-loading" class="htmx-indicator loading">Удаление...</div>
+                    <div id="delete-result" class="result-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>⚙️ Технические детали</h2>
+        <ul>
+            <li><strong>Фреймворк:</strong> Qornix Web Server</li>
+            <li><strong>Язык:</strong> C++17</li>
+            <li><strong>База данных:</strong> PostgreSQL/MySQL/SQLite</li>
+            <li><strong>ORM:</strong> Встроенный Query Builder</li>
+            <li><strong>Формат данных:</strong> JSON</li>
+            <li><strong>Поддерживаемые операции:</strong> SELECT, INSERT, UPDATE, DELETE, JOIN</li>
+            <li><strong>Защита:</strong> Автоматическая защита от SQL-инъекций</li>
+            <li><strong>Интерфейс:</strong> CodeMirror JSON Editor</li>
+        </ul>
+    </div>
+</div>
+
+<!-- CodeMirror JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/closebrackets.min.js"></script>
+
+<!--project scripts-->
+<script src="/static/app.js"></script>
+
+</body>
+</html>

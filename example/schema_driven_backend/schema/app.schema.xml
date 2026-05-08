@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application schemaFormatVersion="1.0" name="schema_driven_backend" version="0.0.1">
+  <DataStructure>
+    <Entity name="categories" tableName="categories" verboseName="Categories">
+      <Field name="id" type="INTEGER" primaryKey="true" nullable="false" autoIncrement="true" />
+      <Field name="name" type="VARCHAR" maxLength="120" nullable="false" />
+    </Entity>
+    <Entity name="products" tableName="products" verboseName="Products">
+      <Field name="id" type="INTEGER" primaryKey="true" nullable="false" autoIncrement="true" />
+      <Field name="name" type="VARCHAR" maxLength="160" nullable="false" />
+      <Field name="price" type="DECIMAL" precision="10" scale="2" nullable="false" defaultValue="0" />
+      <Field name="category_id" type="INTEGER" nullable="true" />
+      <ForeignKeyField name="category_id" referencedEntity="categories" referencedTable="categories" referencedField="id" onDelete="SET NULL" />
+    </Entity>
+  </DataStructure>
+</Application>

@@ -1,0 +1,25 @@
+# Wiki application configuration (Qornix Web)
+
+server:
+  address: 127.0.0.1
+  port: 8008
+
+database:
+  driver: sqlite
+  path: ./data/wiki.sqlite
+  schema: wiki_schema.xml
+
+auth:
+  jwt_secret: "qornix-wiki-secret-key-change-in-production"
+  session_duration_minutes: 30
+  jwt_duration_minutes: 60
+  password_validation: true
+  min_password_length: 6
+
+logging:
+  enabled: false
+  level: debug              # trace, debug, info, warning, error, fatal
+  to_file: true
+  file_path: ./logs/wiki_server
+  rotation_size: 10485760   # 10 MB
+  max_files: 5

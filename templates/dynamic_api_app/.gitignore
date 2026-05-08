@@ -1,0 +1,4 @@
+build/
+logs/
+*.sqlite3
+schema/schema_history.jsonl

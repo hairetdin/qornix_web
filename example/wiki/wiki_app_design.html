@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wiki App Design</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #64748b;
+      --primary: #2563eb;
+      --primary-soft: #dbeafe;
+      --success: #16a34a;
+      --warning: #f59e0b;
+      --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      --radius-xl: 24px;
+      --radius-lg: 18px;
+      --radius-md: 14px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: Inter, Arial, Helvetica, sans-serif;
+      background: linear-gradient(180deg, #eef4ff 0%, var(--bg) 42%);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .layout {
+      max-width: 1460px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 24px;
+    }
+
+    .sidebar {
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      border-radius: var(--radius-xl);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      height: calc(100vh - 48px);
+      position: sticky;
+      top: 24px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+      color: #fff;
+      font-size: 22px;
+      font-weight: 700;
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.28);
+    }
+
+    .brand h1 {
+      font-size: 22px;
+      line-height: 1.1;
+      margin-bottom: 4px;
+    }
+
+    .brand p {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .sidebar-section h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #94a3b8;
+      margin-bottom: 12px;
+    }
+
+    .nav-list,
+    .space-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .nav-link,
+    .space-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      text-decoration: none;
+      color: var(--text);
+      background: transparent;
+      transition: 0.2s ease;
+      font-size: 15px;
+    }
+
+    .nav-link span,
+    .space-item span {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .nav-link:hover,
+    .space-item:hover,
+    .nav-link.active {
+      background: var(--primary-soft);
+      color: var(--primary);
+    }
+
+    .count {
+      min-width: 26px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #eff6ff;
+      color: var(--primary);
+      font-size: 12px;
+      text-align: center;
+      font-weight: 600;
+    }
+
+    .team-card {
+      margin-top: auto;
+      background: linear-gradient(145deg, #0f172a, #1e3a8a);
+      color: #fff;
+      border-radius: 20px;
+      padding: 18px;
+    }
+
+    .team-card h4 {
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+
+    .team-card p {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.78);
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+
+    .team-card button {
+      width: 100%;
+      border: none;
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      background: #fff;
+      color: #0f172a;
+      cursor: pointer;
+    }
+
+    .content {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 24px;
+    }
+
+    .topbar {
+      background: rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      border-radius: var(--radius-xl);
+      padding: 18px 22px;
+      box-shadow: var(--shadow);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .search-box {
+      flex: 1;
+      min-width: 260px;
+      position: relative;
+    }
+
+    .search-box input {
+      width: 100%;
+      padding: 15px 18px 15px 46px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--surface-soft);
+      font-size: 15px;
+      outline: none;
+    }
+
+    .search-box .icon {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #94a3b8;
+      font-size: 16px;
+    }
+
+    .topbar-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .ghost-btn,
+    .primary-btn {
+      border: none;
+      border-radius: 14px;
+      padding: 13px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.18s ease, opacity 0.2s ease;
+    }
+
+    .ghost-btn {
+      background: #eff6ff;
+      color: var(--primary);
+    }
+
+    .primary-btn {
+      background: linear-gradient(135deg, #2563eb, #4f46e5);
+      color: #fff;
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.24);
+    }
+
+    .ghost-btn:hover,
+    .primary-btn:hover,
+    .article-card:hover,
+    .template-card:hover {
+      transform: translateY(-2px);
+    }
+
+    .hero {
+      background: linear-gradient(130deg, #0f172a, #1d4ed8 60%, #60a5fa 100%);
+      color: #fff;
+      border-radius: 30px;
+      padding: 32px;
+      box-shadow: var(--shadow);
+      display: grid;
+      grid-template-columns: 1.35fr 0.95fr;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .hero h2 {
+      font-size: 34px;
+      line-height: 1.12;
+      margin-bottom: 14px;
+    }
+
+    .hero p {
+      font-size: 15px;
+      line-height: 1.7;
+      color: rgba(255, 255, 255, 0.84);
+      max-width: 640px;
+      margin-bottom: 20px;
+    }
+
+    .hero-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .hero-tag {
+      padding: 9px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      font-size: 13px;
+    }
+
+    .hero-card {
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 24px;
+      padding: 20px;
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-card h3 {
+      font-size: 16px;
+      margin-bottom: 14px;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .stat {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 18px;
+      padding: 14px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 22px;
+      margin-bottom: 4px;
+    }
+
+    .stat span {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.72);
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .panel {
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      border-radius: 24px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .panel-header h3 {
+      font-size: 20px;
+    }
+
+    .panel-header a {
+      text-decoration: none;
+      color: var(--primary);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .article-list,
+    .template-list,
+    .mini-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .article-card,
+    .template-card,
+    .mini-item {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--surface-soft);
+      padding: 16px;
+      transition: 0.2s ease;
+    }
+
+    .article-card.active {
+      border-color: #bfdbfe;
+      background: #eff6ff;
+    }
+
+    .article-meta,
+    .mini-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .status-badge {
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    .status-published {
+      background: #dcfce7;
+      color: var(--success);
+    }
+
+    .status-draft {
+      background: #fef3c7;
+      color: #b45309;
+    }
+
+    .article-card h4,
+    .template-card h4,
+    .reader h2 {
+      font-size: 17px;
+      margin-bottom: 8px;
+      line-height: 1.35;
+    }
+
+    .article-card p,
+    .template-card p,
+    .mini-item p,
+    .reader p,
+    .reader li {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .tag {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      font-size: 12px;
+      color: #334155;
+    }
+
+    .reader-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+
+    .reader-subtitle {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .reader-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .reader-section {
+      margin-bottom: 24px;
+    }
+
+    .reader h3 {
+      font-size: 18px;
+      margin-bottom: 10px;
+    }
+
+    .reader ul {
+      padding-left: 20px;
+      margin-top: 10px;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin: 18px 0 8px;
+    }
+
+    .info-card {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
+      background: var(--surface-soft);
+    }
+
+    .info-card span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+
+    .info-card strong {
+      font-size: 18px;
+    }
+
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-top: 24px;
+    }
+
+    @media (max-width: 1200px) {
+      .hero,
+      .main-grid,
+      .bottom-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        height: auto;
+        position: static;
+      }
+    }
+
+    @media (max-width: 960px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        gap: 18px;
+      }
+
+      .info-grid,
+      .stats-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 16px;
+      }
+
+      .topbar,
+      .panel,
+      .hero,
+      .sidebar {
+        border-radius: 20px;
+      }
+
+      .hero {
+        padding: 24px;
+      }
+
+      .hero h2 {
+        font-size: 28px;
+      }
+
+      .info-grid,
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .reader-header {
+        flex-direction: column;
+      }
+
+      .topbar-actions,
+      .reader-actions {
+        width: 100%;
+      }
+
+      .ghost-btn,
+      .primary-btn {
+        flex: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">W</div>
+        <div>
+          <h1>WikiSpace</h1>
+          <p>База знаний команды</p>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Навигация</h3>
+        <ul class="nav-list">
+          <li><a href="#" class="nav-link active"><span>📚 Все статьи</span><span class="count">124</span></a></li>
+          <li><a href="#" class="nav-link"><span>⭐ Избранное</span><span class="count">18</span></a></li>
+          <li><a href="#" class="nav-link"><span>🕘 Недавние</span><span class="count">12</span></a></li>
+          <li><a href="#" class="nav-link"><span>👥 Команда</span><span class="count">27</span></a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Категории</h3>
+        <ul class="space-list">
+          <li><a href="#" class="space-item"><span>🚀 Product</span><span class="count">34</span></a></li>
+          <li><a href="#" class="space-item"><span>🎨 Design</span><span class="count">21</span></a></li>
+          <li><a href="#" class="space-item"><span>💻 Engineering</span><span class="count">42</span></a></li>
+          <li><a href="#" class="space-item"><span>📈 Marketing</span><span class="count">15</span></a></li>
+        </ul>
+      </div>
+
+      <div class="team-card">
+        <h4>Создать новую статью</h4>
+        <p>Добавьте инструкцию, процесс или справочник, чтобы знания команды были всегда под рукой.</p>
+        <button>+ Новая статья</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="search-box">
+          <span class="icon">🔎</span>
+          <input type="text" placeholder="Поиск по статьям, тегам и авторам" />
+        </div>
+        <div class="topbar-actions">
+          <button class="ghost-btn">Фильтры</button>
+          <button class="primary-btn">Написать статью</button>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div>
+          <h2>Современный интерфейс для корпоративной wiki</h2>
+          <p>Дизайн сочетает боковую навигацию, быстрый поиск, карточки знаний и удобный режим чтения. Подходит для внутренней документации, продуктовой базы знаний и onboarding-портала.</p>
+          <div class="hero-tags">
+            <div class="hero-tag">Knowledge Base</div>
+            <div class="hero-tag">Documentation</div>
+            <div class="hero-tag">Team Wiki</div>
+            <div class="hero-tag">Responsive Layout</div>
+          </div>
+        </div>
+
+        <div class="hero-card">
+          <h3>Состояние базы знаний</h3>
+          <div class="stats-grid">
+            <div class="stat">
+              <strong>124</strong>
+              <span>Статей</span>
+            </div>
+            <div class="stat">
+              <strong>27</strong>
+              <span>Авторы</span>
+            </div>
+            <div class="stat">
+              <strong>91%</strong>
+              <span>Актуальность</span>
+            </div>
+            <div class="stat">
+              <strong>14</strong>
+              <span>Черновиков</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="main-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Популярные статьи</h3>
+            <a href="#">Смотреть все</a>
+          </div>
+
+          <div class="article-list">
+            <article class="article-card active">
+              <div class="article-meta">
+                <span>Обновлено 2 часа назад</span>
+                <span class="status-badge status-published">Published</span>
+              </div>
+              <h4>Onboarding нового сотрудника</h4>
+              <p>Пошаговая инструкция по доступам, рабочим процессам, встречам и базовым правилам команды.</p>
+              <div class="tag-row">
+                <span class="tag">HR</span>
+                <span class="tag">Onboarding</span>
+                <span class="tag">Process</span>
+              </div>
+            </article>
+
+            <article class="article-card">
+              <div class="article-meta">
+                <span>Обновлено вчера</span>
+                <span class="status-badge status-published">Published</span>
+              </div>
+              <h4>Дизайн-система и UI компоненты</h4>
+              <p>Библиотека компонентов, правила использования токенов, сеток, отступов и типографики.</p>
+              <div class="tag-row">
+                <span class="tag">Design</span>
+                <span class="tag">UI Kit</span>
+              </div>
+            </article>
+
+            <article class="article-card">
+              <div class="article-meta">
+                <span>Черновик</span>
+                <span class="status-badge status-draft">Draft</span>
+              </div>
+              <h4>Релизный процесс продукта</h4>
+              <p>Чек-лист по подготовке, согласованию и публикации релизов для продуктовой команды.</p>
+              <div class="tag-row">
+                <span class="tag">Release</span>
+                <span class="tag">Product</span>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="panel reader">
+          <div class="reader-header">
+            <div>
+              <h2>Onboarding нового сотрудника</h2>
+              <div class="reader-subtitle">
+                <span>Автор: Анна Петрова</span>
+                <span>Обновлено: 27 апреля 2026</span>
+                <span>Время чтения: 6 мин</span>
+              </div>
+              <div class="tag-row">
+                <span class="tag">HR</span>
+                <span class="tag">Onboarding</span>
+                <span class="tag">Инструкции</span>
+                <span class="tag">Команда</span>
+              </div>
+            </div>
+            <div class="reader-actions">
+              <button class="ghost-btn">Поделиться</button>
+              <button class="primary-btn">Редактировать</button>
+            </div>
+          </div>
+
+          <div class="reader-section">
+            <h3>Описание</h3>
+            <p>Эта статья помогает быстро провести нового сотрудника через первые шаги в компании: получить доступы, познакомиться с командой, разобраться в процессах и начать работу без лишних задержек.</p>
+          </div>
+
+          <div class="info-grid">
+            <div class="info-card">
+              <span>Категория</span>
+              <strong>People Ops</strong>
+            </div>
+            <div class="info-card">
+              <span>Статус</span>
+              <strong>Актуально</strong>
+            </div>
+            <div class="info-card">
+              <span>Шаблон</span>
+              <strong>Guide</strong>
+            </div>
+          </div>
+
+          <div class="reader-section">
+            <h3>Первые действия</h3>
+            <ul>
+              <li>Выдать доступ к рабочим инструментам и корпоративным сервисам.</li>
+              <li>Добавить сотрудника в командные чаты и внутренние пространства wiki.</li>
+              <li>Назначить приветственную встречу и ответственного buddy.</li>
+              <li>Передать список обязательных материалов для ознакомления.</li>
+            </ul>
+          </div>
+
+          <div class="reader-section">
+            <h3>Рекомендуемая структура статьи</h3>
+            <p>Используйте краткое описание, блок ключевой информации, список шагов, дополнительные материалы и секцию с полезными ссылками. Такой формат делает базу знаний удобной и для чтения, и для редактирования.</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Недавняя активность</h3>
+            <a href="#">Журнал</a>
+          </div>
+
+          <div class="mini-list">
+            <div class="mini-item">
+              <div class="mini-meta">
+                <span>Сегодня</span>
+                <span>Мария</span>
+              </div>
+              <p>Обновила раздел с доступами в статье onboarding.</p>
+            </div>
+            <div class="mini-item">
+              <div class="mini-meta">
+                <span>Вчера</span>
+                <span>Иван</span>
+              </div>
+              <p>Добавил чек-лист для welcome-процесса и обновил описание ролей.</p>
+            </div>
+            <div class="mini-item">
+              <div class="mini-meta">
+                <span>2 дня назад</span>
+                <span>Ольга</span>
+              </div>
+              <p>Создала новую категорию Design и перенесла 6 статей в общий раздел.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

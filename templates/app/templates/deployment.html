@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Deployment · @PROJECT_NAME@</title><link rel="stylesheet" href="/static/app.css"></head>
+<body><div class="qx-shell"><header class="qx-topbar"><a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Deployment</small></span></a><nav class="qx-nav"><a href="/">Home</a><a href="/docs">Docs</a><a href="/docs/getting-started">Start</a><a href="/health">Health</a></nav></header>
+<section class="qx-page-intro"><p class="qx-kicker">Portable bundle</p><h1>Run the app from another directory or compatible machine.</h1><p class="qx-lead">The build creates a deploy directory containing the binary and runtime assets. Copy that whole folder, not only the executable.</p></section>
+<section class="qx-grid qx-grid-2"><article class="qx-card"><h2>Build deploy bundle</h2><pre class="qx-code">mkdir -p build
+cd build
+cmake ..
+cmake --build .
+
+# Bundle location:
+build/deploy/@PROJECT_NAME@/</pre></article><article class="qx-card"><h2>Run from bundle</h2><pre class="qx-code">cd build/deploy/@PROJECT_NAME@
+./@PROJECT_NAME@</pre><p>Or set <code>QORNIX_APP_ROOT</code> explicitly when running from another location.</p></article></section>
+<section class="qx-card"><h2>Bundle layout</h2><pre class="qx-code">@PROJECT_NAME@/
+├── @PROJECT_NAME@
+├── config.yaml
+├── README.md
+├── templates/
+├── static/
+├── doc/
+├── route_extensions/
+└── logs/</pre><p class="qx-note">The bundle does not include system shared libraries. On another machine, install compatible runtime dependencies or use your normal package/container workflow.</p></section>
+<footer class="qx-footer"><span>Deployment guide</span><a href="/docs/raw/deployment.md">Open bundled markdown</a></footer></div></body></html>

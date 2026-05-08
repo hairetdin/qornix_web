@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Configuration · @PROJECT_NAME@</title><link rel="stylesheet" href="/static/app.css"></head>
+<body><div class="qx-shell"><header class="qx-topbar"><a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Configuration</small></span></a><nav class="qx-nav"><a href="/">Home</a><a href="/docs">Docs</a><a href="/docs/routing">Routing</a><a href="/docs/deployment">Deploy</a></nav></header>
+<section class="qx-page-intro"><p class="qx-kicker">Runtime settings</p><h1>Configure host, port and logging through config.yaml.</h1><p class="qx-lead">The server manager loads <code>config.yaml</code> from the current location or near the executable, which makes the generated deploy bundle self-contained.</p></section>
+<section class="qx-grid qx-grid-2"><article class="qx-card"><h2>Common settings</h2><pre class="qx-code">server:
+  address: "127.0.0.1"
+  port: 8008
+logging:
+  enabled: true
+  level: "info"
+  to_file: true
+  file_path: "logs/app.log"</pre></article><article class="qx-card"><h2>Command-line overrides</h2><pre class="qx-code">./@PROJECT_NAME@ --log --log-level debug
+./@PROJECT_NAME@ --log-file logs/debug.log</pre><p>Keep production config beside the deployed binary.</p></article></section>
+<footer class="qx-footer"><span>Configuration guide</span><a href="/docs/raw/configuration.md">Open bundled markdown</a></footer></div></body></html>

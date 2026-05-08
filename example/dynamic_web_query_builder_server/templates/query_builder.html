@@ -1,0 +1,1376 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Query Builder Interface - Qornix</title>
+    <link rel="icon" type="image/svg+xml"
+          href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90' font-family='Arial, sans-serif'%3E🦅%3C/text%3E%3C/svg%3E">
+
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/material-darker.min.css">
+
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div class="container">
+    <nav class="navbar">
+        <span class="nav-brand">🦅 Qornix</span>
+        <a href="/" class="nav-link">📋 Главная</a>
+        <a href="/query-builder" class="nav-link active">🔧 Query Builder</a>
+        <a href="/table" class="nav-link">📊 Table Browser</a>
+        <a href="/schema-manager" class="nav-link">📄 Schema Manager</a>
+    </nav>
+
+    <div class="header">
+        <h1>🦅 Qornix Query Builder Interface</h1>
+        <p>Интерактивный интерфейс для построения запросов к базе данных</p>
+    </div>
+
+    <div class="main-layout">
+        <!--Left column: request parameters-->
+        <div class="left-column">
+            <div class="card">
+                <h2>🔄 Преобразование SQL в параметры</h2>
+
+                <div class="form-group">
+                    <label for="sqlInput">SQL запрос:</label>
+                    <textarea id="sqlInput" placeholder="SELECT * FROM users WHERE status='active' ORDER BY name ASC LIMIT 10" rows="4"></textarea>
+                </div>
+
+                <button type="button" class="btn btn-primary" onclick="parseSqlToParams()" style="width: 100%;">
+                    Преобразовать SQL в параметры
+                </button>
+            </div>
+
+            <div class="card">
+                <h2>📝 Параметры запроса</h2>
+
+                <div class="form-grid">
+                    <!--Basic parameters-->
+                    <div class="form-group">
+                        <label for="method">HTTP Метод:</label>
+                        <select id="method">
+                            <option value="GET">GET (SELECT)</option>
+                            <option value="POST">POST (INSERT)</option>
+                            <option value="PUT">PUT (UPDATE)</option>
+                            <option value="PATCH">PATCH (UPDATE PARTIAL)</option>
+                            <option value="DELETE">DELETE</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="table">Таблица:</label>
+                        <input type="text" id="table" list="tableSuggestions" placeholder="например: users, products, orders">
+                        <datalist id="tableSuggestions"></datalist>
+                    </div>
+                </div>
+
+                <!--SELECT fields-->
+                <div class="form-group">
+                    <label>Поля (SELECT):</label>
+                    <div class="list-input">
+                        <input type="text" id="fieldInput" list="fieldSuggestions" placeholder="имя поля (например: id, name), по умолчанию все *">
+                        <datalist id="fieldSuggestions"></datalist>
+                        <button type="button" class="btn btn-secondary" onclick="addItem('field')">Добавить</button>
+                    </div>
+                    <div class="list-items" id="fieldsList"></div>
+                </div>
+
+                <!--WHERE filters-->
+                <div class="form-group">
+                    <label>Фильтры (WHERE):</label>
+                    <div class="list-input">
+                        <input type="text" id="filterInput" placeholder="условие (например: id=1, name>'test')">
+                        <button type="button" class="btn btn-secondary" onclick="addItem('filter')">Добавить</button>
+                    </div>
+                    <div class="list-items" id="filtersList"></div>
+                </div>
+
+                <!--JOINs-->
+                <div class="form-group">
+                    <label>JOIN:</label>
+                    <div class="list-input">
+                        <input type="text" id="joinInput" placeholder="JOIN products ON orders.product_id=products.id">
+                        <button type="button" class="btn btn-secondary" onclick="addItem('join')">Добавить</button>
+                    </div>
+                    <div class="list-items" id="joinsList"></div>
+                </div>
+
+                <!-- GROUP BY -->
+                <div class="form-group">
+                    <label>GROUP BY:</label>
+                    <div class="list-input">
+                        <input type="text" id="groupInput" placeholder="поле для группировки">
+                        <button type="button" class="btn btn-secondary" onclick="addItem('group')">Добавить</button>
+                    </div>
+                    <div class="list-items" id="groupsList"></div>
+                </div>
+
+                <!-- ORDER BY -->
+                <div class="form-group">
+                    <label>ORDER BY:</label>
+                    <div class="list-input">
+                        <input type="text" id="orderInput" placeholder="сортировка (например: name ASC, created_at DESC)">
+                        <button type="button" class="btn btn-secondary" onclick="addItem('order')">Добавить</button>
+                    </div>
+                    <div class="list-items" id="ordersList"></div>
+                </div>
+
+                <!-- HAVING -->
+                <div class="form-group">
+                    <label>HAVING:</label>
+                    <div class="list-input">
+                        <input type="text" id="havingInput" placeholder="условие для групп (например: COUNT(*) > 5)">
+                        <button type="button" class="btn btn-secondary" onclick="addItem('having')">Добавить</button>
+                    </div>
+                    <div class="list-items" id="havingsList"></div>
+                </div>
+
+                <!-- LIMIT -->
+                <div class="form-group">
+                    <label for="limit">LIMIT:</label>
+                    <input type="number" id="limit" placeholder="-1 для безлимита" value="10">
+                </div>
+
+                <!--Data for INSERT/UPDATE-->
+                <div class="form-group editor-container">
+                    <label for="dataEditor">Данные (для POST/PUT/PATCH):</label>
+                    <textarea id="dataEditor"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!--Right column: controls and result-->
+        <div class="right-column">
+            <div class="card">
+<!--<h2>🔧 Controls</h2>-->
+
+                <div class="button-group">
+                    <button type="button" class="btn btn-primary" onclick="generateAndSend()">
+                        Выполнить запрос
+                    </button>
+                    <button type="button" class="btn btn-success" onclick="copyToClipboard()">
+                        Копировать JSON
+                    </button>
+                    <button type="button" class="btn btn-info" onclick="generateCurl()">
+                        Генерировать curl
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="clearForm()">
+                        Очистить форму
+                    </button>
+                </div>
+
+                <div class="json-preview" id="jsonPreview">
+                    <strong>JSON Preview:</strong><br>
+                    {}
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>🗂️ Список таблиц</h2>
+                <div class="form-group">
+                    <label for="tablesSearchInput">Поиск таблиц:</label>
+                    <input type="text" id="tablesSearchInput" placeholder="Начните вводить имя таблицы">
+                </div>
+                <div class="button-group" style="margin-bottom: 12px;">
+                    <button type="button" class="btn btn-info" onclick="loadTablesList()">
+                        Загрузить таблицы
+                    </button>
+                </div>
+                <div id="tablesListStatus" style="margin-bottom: 10px; color: #7f8c8d; font-size: 0.95rem;">
+                    Нажмите кнопку, чтобы загрузить таблицы из БД
+                </div>
+                <div class="list-items" id="tablesListContainer"></div>
+                <div class="button-group" style="margin-top: 12px;">
+                    <button type="button" id="tablesLoadMoreBtn" class="btn btn-secondary" onclick="loadMoreTables()" style="display: none;">
+                        Показать еще
+                    </button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>📋 Результат</h2>
+
+                <div id="loading" class="loading">
+                    Выполнение запроса...
+                </div>
+
+                <div id="resultInfo" class="result-info" style="display: none;">
+                    <span id="statusBadge" class="status-badge status-success">200 OK</span>
+                    <span id="messageText">Query executed successfully</span>
+                    <span id="countText" style="margin-left: 15px; color: #7f8c8d;">Записей: 0</span>
+                </div>
+
+                <div id="resultTableContainer" style="overflow-x: auto;">
+                    <table id="resultTable" style="display: none;">
+                        <thead id="tableHead"></thead>
+                        <tbody id="tableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!--Modal window with SQL parse result-->
+<div id="parseResultModal" class="modal">
+    <div class="modal-content parse-result-modal">
+        <div class="modal-header">
+            <h3>✅ Результат парсинга SQL</h3>
+            <span class="close-btn" onclick="closeParseResultModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div id="parseResultBody"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeParseResultModal()">Закрыть</button>
+            <button type="button" class="btn btn-primary" onclick="executeFromModal()">Выполнить запрос</button>
+        </div>
+    </div>
+</div>
+
+<!-- CodeMirror JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/closebrackets.min.js"></script>
+
+<script>
+// Lists for storing items
+let fields = [];
+let filters = [];
+let joins = [];
+let groups = [];
+let orders = [];
+let havings = [];
+let tableAutocompleteAbortController = null;
+let tableAutocompleteTimer = null;
+let fieldAutocompleteAbortController = null;
+let fieldAutocompleteTimer = null;
+let tablesSearchTimer = null;
+const TABLES_PAGE_SIZE = 50;
+let tablesListOffset = 0;
+let tablesListQuery = '';
+
+// Initialize CodeMirror redaktora
+let dataEditor;
+
+function initializeEditor() {
+    dataEditor = CodeMirror.fromTextArea(document.getElementById('dataEditor'), {
+        mode: 'application/json',
+        theme: 'material-darker',
+        lineNumbers: true,
+        autoCloseBrackets: true,
+        matchBrackets: true,
+        indentUnit: 2,
+        tabSize: 2
+    });
+
+    // Set nachalnogo values
+    dataEditor.setValue(JSON.stringify({
+        "name": "",
+        "description": ""
+    }, null, 2));
+}
+
+// Function for adding an item to the list
+function addItem(type) {
+    const inputId = type + 'Input';
+    const listId = type + 'sList';
+    const input = document.getElementById(inputId);
+    const value = input.value.trim();
+
+    if (!value) {
+        alert('Введите значение');
+        return;
+    }
+
+    // Check contains whether value zapyatye (several elements)
+    if (value.includes(',')) {
+        // Split by comma and Add each item
+        const items = value.split(',').map(item => item.trim()).filter(item => item !== '');
+
+        // Add each item in matching array
+        items.forEach(item => {
+            switch(type) {
+                case 'field': fields.push(item); break;
+                case 'filter': filters.push(item); break;
+                case 'join': joins.push(item); break;
+                case 'group': groups.push(item); break;
+                case 'order': orders.push(item); break;
+                case 'having': havings.push(item); break;
+            }
+        });
+    } else {
+        // Add odinochnyy item
+        switch(type) {
+            case 'field': fields.push(value); break;
+            case 'filter': filters.push(value); break;
+            case 'join': joins.push(value); break;
+            case 'group': groups.push(value); break;
+            case 'order': orders.push(value); break;
+            case 'having': havings.push(value); break;
+        }
+    }
+
+    renderList(type);
+    input.value = '';
+    updateJsonPreview();
+}
+
+// Function for removing an item from the list
+function removeItem(type, index) {
+    switch(type) {
+        case 'field': fields.splice(index, 1); break;
+        case 'filter': filters.splice(index, 1); break;
+        case 'join': joins.splice(index, 1); break;
+        case 'group': groups.splice(index, 1); break;
+        case 'order': orders.splice(index, 1); break;
+        case 'having': havings.splice(index, 1); break;
+    }
+    renderList(type);
+    updateJsonPreview();
+}
+
+// Render the list
+function renderList(type) {
+    const listId = type + 'sList';
+    const container = document.getElementById(listId);
+    const array = getArrayByType(type);
+
+    container.innerHTML = '';
+    array.forEach((item, index) => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'list-item';
+        itemEl.innerHTML = `
+            ${item}
+            <span class="remove-item" onclick="removeItem('${type}', ${index})">×</span>
+        `;
+        container.appendChild(itemEl);
+    });
+}
+
+// Get an array by type
+function getArrayByType(type) {
+    switch(type) {
+        case 'field': return fields;
+        case 'filter': return filters;
+        case 'join': return joins;
+        case 'group': return groups;
+        case 'order': return orders;
+        case 'having': return havings;
+        default: return [];
+    }
+}
+
+// Generate a JSON request
+function generateRequestJson() {
+    const method = document.getElementById('method').value;
+    const table = document.getElementById('table').value.trim();
+
+    const requestData = {
+        method: method,
+        table: table
+    };
+
+    // Add query object if is parameters
+    const queryObj = {};
+
+    if (fields.length > 0) queryObj.fields = fields;
+    if (filters.length > 0) queryObj.filter = filters;
+    if (joins.length > 0) queryObj.join = joins;
+    if (groups.length > 0) queryObj.group_by = groups;
+    if (orders.length > 0) queryObj.order_by = orders;
+    if (havings.length > 0) queryObj.having = havings;
+
+    const limit = parseInt(document.getElementById('limit').value);
+    if (limit >= 0) queryObj.limit = limit;
+
+    if (Object.keys(queryObj).length > 0) {
+        requestData.query = queryObj;
+    }
+
+    // Add data for POST/PUT/PATCH
+    if (['POST', 'PUT', 'PATCH'].includes(method)) {
+        try {
+            const dataJson = JSON.parse(dataEditor.getValue());
+            requestData.data = dataJson;
+        } catch (e) {
+            console.error('Invalid JSON in data editor:', e);
+        }
+    }
+
+    return requestData;
+}
+
+// Update prevyu JSON
+function updateJsonPreview() {
+    const jsonData = generateRequestJson();
+    const formattedJson = JSON.stringify(jsonData, null, 2);
+
+    // Convert JSON in HTML with sokhraneniem formatirovaniya
+    document.getElementById('jsonPreview').innerHTML =
+        '<strong>JSON Preview:</strong><br>' +
+        formattedJson
+            .replace(/ /g, '&nbsp;')  // Replace spaces on nerazryvnye spaces
+            .replace(/\n/g, '<br>');   // Replace perenosy rows on <br>
+}
+
+function extractAutocompleteItems(payload) {
+    if (Array.isArray(payload)) {
+        return payload;
+    }
+
+    if (payload && Array.isArray(payload.data)) {
+        return payload.data;
+    }
+
+    if (payload && payload.data && Array.isArray(payload.data.items)) {
+        return payload.data.items;
+    }
+
+    if (payload && Array.isArray(payload.items)) {
+        return payload.items;
+    }
+
+    return [];
+}
+
+function renderTableSuggestions(items) {
+    const datalist = document.getElementById('tableSuggestions');
+    datalist.innerHTML = '';
+
+    items.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item;
+        datalist.appendChild(option);
+    });
+}
+
+function getFieldAutocompleteContext(rawValue) {
+    const value = rawValue || '';
+    const commaIndex = value.lastIndexOf(',');
+    if (commaIndex === -1) {
+        return {prefix: '', query: value.trim()};
+    }
+
+    const prefix = value.slice(0, commaIndex + 1);
+    const query = value.slice(commaIndex + 1).trim();
+    return {prefix, query};
+}
+
+function renderFieldSuggestions(prefix, items) {
+    const datalist = document.getElementById('fieldSuggestions');
+    datalist.innerHTML = '';
+
+    items.forEach(item => {
+        const option = document.createElement('option');
+        option.value = `${prefix}${prefix ? ' ' : ''}${item}`;
+        datalist.appendChild(option);
+    });
+}
+
+async function fetchTableSuggestions(query) {
+    if (tableAutocompleteAbortController) {
+        tableAutocompleteAbortController.abort();
+    }
+
+    tableAutocompleteAbortController = new AbortController();
+
+    try {
+        const response = await fetch(`/api/dynamic/meta/tables?q=${encodeURIComponent(query)}&limit=20&offset=0`, {
+            method: 'GET',
+            signal: tableAutocompleteAbortController.signal
+        });
+
+        if (!response.ok) {
+            return;
+        }
+
+        const payload = await response.json();
+        const items = extractAutocompleteItems(payload);
+        renderTableSuggestions(items);
+    } catch (error) {
+        if (error && error.name !== 'AbortError') {
+            console.error('Failed to load table suggestions:', error);
+        }
+    }
+}
+
+async function fetchFieldSuggestions(inputValue) {
+    const table = document.getElementById('table').value.trim();
+    if (!table) {
+        renderFieldSuggestions('', []);
+        return;
+    }
+
+    if (fieldAutocompleteAbortController) {
+        fieldAutocompleteAbortController.abort();
+    }
+    fieldAutocompleteAbortController = new AbortController();
+
+    const {prefix, query} = getFieldAutocompleteContext(inputValue);
+    try {
+        const response = await fetch(`/api/dynamic/meta/${encodeURIComponent(table)}/fields?q=${encodeURIComponent(query)}`, {
+            method: 'GET',
+            signal: fieldAutocompleteAbortController.signal
+        });
+
+        if (!response.ok) {
+            renderFieldSuggestions(prefix, []);
+            return;
+        }
+
+        const payload = await response.json();
+        const items = extractAutocompleteItems(payload);
+        renderFieldSuggestions(prefix, items);
+    } catch (error) {
+        if (error && error.name !== 'AbortError') {
+            console.error('Failed to load field suggestions:', error);
+        }
+    }
+}
+
+async function loadTablesList() {
+    tablesListOffset = 0;
+    tablesListQuery = document.getElementById('tablesSearchInput').value.trim();
+    await loadTablesPage(true);
+}
+
+async function loadMoreTables() {
+    await loadTablesPage(false);
+}
+
+async function loadTablesPage(resetList) {
+    const statusEl = document.getElementById('tablesListStatus');
+    const container = document.getElementById('tablesListContainer');
+    const loadMoreBtn = document.getElementById('tablesLoadMoreBtn');
+    statusEl.textContent = 'Загрузка...';
+    if (resetList) {
+        container.innerHTML = '';
+        loadMoreBtn.style.display = 'none';
+    }
+
+    try {
+        const url = `/api/dynamic/meta/tables?q=${encodeURIComponent(tablesListQuery)}&limit=${TABLES_PAGE_SIZE}&offset=${tablesListOffset}`;
+        const response = await fetch(url, {method: 'GET'});
+        if (!response.ok) {
+            statusEl.textContent = `Ошибка загрузки (${response.status})`;
+            loadMoreBtn.style.display = 'none';
+            return;
+        }
+
+        const payload = await response.json();
+        const items = extractAutocompleteItems(payload);
+        const tables = items.filter(item => typeof item === 'string');
+
+        if (tables.length === 0 && tablesListOffset === 0) {
+            statusEl.textContent = 'Таблицы не найдены';
+            loadMoreBtn.style.display = 'none';
+            return;
+        }
+
+        if (tables.length === 0) {
+            statusEl.textContent = `Показаны все таблицы (${tablesListOffset})`;
+            loadMoreBtn.style.display = 'none';
+            return;
+        }
+
+        tablesListOffset += tables.length;
+        statusEl.textContent = `Показано таблиц: ${tablesListOffset}`;
+        tables.forEach(tableName => {
+            const itemEl = document.createElement('div');
+            itemEl.className = 'list-item';
+            itemEl.style.cursor = 'pointer';
+            itemEl.textContent = tableName;
+            itemEl.title = 'Нажмите, чтобы выбрать таблицу';
+            itemEl.addEventListener('click', function() {
+                document.getElementById('table').value = tableName;
+                updateJsonPreview();
+                fetchFieldSuggestions(document.getElementById('fieldInput').value || '');
+            });
+            container.appendChild(itemEl);
+        });
+
+        loadMoreBtn.style.display = tables.length === TABLES_PAGE_SIZE ? 'inline-block' : 'none';
+    } catch (error) {
+        statusEl.textContent = 'Ошибка загрузки таблиц';
+        document.getElementById('tablesLoadMoreBtn').style.display = 'none';
+        console.error('Failed to load tables list:', error);
+    }
+}
+
+
+// Generate and otpravka request
+async function generateAndSend() {
+    const table = document.getElementById('table').value.trim();
+    if (!table) {
+        alert('Пожалуйста, укажите имя таблицы');
+        return;
+    }
+
+    const requestData = generateRequestJson();
+    const jsonBody = JSON.stringify(requestData);
+
+    console.log('Sending request:', jsonBody);
+
+    // Pokazyvaem indikator loading
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('resultInfo').style.display = 'none';
+    document.getElementById('resultTable').style.display = 'none';
+
+    try {
+        const response = await fetch('/api/dynamic/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: jsonBody
+        });
+
+        document.getElementById('loading').style.display = 'none';
+
+        const resultData = await response.json();
+
+        // Check uspeshnost request
+        if (!response.ok) {
+            // Return error with full JSON otvetom
+            displayError(JSON.stringify(resultData));
+        } else {
+            displayResult(resultData, response.status);
+        }
+
+    } catch (error) {
+        document.getElementById('loading').style.display = 'none';
+        displayError(error.message);
+    }
+}
+
+// Display the result
+function displayResult(resultData, status) {
+    const resultInfo = document.getElementById('resultInfo');
+    const statusBadge = document.getElementById('statusBadge');
+    const messageText = document.getElementById('messageText');
+    const countText = document.getElementById('countText');
+    const table = document.getElementById('resultTable');
+    const tableHead = document.getElementById('tableHead');
+    const tableBody = document.getElementById('tableBody');
+
+    resultInfo.style.display = 'block';
+    table.style.display = 'table';
+
+    // Set status
+    statusBadge.textContent = `${status} ${getStatusText(status)}`;
+    statusBadge.className = 'status-badge ' + getStatusClass(status);
+
+    // Check format response: if this array, Use its directly
+    let data, count, message;
+    if (Array.isArray(resultData)) {
+        // Response arrived as chistyy array data
+        data = resultData;
+        count = resultData.length;
+        message = 'Query executed successfully';
+    } else {
+        // Response arrived as object {data: [...], count: N, message: "..."}
+        data = resultData.data || [];
+        count = resultData.count || data.length;
+        message = resultData.message || 'Query executed successfully';
+    }
+
+    messageText.textContent = message;
+    countText.textContent = `Записей: ${count}`;
+
+    // Clear table
+    tableHead.innerHTML = '';
+    tableBody.innerHTML = '';
+
+    // If is data, stroim table
+    if (data && data.length > 0) {
+        // Headers table
+        const headers = Object.keys(data[0]);
+        const headerRow = document.createElement('tr');
+        headers.forEach(header => {
+            const th = document.createElement('th');
+            th.textContent = header;
+            headerRow.appendChild(th);
+        });
+        tableHead.appendChild(headerRow);
+
+        // Rows data
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            headers.forEach(header => {
+                const td = document.createElement('td');
+                td.textContent = row[header] || 'NULL';
+                tr.appendChild(td);
+            });
+            tableBody.appendChild(tr);
+        });
+    } else {
+        // No data
+        const emptyRow = document.createElement('tr');
+        const emptyCell = document.createElement('td');
+        emptyCell.colSpan = 1;
+        emptyCell.textContent = 'Нет данных для отображения';
+        emptyCell.style.textAlign = 'center';
+        emptyCell.style.padding = '20px';
+        emptyRow.appendChild(emptyCell);
+        tableBody.appendChild(emptyRow);
+    }
+}
+
+
+// Otobrazhenie error
+function displayError(errorMessage) {
+    const resultInfo = document.getElementById('resultInfo');
+    const statusBadge = document.getElementById('statusBadge');
+    const messageText = document.getElementById('messageText');
+
+    resultInfo.style.display = 'block';
+    statusBadge.textContent = 'Ошибка';
+    statusBadge.className = 'status-badge status-error';
+
+    // Try Parse errorMessage as JSON if this vozmozhno
+    try {
+        const errorData = JSON.parse(errorMessage);
+        if (errorData.error) {
+            messageText.textContent = errorData.error;
+        } else if (errorData.message) {
+            messageText.textContent = errorData.message;
+        } else {
+            messageText.textContent = errorMessage;
+        }
+    } catch (e) {
+        // If not JSON, Use as is
+        messageText.textContent = errorMessage;
+    }
+
+    document.getElementById('resultTable').style.display = 'none';
+}
+
+// Get teksta status
+function getStatusText(status) {
+    const statusMap = {
+        200: 'OK',
+        201: 'Created',
+        400: 'Bad Request',
+        404: 'Not Found',
+        500: 'Internal Server Error'
+    };
+    return statusMap[status] || 'Unknown';
+}
+
+// Get klassa status
+function getStatusClass(status) {
+    if (status >= 200 && status < 300) return 'status-success';
+    if (status === 404) return 'status-not-found';
+    return 'status-error';
+}
+
+// Copying JSON in buffer
+function copyToClipboard() {
+    const jsonData = JSON.stringify(generateRequestJson(), null, 2);
+    navigator.clipboard.writeText(jsonData).then(() => {
+        alert('JSON скопирован в буфер обмена!');
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+    });
+}
+
+// Generate curl komandy
+function generateCurl() {
+    const requestData = generateRequestJson();
+    const method = requestData.method;
+    const table = requestData.table;
+
+    if (!table) {
+        alert('Пожалуйста, укажите имя таблицы');
+        return;
+    }
+
+    const url = window.location.origin + '/api/dynamic/';
+    let curlCommand;
+
+    // For POST/PUT/PATCH pass JSON in body
+    if (['POST', 'PUT', 'PATCH'].includes(method)) {
+        const jsonBody = JSON.stringify(requestData);
+        // Ekraniruem quotes for bash
+        const escapedJson = jsonBody.replace(/"/g, '\\"').replace(/\n/g, '');
+
+        curlCommand = `curl -X ${method} "${url}" \\
+  -H "Content-Type: application/json" \\
+  -d "${escapedJson}"`;
+    }
+    // Для GET и DELETE формируем query строку в специальном формате
+    else if (method === 'GET' || method === 'DELETE') {
+        // Формируем query строку в формате: (key:value;key2:[value1,value2])
+        let queryParts = [];
+
+        // Добавляем method
+        queryParts.push(`method:${method}`);
+
+        // Добавляем table
+        queryParts.push(`table:${table}`);
+
+        // Формируем query объект если есть параметры
+        if (requestData.query) {
+            const query = requestData.query;
+
+            // Fields
+            if (query.fields && query.fields.length > 0) {
+                queryParts.push(`fields:[${query.fields.join(',')}]`);
+            }
+
+            // Filters
+            if (query.filter && query.filter.length > 0) {
+                queryParts.push(`filters:[${query.filter.join(',')}]`);
+            }
+
+            // Joins
+            if (query.join && query.join.length > 0) {
+                queryParts.push(`joins:[${query.join.join(',')}]`);
+            }
+
+            // Group by
+            if (query.group_by && query.group_by.length > 0) {
+                queryParts.push(`groups:[${query.group_by.join(',')}]`);
+            }
+
+            // Order by
+            if (query.order_by && query.order_by.length > 0) {
+                queryParts.push(`orders:[${query.order_by.join(',')}]`);
+            }
+
+            // Having
+            if (query.having && query.having.length > 0) {
+                queryParts.push(`havings:[${query.having.join(',')}]`);
+            }
+
+            // Limit
+            if (query.limit !== undefined && query.limit >= 0) {
+                queryParts.push(`limit:${query.limit}`);
+            }
+        }
+
+        // Собираем все части через точку с запятой и оборачиваем в скобки
+        const queryString = `query=(${queryParts.join(';')})`;
+
+        curlCommand = `curl -X ${method} "${url}?${queryString}"`;
+    }
+
+    // Показываем curl команду в красивом формате
+    showCurlDialog(curlCommand);
+}
+
+// Показать диалог с curl командой
+function showCurlDialog(curlCommand) {
+    // Создаем модальное окно если его нет
+    let modal = document.getElementById('curlModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'curlModal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>📋 Curl команда</h3>
+                    <span class="close-btn" onclick="closeCurlModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <pre id="curlCode"></pre>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-success" onclick="copyCurlCommand()">Копировать</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeCurlModal()">Закрыть</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+
+    document.getElementById('curlCode').textContent = curlCommand;
+    modal.style.display = 'block';
+}
+
+// Закрыть модальное окно curl
+function closeCurlModal() {
+    const modal = document.getElementById('curlModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// Копировать curl команду
+function copyCurlCommand() {
+    const curlCode = document.getElementById('curlCode').textContent;
+    navigator.clipboard.writeText(curlCode).then(() => {
+        alert('Curl команда скопирована в буфер обмена!');
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+    });
+}
+
+// Очистка формы
+function clearForm() {
+    fields = [];
+    filters = [];
+    joins = [];
+    groups = [];
+    orders = [];
+    havings = [];
+
+    document.getElementById('method').value = 'GET';
+    document.getElementById('table').value = '';
+    document.getElementById('limit').value = '10';
+    dataEditor.setValue(JSON.stringify({
+        "name": "",
+        "description": ""
+    }, null, 2));
+
+    ['field', 'filter', 'join', 'group', 'order', 'having'].forEach(type => {
+        renderList(type);
+    });
+
+    document.getElementById('resultInfo').style.display = 'none';
+    document.getElementById('resultTable').style.display = 'none';
+    updateJsonPreview();
+}
+
+// Парсинг SQL запроса в параметры
+function parseSqlToParams() {
+    const sqlInput = document.getElementById('sqlInput').value.trim();
+
+    if (!sqlInput) {
+        alert('Введите SQL запрос');
+        return;
+    }
+
+    try {
+        // Очищаем текущие параметры
+        fields = [];
+        filters = [];
+        joins = [];
+        groups = [];
+        orders = [];
+        havings = [];
+
+        let method = 'GET';
+        let limit = 10;
+        let dataObj = {};
+
+        // Приводим к верхнему регистру для удобства парсинга
+        const sqlUpper = sqlInput.toUpperCase();
+
+        // Определяем тип запроса
+        if (sqlUpper.startsWith('SELECT')) {
+            method = 'GET';
+            parseSelectQuery(sqlInput, sqlUpper);
+        } else if (sqlUpper.startsWith('INSERT')) {
+            method = 'POST';
+            parseInsertQuery(sqlInput, sqlUpper);
+        } else if (sqlUpper.startsWith('UPDATE')) {
+            method = 'PUT';
+            parseUpdateQuery(sqlInput, sqlUpper);
+        } else if (sqlUpper.startsWith('DELETE')) {
+            method = 'DELETE';
+            parseDeleteQuery(sqlInput, sqlUpper);
+        } else {
+            alert('Неподдерживаемый тип SQL запроса. Используйте SELECT, INSERT, UPDATE или DELETE.');
+            return;
+        }
+
+        // Устанавливаем метод
+        document.getElementById('method').value = method;
+
+        // Получаем таблицу из поля ввода
+        const table = document.getElementById('table').value.trim();
+
+        // Обновляем списки на странице
+        ['field', 'filter', 'join', 'group', 'order', 'having'].forEach(type => {
+            renderList(type);
+        });
+
+        // Обновляем preview
+        updateJsonPreview();
+
+        // Показываем результат в модальном окне
+        showParseResultModal(method, table);
+
+    } catch (error) {
+        console.error('Ошибка парсинга SQL:', error);
+        alert('Ошибка при парсинге SQL: ' + error.message);
+    }
+}
+
+// Показать модальное окно с результатом парсинга
+function showParseResultModal(method, table) {
+    const modal = document.getElementById('parseResultModal');
+    const detailsBody = document.getElementById('parseResultBody');
+
+    // Формируем HTML с деталями
+    let html = `
+        <div class="parse-summary">
+            <div class="summary-item">
+                <span class="summary-label">Метод:</span>
+                <span class="summary-value method-${method.toLowerCase()}">${method}</span>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">Таблица:</span>
+                <span class="summary-value">${table || 'не определена'}</span>
+            </div>
+        </div>
+
+        <div class="parse-details">
+    `;
+
+    // Добавляем секции только если есть данные
+    if (fields.length > 0) {
+        html += `
+            <div class="detail-section">
+                <h4>📋 Поля (${fields.length})</h4>
+                <ul class="detail-list">
+                    ${fields.map(f => `<li><code>${f}</code></li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    if (filters.length > 0) {
+        html += `
+            <div class="detail-section">
+                <h4>🔍 Фильтры (${filters.length})</h4>
+                <ul class="detail-list">
+                    ${filters.map(f => `<li><code>${f}</code></li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    if (joins.length > 0) {
+        html += `
+            <div class="detail-section">
+                <h4>🔗 JOIN'ы (${joins.length})</h4>
+                <ul class="detail-list">
+                    ${joins.map(j => `<li><code>${j}</code></li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    if (groups.length > 0) {
+        html += `
+            <div class="detail-section">
+                <h4>📊 Группировка (${groups.length})</h4>
+                <ul class="detail-list">
+                    ${groups.map(g => `<li><code>${g}</code></li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    if (havings.length > 0) {
+        html += `
+            <div class="detail-section">
+                <h4>🎯 HAVING (${havings.length})</h4>
+                <ul class="detail-list">
+                    ${havings.map(h => `<li><code>${h}</code></li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    if (orders.length > 0) {
+        html += `
+            <div class="detail-section">
+                <h4>📈 Сортировка (${orders.length})</h4>
+                <ul class="detail-list">
+                    ${orders.map(o => `<li><code>${o}</code></li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    // Для POST/PUT/PATCH показываем данные
+    if (['POST', 'PUT', 'PATCH'].includes(method)) {
+        try {
+            const dataJson = JSON.parse(dataEditor.getValue());
+            const dataKeys = Object.keys(dataJson);
+            if (dataKeys.length > 0) {
+                html += `
+                    <div class="detail-section">
+                        <h4>💾 Данные (${dataKeys.length})</h4>
+                        <ul class="detail-list">
+                            ${dataKeys.map(key => `<li><code>${key}: ${JSON.stringify(dataJson[key])}</code></li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+        } catch (e) {
+            // Игнорируем ошибки парсинга JSON
+        }
+    }
+
+    // LIMIT
+    const limitValue = document.getElementById('limit').value;
+    if (limitValue && parseInt(limitValue) >= 0) {
+        html += `
+            <div class="detail-section">
+                <h4>⏱️ LIMIT</h4>
+                <ul class="detail-list">
+                    <li><code>${limitValue}</code></li>
+                </ul>
+            </div>
+        `;
+    }
+
+    html += `</div>`;
+
+    detailsBody.innerHTML = html;
+    modal.style.display = 'block';
+}
+
+// Закрыть модальное окно результата парсинга
+function closeParseResultModal() {
+    const modal = document.getElementById('parseResultModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// Выполнить запрос из модального окна
+function executeFromModal() {
+    // Закрываем модальное окно
+    closeParseResultModal();
+
+    // Выполняем запрос с небольшой задержкой, чтобы окно успело закрыться
+    setTimeout(() => {
+        generateAndSend();
+    }, 100);
+}
+
+// Парсинг SELECT запроса
+function parseSelectQuery(sql, sqlUpper) {
+    // Извлекаем таблицу из FROM
+    const fromMatch = sql.match(/FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+    if (fromMatch) {
+        document.getElementById('table').value = fromMatch[1];
+    }
+
+    // Извлекаем поля между SELECT и FROM
+    const selectMatch = sql.match(/SELECT\s+(.*?)\s+FROM/i);
+    if (selectMatch && selectMatch[1].trim() !== '*') {
+        // Разделяем по запятой и убираем пробелы
+        const fieldList = selectMatch[1].split(',').map(f => f.trim());
+        fields.push(...fieldList);
+    }
+
+    // Извлекаем WHERE условия
+    const whereMatch = sql.match(/WHERE\s+(.*?)(?:GROUP BY|ORDER BY|LIMIT|$)/i);
+    if (whereMatch) {
+        const conditions = whereMatch[1].split(/\s+AND\s+/i);
+        conditions.forEach(cond => {
+            const trimmed = cond.trim();
+            if (trimmed) filters.push(trimmed);
+        });
+    }
+
+    // Извлекаем JOIN
+    const joinMatches = sql.matchAll(/(LEFT\s+|RIGHT\s+|INNER\s+|FULL\s+)?JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+ON\s+([^W]+?)(?=\s+WHERE|\s+GROUP|\s+ORDER|\s+LIMIT|$)/gi);
+    for (const match of joinMatches) {
+        const joinType = (match[1] || '').trim().toUpperCase() + 'JOIN';
+        const joinTable = match[2];
+        const joinCondition = match[3].trim();
+        joins.push(`${joinType} ${joinTable} ON ${joinCondition}`);
+    }
+
+    // Извлекаем GROUP BY
+    const groupMatch = sql.match(/GROUP BY\s+(.*?)(?:HAVING|ORDER BY|LIMIT|$)/i);
+    if (groupMatch) {
+        const groupFields = groupMatch[1].split(',').map(f => f.trim());
+        groups.push(...groupFields);
+    }
+
+    // Извлекаем HAVING
+    const havingMatch = sql.match(/HAVING\s+(.*?)(?:ORDER BY|LIMIT|$)/i);
+    if (havingMatch) {
+        const havingConditions = havingMatch[1].split(/\s+AND\s+/i);
+        havingConditions.forEach(cond => {
+            const trimmed = cond.trim();
+            if (trimmed) havings.push(trimmed);
+        });
+    }
+
+    // Извлекаем ORDER BY
+    const orderMatch = sql.match(/ORDER BY\s+(.*?)(?:LIMIT|$)/i);
+    if (orderMatch) {
+        const orderFields = orderMatch[1].split(',').map(f => f.trim());
+        orders.push(...orderFields);
+    }
+
+    // Извлекаем LIMIT
+    const limitMatch = sql.match(/LIMIT\s+(\d+)/i);
+    if (limitMatch) {
+        document.getElementById('limit').value = limitMatch[1];
+    }
+}
+
+// Парсинг INSERT запроса
+function parseInsertQuery(sql, sqlUpper) {
+    // Извлекаем таблицу
+    const insertMatch = sql.match(/INSERT INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+    if (insertMatch) {
+        document.getElementById('table').value = insertMatch[1];
+    }
+
+    // Извлекаем поля и значения
+    const valuesMatch = sql.match(/VALUES\s*\((.*?)\)/i);
+    const fieldsMatch = sql.match(/\((.*?)\)\s*VALUES/i);
+
+    if (valuesMatch && fieldsMatch) {
+        const fieldNames = fieldsMatch[1].split(',').map(f => f.trim());
+        const values = valuesMatch[1].split(',').map(v => v.trim());
+
+        // Создаем объект данных
+        fieldNames.forEach((field, index) => {
+            if (values[index]) {
+                let value = values[index].replace(/^['"]|['"]$/g, ''); // Убираем кавычки
+                dataObj[field] = value;
+            }
+        });
+
+        dataEditor.setValue(JSON.stringify(dataObj, null, 2));
+    }
+}
+
+// Парсинг UPDATE запроса
+function parseUpdateQuery(sql, sqlUpper) {
+    // Извлекаем таблицу
+    const updateMatch = sql.match(/UPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+    if (updateMatch) {
+        document.getElementById('table').value = updateMatch[1];
+    }
+
+    // Извлекаем SET значения
+    const setMatch = sql.match(/SET\s+(.*?)(?:WHERE|$)/i);
+    if (setMatch) {
+        const assignments = setMatch[1].split(',');
+        assignments.forEach(assign => {
+            const parts = assign.split('=');
+            if (parts.length === 2) {
+                const fieldName = parts[0].trim();
+                let fieldValue = parts[1].trim().replace(/^['"]|['"]$/g, '');
+                dataObj[fieldName] = fieldValue;
+            }
+        });
+
+        dataEditor.setValue(JSON.stringify(dataObj, null, 2));
+    }
+
+    // Извлекаем WHERE условия
+    const whereMatch = sql.match(/WHERE\s+(.*)/i);
+    if (whereMatch) {
+        const conditions = whereMatch[1].split(/\s+AND\s+/i);
+        conditions.forEach(cond => {
+            const trimmed = cond.trim();
+            if (trimmed) filters.push(trimmed);
+        });
+    }
+}
+
+// Парсинг DELETE запроса
+function parseDeleteQuery(sql, sqlUpper) {
+    // Извлекаем таблицу
+    const deleteMatch = sql.match(/DELETE FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+    if (deleteMatch) {
+        document.getElementById('table').value = deleteMatch[1];
+    }
+
+    // Извлекаем WHERE условия
+    const whereMatch = sql.match(/WHERE\s+(.*)/i);
+    if (whereMatch) {
+        const conditions = whereMatch[1].split(/\s+AND\s+/i);
+        conditions.forEach(cond => {
+            const trimmed = cond.trim();
+            if (trimmed) filters.push(trimmed);
+        });
+    }
+}
+
+// Инициализация после загрузки DOM
+document.addEventListener('DOMContentLoaded', function() {
+    initializeEditor();
+    updateJsonPreview();
+
+    // Добавляем обработчики изменений для автообновления превью
+    document.getElementById('method').addEventListener('change', updateJsonPreview);
+    document.getElementById('table').addEventListener('input', function(event) {
+        updateJsonPreview();
+
+        if (tableAutocompleteTimer) {
+            clearTimeout(tableAutocompleteTimer);
+        }
+
+        const query = event.target.value.trim();
+        tableAutocompleteTimer = setTimeout(() => {
+            fetchTableSuggestions(query);
+        }, 180);
+    });
+    document.getElementById('table').addEventListener('focus', function(event) {
+        fetchTableSuggestions(event.target.value.trim());
+    });
+    document.getElementById('fieldInput').addEventListener('input', function(event) {
+        if (fieldAutocompleteTimer) {
+            clearTimeout(fieldAutocompleteTimer);
+        }
+
+        const currentValue = event.target.value;
+        fieldAutocompleteTimer = setTimeout(() => {
+            fetchFieldSuggestions(currentValue);
+        }, 180);
+    });
+    document.getElementById('fieldInput').addEventListener('focus', function(event) {
+        fetchFieldSuggestions(event.target.value);
+    });
+    document.getElementById('tablesSearchInput').addEventListener('input', function() {
+        if (tablesSearchTimer) {
+            clearTimeout(tablesSearchTimer);
+        }
+        tablesSearchTimer = setTimeout(() => {
+            loadTablesList();
+        }, 250);
+    });
+    document.getElementById('limit').addEventListener('input', updateJsonPreview);
+
+    // Добавляем обработчик для dataEditor
+    dataEditor.on('change', function() {
+        updateJsonPreview();
+    });
+
+    // Обработчик смены HTTP метода - автоматическое управление LIMIT
+    document.getElementById('method').addEventListener('change', function() {
+        const method = this.value;
+        const limitInput = document.getElementById('limit');
+
+        if (method === 'GET') {
+            // Для GET восстанавливаем limit по умолчанию (10)
+            limitInput.value = '10';
+            limitInput.disabled = false;
+        } else {
+            // Для POST, PUT, PATCH, DELETE - убираем limit
+            limitInput.value = '-1';
+            limitInput.disabled = true;
+        }
+
+        updateJsonPreview();
+    });
+
+    fetchTableSuggestions('');
+});
+</script>
+
+</body>
+</html>

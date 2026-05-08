@@ -1,0 +1,13 @@
+# Qornix Web Server configuration
+
+server:
+  address: 127.0.0.1
+  port: 8008
+
+logging:
+  enabled: false
+  level: info              # trace, debug, info, warning, error, fatal
+  to_file: false
+  file_path: logs/server
+  rotation_size: 10485760  # 10 MB
+  max_files: 5

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application>
+    <Name>Wiki Example</Name>
+    <Version>1.0.0</Version>
+    <Description>SQLite-backed team wiki schema for the Qornix Web example</Description>
+
+    <Configuration>
+        <DbConnectionString>sqlite:///wiki.sqlite</DbConnectionString>
+        <LogLevel>INFO</LogLevel>
+        <Timeout>30</Timeout>
+        <DatabaseEngine>sqlite</DatabaseEngine>
+    </Configuration>
+
+    <DataStructure>
+        <Entity name="WikiArticle" tableName="wiki_articles" verboseName="Wiki Article" verboseNamePlural="Wiki Articles">
+            <Field name="id" type="INTEGER" primaryKey="true" nullable="false" autoIncrement="true" />
+            <Field name="title" type="VARCHAR" maxLength="140" nullable="false" />
+            <Field name="slug" type="VARCHAR" maxLength="180" unique="true" nullable="false" />
+            <Field name="summary" type="TEXT" nullable="false" />
+            <Field name="content" type="TEXT" nullable="false" />
+            <Field name="category" type="VARCHAR" maxLength="80" nullable="false" />
+            <Field name="status" type="VARCHAR" maxLength="20" nullable="false" defaultValue="'draft'" />
+            <Field name="author" type="VARCHAR" maxLength="80" nullable="false" />
+            <Field name="tags" type="TEXT" nullable="false" defaultValue="''" />
+            <Field name="template" type="VARCHAR" maxLength="40" nullable="false" defaultValue="'Guide'" />
+            <Field name="reading_time" type="INTEGER" nullable="false" defaultValue="4" />
+            <Field name="favorite" type="BOOLEAN" nullable="false" defaultValue="0" />
+            <Field name="views" type="INTEGER" nullable="false" defaultValue="0" />
+            <Field name="created_at" type="DATETIME" nullable="false" defaultValue="CURRENT_TIMESTAMP" />
+            <Field name="updated_at" type="DATETIME" nullable="false" defaultValue="CURRENT_TIMESTAMP" />
+
+            <Index name="idx_wiki_articles_category">
+                <FieldName>category</FieldName>
+            </Index>
+            <Index name="idx_wiki_articles_status">
+                <FieldName>status</FieldName>
+            </Index>
+            <Index name="idx_wiki_articles_updated_at">
+                <FieldName>updated_at</FieldName>
+            </Index>
+        </Entity>
+
+        <Entity name="WikiActivity" tableName="wiki_activity" verboseName="Wiki Activity" verboseNamePlural="Wiki Activity">
+            <Field name="id" type="INTEGER" primaryKey="true" nullable="false" autoIncrement="true" />
+            <ForeignKeyField name="article_id" type="FOREIGN_KEY" nullable="true" references="wiki_articles" toField="id" onDelete="SET NULL" />
+            <Field name="actor" type="VARCHAR" maxLength="80" nullable="false" />
+            <Field name="action" type="VARCHAR" maxLength="120" nullable="false" />
+            <Field name="detail" type="TEXT" nullable="false" />
+            <Field name="created_at" type="DATETIME" nullable="false" defaultValue="CURRENT_TIMESTAMP" />
+
+            <Index name="idx_wiki_activity_created_at">
+                <FieldName>created_at</FieldName>
+            </Index>
+        </Entity>
+
+        <Entity name="Users" tableName="users" verboseName="User" verboseNamePlural="Users">
+            <Field name="id" type="INTEGER" primaryKey="true" nullable="false" autoIncrement="true" />
+            <Field name="username" type="VARCHAR" maxLength="80" unique="true" nullable="false" />
+            <Field name="email" type="VARCHAR" maxLength="120" nullable="false" />
+            <Field name="password_hash" type="TEXT" nullable="false" />
+            <Field name="salt" type="TEXT" nullable="false" />
+            <Field name="is_active" type="BOOLEAN" nullable="false" defaultValue="1" />
+            <Field name="created_at" type="DATETIME" nullable="false" defaultValue="CURRENT_TIMESTAMP" />
+            <Field name="last_login_at" type="DATETIME" nullable="true" />
+
+            <Index name="idx_users_username">
+                <FieldName>username</FieldName>
+            </Index>
+            <Index name="idx_users_email">
+                <FieldName>email</FieldName>
+            </Index>
+        </Entity>
+    </DataStructure>
+
+    <DatabaseMapping>
+        <TypeMapping>
+            <TypeMap appType="INTEGER" postgresqlType="INTEGER" mysqlType="INT" sqliteType="INTEGER" />
+            <TypeMap appType="VARCHAR" postgresqlType="VARCHAR" mysqlType="VARCHAR" sqliteType="TEXT" />
+            <TypeMap appType="TEXT" postgresqlType="TEXT" mysqlType="TEXT" sqliteType="TEXT" />
+            <TypeMap appType="BOOLEAN" postgresqlType="BOOLEAN" mysqlType="TINYINT" sqliteType="INTEGER" />
+            <TypeMap appType="DATETIME" postgresqlType="TIMESTAMP" mysqlType="DATETIME" sqliteType="TEXT" />
+            <TypeMap appType="FOREIGN_KEY" postgresqlType="INTEGER" mysqlType="INT" sqliteType="INTEGER" />
+        </TypeMapping>
+    </DatabaseMapping>
+</Application>

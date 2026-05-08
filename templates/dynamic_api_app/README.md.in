@@ -1,0 +1,240 @@
+# @PROJECT_NAME@
+
+Generated Qornix Web application with Schema-driven Dynamic API enabled. The template includes a bundled first-run demo schema so a new user can apply a real schema immediately, seed data and explore queries without writing XML from scratch.
+
+This template is intended to showcase the full schema-driven backend flow out of the box:
+
+1. Manage XML schema safely.
+2. Apply a confirmed schema plan.
+3. Explore metadata-backed queries visually.
+4. Browse table data.
+5. Open, update or delete a single row.
+6. Run API recipes.
+7. Read generated OpenAPI docs and text specifications for schema XML and query payloads.
+
+## Build and run
+
+```bash
+mkdir -p build
+cd build
+cmake ..
+cmake --build .
+```
+
+The default build creates both the raw executable and a portable deploy bundle:
+
+```text
+build/@PROJECT_NAME@
+build/deploy/@PROJECT_NAME@/
+```
+
+For normal use, run the application from the deploy bundle:
+
+```bash
+cd build/deploy/@PROJECT_NAME@
+./@PROJECT_NAME@
+```
+
+Open:
+
+```text
+http://127.0.0.1:8008/
+```
+
+## Portable deployment
+
+The generated project is configured to assemble a self-contained application directory during `cmake --build .`:
+
+```text
+build/deploy/@PROJECT_NAME@/
+├── @PROJECT_NAME@
+├── config.yaml
+├── README.md
+├── templates/
+├── static/
+├── schema/
+│   ├── app.schema.xml
+│   └── schema_app.xsd
+├── doc/
+└── logs/
+```
+
+You can copy the whole `build/deploy/@PROJECT_NAME@` directory to another directory on the same machine, or to another Linux machine that has compatible runtime shared libraries installed. The app discovers its root at runtime in this order:
+
+```text
+QORNIX_APP_ROOT environment variable
+directory containing the executable
+parent of the executable directory
+current working directory
+parent of current working directory
+compile-time source directory as a development fallback
+```
+
+This means these launch styles are supported:
+
+```bash
+# Run from inside the bundle
+cd build/deploy/@PROJECT_NAME@
+./@PROJECT_NAME@
+
+# Run by absolute path from another working directory
+/path/to/deploy/@PROJECT_NAME@/@PROJECT_NAME@
+
+# Override the app root explicitly
+QORNIX_APP_ROOT=/path/to/deploy/@PROJECT_NAME@ /path/to/@PROJECT_NAME@
+```
+
+The deployment bundle includes Qornix application assets, HTML templates, CSS/JS, docs, the demo XML schema and the local `schema_app.xsd`. It does not bundle system shared libraries. If you move the bundle to another machine, make sure required runtime libraries such as Boost, SQLite, yaml-cpp, pugixml, libxml2 and libstdc++ are available there, or build/link them according to your packaging policy. Use `ldd ./@PROJECT_NAME@` on Linux to inspect runtime dependencies.
+
+Manual deploy target:
+
+```bash
+cmake --build . --target @PROJECT_NAME@_deploy
+```
+
+Install-style layout is also available:
+
+```bash
+cmake --install . --prefix /opt/@PROJECT_NAME@
+```
+
+## Pages
+
+```text
+GET /                    application landing page and first-run wizard
+GET /schema-manager      Schema Manager UI for validate/diff/plan/apply
+GET /query-builder       visual structured query builder
+GET /table               table browser with filters, fields and sorting
+GET /table/{table}/{id}  row view with inline update/delete
+GET /api-playground      ready-made Dynamic API recipes
+GET /docs                lightweight OpenAPI viewer
+GET /docs/schema         human-readable Schema Manager and XML schema guide
+GET /docs/query-syntax   human-readable Dynamic API query contract
+GET /openapi.json        raw OpenAPI document
+```
+
+## Recommended first run
+
+1. Open `/`.
+2. Click `Initialize demo database`, or open `/schema-manager`, click `Load demo schema`, then run `Validate -> Diff -> Plan -> Apply live plan`.
+3. Click `Initialize demo data`.
+4. Open `/query-builder` and build a structured request.
+5. Open `/table`, choose `products`, and click a row id to open Row View.
+6. Open `/api-playground` to run copyable frontend recipes.
+7. Open `/docs` to inspect generated OpenAPI paths.
+8. Open `/docs/schema` to read the XML schema and Schema Manager guide.
+9. Open `/docs/query-syntax` to read the text specification for query payloads.
+
+## Dynamic API endpoints
+
+```text
+GET  /api/dynamic/meta/tables
+GET  /api/dynamic/meta/{table}/fields
+GET  /api/dynamic/meta/{table}/fields-info
+GET  /api/dynamic/meta/autocomplete
+GET  /api/dynamic/meta/allowlist
+POST /api/dynamic
+GET  /api/dynamic/{table}
+POST /api/dynamic/{table}
+GET  /api/dynamic/{table}/{id}
+PUT  /api/dynamic/{table}/{id}
+PATCH /api/dynamic/{table}/{id}
+DELETE /api/dynamic/{table}/{id}
+```
+
+## Schema endpoints
+
+```text
+GET  /api/dynamic/schema/export
+POST /api/dynamic/schema/validate
+POST /api/dynamic/schema/diff
+POST /api/dynamic/schema/plan
+POST /api/dynamic/schema/apply
+GET  /api/dynamic/schema/history
+GET  /api/dynamic/schema.xml
+GET  /api/dynamic/openapi.json
+```
+
+## Files to edit
+
+```text
+routes.h                         register application routes
+schema/app.schema.xml             bundled demo XML data model and editable desired schema
+templates/home.html               landing page and first-run wizard
+templates/schema_manager.html     Schema Manager UI shell
+templates/query_builder.html      visual query builder
+templates/table.html              table browser
+templates/row_view.html           single-row editor
+templates/api_playground.html     API recipes
+templates/docs.html               OpenAPI viewer
+templates/schema_docs.html        rendered schema documentation
+templates/query_syntax.html       rendered query contract documentation
+doc/schema_manager_guide.md       Markdown Schema Manager and XML schema documentation
+doc/dynamic_api_query_syntax.md   Markdown query contract documentation
+static/dynamic_api.css            shared UI styles
+static/demo_schema.xml             browser-loadable copy of the bundled demo schema
+static/schema_manager_guide.md     browser-loadable Markdown schema guide
+static/schema_app.xsd              browser-loadable raw schema XSD
+schema/schema_app.xsd              local XSD used by deployed Schema Manager validation
+static/dynamic_api_browser.js     query/table/row/docs/playground behavior
+static/schema_manager.js          Schema Manager behavior
+```
+
+
+## Bundled demo schema
+
+The generated app starts with a ready-to-apply schema in two places:
+
+```text
+schema/app.schema.xml
+static/demo_schema.xml
+```
+
+It creates four tables for the first run:
+
+```text
+categories
+customers
+products
+orders
+```
+
+Use `/schema-manager` -> `Load demo schema` to load it into the editor. `Build plan` is a preview step. `Apply live plan` changes `app.sqlite3` unless `Only dry-run` is checked.
+
+
+## Showcase pages
+
+- `/query-builder` includes a SQL-to-payload Query Builder, structured WHERE, raw filter strings, JOIN, GROUP BY, HAVING, ORDER BY, LIMIT and write payload examples.
+- `/api-playground` presents beginner-friendly recipes in a two-column layout: choose a recipe on the left and inspect request/response on the right.
+- The generated app enables `allowRawJoin` for the showcase so users can test JOIN examples immediately.
+
+
+### One-click demo setup
+
+The generated app exposes `POST /api/demo/setup`. It resets only the generated app SQLite database, writes the bundled demo schema, creates `categories`, `customers`, `products`, `orders`, and seeds rows used by `/query-builder`, `/table`, and `/api-playground`.
+
+
+
+## Schema documentation
+
+The generated app includes a text guide for the Schema Manager workflow and XML schema contract:
+
+```text
+GET /docs/schema
+doc/schema_manager_guide.md
+static/schema_manager_guide.md
+static/schema_app.xsd
+```
+
+Use it as the onboarding reference for editing `schema/app.schema.xml`, understanding `Application`, `Configuration`, `DataStructure`, `Entity`, `Field`, `ForeignKeyField`, `Index`, validation errors, diff output, plan output, apply confirmations and schema history.
+
+## Query syntax documentation
+
+The generated app includes a text specification for the current Dynamic API query contract:
+
+```text
+GET /docs/query-syntax
+doc/dynamic_api_query_syntax.md
+```
+
+Use it as the authoritative onboarding reference for JSON envelopes sent to `POST /api/dynamic`, table-specific CRUD shortcuts, metadata endpoints, structured `where`, raw `filter`, `join`, `group_by`, `having`, sorting and limits.

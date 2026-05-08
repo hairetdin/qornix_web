@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qornix Row View</title>
+  <link rel="stylesheet" href="/static/dynamic_api.css">
+</head>
+<body data-qdb-page="row-view">
+<div class="qdx-shell">
+  <header class="qdx-topbar">
+    <a class="qdx-brand" href="/"><span class="qdx-brand-mark">Qx</span><span><strong>Qornix Web</strong><small>Row View</small></span></a>
+    <nav class="qdx-nav">
+      <a href="/">Home</a><a href="/schema-manager">Schema Manager</a><a href="/query-builder">Query Builder</a><a href="/table">Table Browser</a><a href="/api-playground">API Playground</a><a href="/docs">Docs</a>
+    </nav>
+  </header>
+
+  <section class="qdx-card qdx-page-intro">
+    <p class="qdx-kicker">Dynamic row editor</p>
+    <h1 id="qdb-row-title">Row View</h1>
+    <p class="qdx-lead">Load one record through <code>/api/dynamic/{table}/{id}</code>, inspect fields, update values inline or delete the row.</p>
+  </section>
+
+  <section class="qdx-grid qdx-grid-2">
+    <article class="qdx-card">
+      <h2>Record</h2>
+      <div id="qdb-row-form" class="qdb-form-grid"><div class="qdb-empty">Loading row...</div></div>
+      <div class="qdx-actions qdb-toolbar">
+        <button id="qdb-row-refresh" type="button">Reload</button>
+        <button id="qdb-row-save" type="button">Save changes</button>
+        <button id="qdb-row-delete" type="button" class="qdx-btn-secondary">Delete row</button>
+      </div>
+      <div id="qdb-status" class="qdb-status muted">Ready.</div>
+    </article>
+    <article class="qdx-card">
+      <h2>API response</h2>
+      <pre id="qdb-result-json" class="qdx-code qdx-scroll">Response will appear here.</pre>
+      <h2>Update payload</h2>
+      <pre id="qdb-json-preview" class="qdx-code qdx-scroll"></pre>
+    </article>
+  </section>
+
+  <footer class="qdx-footer"><span>Back to the table list.</span><a id="qdb-row-back" href="/table">Open Table Browser</a></footer>
+</div>
+<script src="/static/dynamic_api_browser.js"></script>
+</body>
+</html>

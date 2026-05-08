@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application>
+    <Name>Qornix Sample App</Name>
+    <Version>3.0.0</Version>
+    <Description>A sample application demonstrating the Qornix schema structure with client entity</Description>
+
+    <Configuration>
+        <DbConnectionString>postgresql://user:password@localhost:5432/mydb</DbConnectionString>
+        <LogLevel>INFO</LogLevel>
+        <Timeout>30</Timeout>
+        <DatabaseEngine>postgresql</DatabaseEngine>
+    </Configuration>
+
+    <DataStructure>
+        <!-- User Entity -->
+        <Entity name="User" tableName="users" verboseName="User" verboseNamePlural="Users">
+            <Field name="id" type="INTEGER" primaryKey="true" />
+            <Field name="username" type="VARCHAR" maxLength="50" unique="true" />
+            <Field name="email" type="VARCHAR" maxLength="100" />
+            <Field name="created_at" type="TIMESTAMP" />
+            <Field name="is_active" type="BOOLEAN" defaultValue="true" />
+
+            <ForeignKeyField name="profile_id" type="FOREIGN_KEY" references="profiles" toField="id" onDelete="CASCADE" />
+
+            <Index name="idx_user_email" unique="true">
+                <FieldName>email</FieldName>
+            </Index>
+
+            <Constraint constraintName="chk_email_format" type="CHECK">
+                <Name>Email Format Check</Name>
+                <Expression>email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'</Expression>
+            </Constraint>
+
+            <EntityFunctions>
+                <Function name="get_full_name" language="python">
+                    <Name>Get Full Name</Name>
+                    <Description>Returns the full name of the user</Description>
+                    <Parameters>
+                        <Parameter name="first_name" type="VARCHAR" required="true" />
+                        <Parameter name="last_name" type="VARCHAR" required="true" />
+                    </Parameters>
+                    <ReturnType>VARCHAR</ReturnType>
+                    <Code>
+def get_full_name(first_name, last_name):
+    return f"{first_name} {last_name}".strip()
+                    </Code>
+                </Function>
+
+                <Function name="calculate_age" language="cpp" fileName="user_utils.so">
+                    <Name>Calculate Age</Name>
+                    <Description>Calculates user age based on birth date</Description>
+                    <Parameters>
+                        <Parameter name="birth_date" type="DATE" required="true" />
+                    </Parameters>
+                    <ReturnType>INTEGER</ReturnType>
+                </Function>
+            </EntityFunctions>
+        </Entity>
+
+        <!-- Profile Entity -->
+        <Entity name="Profile" tableName="profiles">
+            <Field name="id" type="INTEGER" primaryKey="true" />
+            <Field name="first_name" type="VARCHAR" maxLength="50" />
+            <Field name="last_name" type="VARCHAR" maxLength="50" />
+            <Field name="bio" type="TEXT" />
+            <Field name="birth_date" type="DATE" />
+        </Entity>
+
+        <!-- Client Entity -->
+        <Entity name="Client" tableName="clients" verboseName="Client" verboseNamePlural="Clients">
+            <Field name="id" type="INTEGER" primaryKey="true" />
+            <Field name="company_name" type="VARCHAR" maxLength="100" />
+            <Field name="contact_person" type="VARCHAR" maxLength="100" />
+            <Field name="email" type="VARCHAR" maxLength="100" />
+            <Field name="phone" type="VARCHAR" maxLength="20" />
+            <Field name="address" type="TEXT" />
+            <Field name="created_at" type="TIMESTAMP" />
+            <Field name="is_active" type="BOOLEAN" defaultValue="true" />
+
+            <Index name="idx_client_email" unique="true">
+                <FieldName>email</FieldName>
+            </Index>
+
+            <Index name="idx_client_company">
+                <FieldName>company_name</FieldName>
+            </Index>
+
+            <Constraint constraintName="chk_client_email_format" type="CHECK">
+                <Name>Client Email Format Check</Name>
+                <Expression>email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'</Expression>
+            </Constraint>
+
+            <EntityFunctions>
+                <Function name="get_client_display_name" language="python">
+                    <Name>Get Client Display Name</Name>
+                    <Description>Returns the display name for the client</Description>
+                    <Parameters>
+                        <Parameter name="company_name" type="VARCHAR" required="true" />
+                        <Parameter name="contact_person" type="VARCHAR" required="false" />
+                    </Parameters>
+                    <ReturnType>VARCHAR</ReturnType>
+                    <Code>
+def get_client_display_name(company_name, contact_person=None):
+    if contact_person:
+        return f"{company_name} ({contact_person})"
+    return company_name
+                    </Code>
+                </Function>
+            </EntityFunctions>
+        </Entity>
+
+        <Entity name="Product" tableName="products" verboseName="Product" verboseNamePlural="Products">
+            <Field name="id" type="INTEGER" primaryKey="true" />
+            <Field name="name" type="VARCHAR" maxLength="100" />
+            <Field name="price" type="DECIMAL" />
+            <Field name="created_at" type="TIMESTAMP" />
+
+            <Index name="idx_product_name" unique="false">
+                <FieldName>name</FieldName>
+            </Index>
+
+            <EntityFunctions>
+                <Function name="calculate_discount" language="python">
+                    <Name>Calculate Discount</Name>
+                    <Description>Calculates discount for the product</Description>
+                    <Parameters>
+                        <Parameter name="price" type="DECIMAL" required="true" />
+                        <Parameter name="discount_percent" type="FLOAT" required="true" />
+                    </Parameters>
+                    <ReturnType>DECIMAL</ReturnType>
+                    <Code>
+                        def calculate_discount(price, discount_percent):
+                        return round(float(price) * (float(discount_percent) / 100), 2)
+                    </Code>
+                </Function>
+            </EntityFunctions>
+        </Entity>
+
+        <!-- Order Entity with ForeignKey relationship -->
+        <Entity name="Order" tableName="orders" verboseName="Order" verboseNamePlural="Orders">
+            <Field name="id" type="INTEGER" primaryKey="true" />
+            <Field name="order_number" type="VARCHAR" maxLength="50" unique="true" />
+            <Field name="order_date" type="TIMESTAMP" />
+            <Field name="total_amount" type="DECIMAL" />
+            <Field name="status" type="VARCHAR" maxLength="20" defaultValue="pending" />
+
+            <!-- Foreign key to User entity -->
+            <ForeignKeyField name="user_id" type="FOREIGN_KEY" references="users" toField="id" onDelete="CASCADE" onUpdate="CASCADE" />
+
+            <!-- Foreign key to Client entity -->
+            <ForeignKeyField name="client_id" type="FOREIGN_KEY" references="clients" toField="id" onDelete="SET NULL" />
+
+            <Index name="idx_order_user" unique="false">
+                <FieldName>user_id</FieldName>
+            </Index>
+
+            <Index name="idx_order_date">
+                <FieldName>order_date</FieldName>
+            </Index>
+
+            <Constraint constraintName="chk_order_status" type="CHECK">
+                <Name>Order Status Check</Name>
+                <Expression>status IN ('pending', 'processing', 'shipped', 'delivered', 'cancelled')</Expression>
+            </Constraint>
+
+            <EntityFunctions>
+                <Function name="calculate_tax" language="python">
+                    <Name>Calculate Tax</Name>
+                    <Description>Calculates tax for the order</Description>
+                    <Parameters>
+                        <Parameter name="amount" type="DECIMAL" required="true" />
+                        <Parameter name="tax_rate" type="FLOAT" required="true" />
+                    </Parameters>
+                    <ReturnType>DECIMAL</ReturnType>
+                    <Code>
+def calculate_tax(amount, tax_rate):
+    """Calculate tax amount based on amount and tax rate"""
+    return round(float(amount) * float(tax_rate), 2)
+                    </Code>
+                </Function>
+
+                <Function name="validate_order_status" language="python">
+                    <Name>Validate Order Status</Name>
+                    <Description>Validates if the order status is valid</Description>
+                    <Parameters>
+                        <Parameter name="status" type="VARCHAR" required="true" />
+                    </Parameters>
+                    <ReturnType>BOOLEAN</ReturnType>
+                    <Code>
+def validate_order_status(status):
+    """Check if the provided status is valid"""
+    valid_statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled']
+    return status.lower() in valid_statuses
+                    </Code>
+                </Function>
+            </EntityFunctions>
+        </Entity>
+
+        <Views>
+            <View viewName="active_users_view" isUpdatable="false">
+                <Name>Active Users</Name>
+                <Description>View of all active users</Description>
+                <Query>SELECT u.id, u.username, u.email, p.first_name, p.last_name FROM users u JOIN profiles p ON u.profile_id = p.id WHERE u.is_active = true</Query>
+            </View>
+
+            <View viewName="active_clients_view" isUpdatable="false">
+                <Name>Active Clients</Name>
+                <Description>View of all active clients</Description>
+                <Query>SELECT id, company_name, contact_person, email FROM clients WHERE is_active = true</Query>
+            </View>
+        </Views>
+
+        <DatabaseFunctions>
+            <DatabaseFunction functionName="generate_slug" language="sql" volatile="STABLE">
+                <Name>Generate Slug</Name>
+                <Description>Generates a URL-friendly slug from text</Description>
+                <Parameters>
+                    <Parameter name="input_text" type="VARCHAR" />
+                </Parameters>
+                <ReturnType>VARCHAR</ReturnType>
+                <Code>
+                    RETURN LOWER(REGEXP_REPLACE(input_text, '[^a-zA-Z0-9]+', '-', 'g'));
+                </Code>
+            </DatabaseFunction>
+        </DatabaseFunctions>
+
+        <StoredProcedures>
+            <StoredProcedure procedureName="update_user_last_login" language="sql">
+                <Name>Update User Last Login</Name>
+                <Description>Updates the last login timestamp for a user</Description>
+                <Parameters>
+                    <Parameter name="user_id" type="INTEGER" mode="IN" required="true" />
+                </Parameters>
+                <Code>
+                    UPDATE users SET last_login = NOW() WHERE id = user_id;
+                </Code>
+            </StoredProcedure>
+
+            <StoredProcedure procedureName="deactivate_client" language="sql">
+                <Name>Deactivate Client</Name>
+                <Description>Deactivates a client by ID</Description>
+                <Parameters>
+                    <Parameter name="client_id" type="INTEGER" mode="IN" required="true" />
+                </Parameters>
+                <Code>
+                    UPDATE clients SET is_active = false WHERE id = client_id;
+                </Code>
+            </StoredProcedure>
+        </StoredProcedures>
+
+        <Triggers>
+            <Trigger triggerName="update_user_timestamp" tableName="users" enabled="true">
+                <Name>Update User Timestamp</Name>
+                <Description>Updates the modified timestamp when a user is updated</Description>
+                <Event>UPDATE</Event>
+                <Timing>BEFORE</Timing>
+                <Function>UPDATE users SET modified_at = NOW() WHERE id = NEW.id;</Function>
+            </Trigger>
+
+            <Trigger triggerName="update_client_timestamp" tableName="clients" enabled="true">
+                <Name>Update Client Timestamp</Name>
+                <Description>Updates the modified timestamp when a client is updated</Description>
+                <Event>UPDATE</Event>
+                <Timing>BEFORE</Timing>
+                <Function>UPDATE clients SET modified_at = NOW() WHERE id = NEW.id;</Function>
+            </Trigger>
+        </Triggers>
+    </DataStructure>
+
+    <DatabaseMapping>
+        <EntityMapping entityName="User" tableName="users">
+            <FieldMapping fieldName="id" columnName="id" postgresqlType="SERIAL" />
+            <FieldMapping fieldName="username" columnName="username" postgresqlType="VARCHAR" />
+            <FieldMapping fieldName="email" columnName="email" postgresqlType="VARCHAR" />
+        </EntityMapping>
+
+        <EntityMapping entityName="Client" tableName="clients">
+            <FieldMapping fieldName="id" columnName="id" postgresqlType="SERIAL" />
+            <FieldMapping fieldName="company_name" columnName="company_name" postgresqlType="VARCHAR" />
+            <FieldMapping fieldName="email" columnName="email" postgresqlType="VARCHAR" />
+        </EntityMapping>
+
+        <EntityMapping entityName="Order" tableName="orders">
+            <FieldMapping fieldName="id" columnName="id" postgresqlType="SERIAL" />
+            <FieldMapping fieldName="order_number" columnName="order_number" postgresqlType="VARCHAR" />
+            <FieldMapping fieldName="user_id" columnName="user_id" postgresqlType="INTEGER" />
+            <FieldMapping fieldName="client_id" columnName="client_id" postgresqlType="INTEGER" />
+        </EntityMapping>
+
+        <TypeMapping>
+            <TypeMap appType="INTEGER" postgresqlType="INTEGER" mysqlType="INT" sqliteType="INTEGER" />
+            <TypeMap appType="VARCHAR" postgresqlType="VARCHAR" mysqlType="VARCHAR" sqliteType="TEXT" />
+            <TypeMap appType="BOOLEAN" postgresqlType="BOOLEAN" mysqlType="TINYINT" sqliteType="INTEGER" />
+            <TypeMap appType="TEXT" postgresqlType="TEXT" mysqlType="TEXT" sqliteType="TEXT" />
+        </TypeMapping>
+    </DatabaseMapping>
+</Application>

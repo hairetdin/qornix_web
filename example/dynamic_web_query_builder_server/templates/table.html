@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Table Browser - Qornix</title>
+    <link rel="icon" type="image/svg+xml"
+          href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90' font-family='Arial, sans-serif'%3E🦅%3C/text%3E%3C/svg%3E">
+
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/material-darker.min.css">
+
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .table-page-layout {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .collapsible-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+            padding: 5px 0;
+        }
+        .collapsible-header .toggle-icon {
+            transition: transform 0.2s ease;
+            font-size: 12px;
+        }
+        .collapsible-header .toggle-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+        .collapsible-body {
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.2s ease;
+        }
+        .collapsible-body.collapsed {
+            max-height: 0 !important;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .pagination-bar {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-top: 12px;
+            padding: 8px 0;
+            flex-wrap: wrap;
+        }
+        .pagination-bar .page-info {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+        .tables-dropdown {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 4px;
+            display: none;
+            background: white;
+            position: absolute;
+            z-index: 100;
+            width: 100%;
+        }
+        .tables-dropdown .table-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .tables-dropdown .table-option:hover {
+            background: #f8f9fa;
+        }
+        .tables-dropdown .table-option:last-child {
+            border-bottom: none;
+        }
+        /* 3-column grid for parameters */
+        .params-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+        .params-grid .full-width {
+            grid-column: 1 / -1;
+        }
+        .params-grid .half-width {
+            grid-column: span 2;
+        }
+        @media (max-width: 700px) {
+            .params-grid {
+                grid-template-columns: 1fr;
+            }
+            .params-grid .half-width {
+                grid-column: span 1;
+            }
+        }
+        .param-inline {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+        .param-inline .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        .param-inline .btn {
+            margin-bottom: 0;
+            height: 40px;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <nav class="navbar">
+        <span class="nav-brand">🦅 Qornix</span>
+        <a href="/" class="nav-link">📋 Главная</a>
+        <a href="/query-builder" class="nav-link">🔧 Query Builder</a>
+        <a href="/table" class="nav-link active">📊 Table Browser</a>
+        <a href="/schema-manager" class="nav-link">📄 Schema Manager</a>
+    </nav>
+
+    <div class="header">
+        <h1>🦅 Qornix Table Browser</h1>
+        <p>Просмотр данных таблиц базы данных с фильтрацией и пагинацией</p>
+    </div>
+
+    <div class="table-page-layout">
+        <!--1. Request parameters (collapsible)-->
+        <div class="card">
+            <div class="collapsible-header" onclick="toggleCollapsible('paramsBody', 'paramsIcon')">
+                <h2 style="margin:0;">📝 Параметры запроса</h2>
+                <span class="toggle-icon" id="paramsIcon">▼ Свернуть</span>
+            </div>
+            <div class="collapsible-body" id="paramsBody" style="max-height: 2000px; opacity: 1;">
+                <div class="params-grid">
+                    <!-- Row 1: Table (full width) -->
+                    <div class="form-group full-width" style="position: relative;">
+                        <label for="tableSelect">Таблица:</label>
+                        <input type="text" id="tableSelect" list="tableList" placeholder="Выберите таблицу" autocomplete="off">
+                        <datalist id="tableList"></datalist>
+                        <div class="tables-dropdown" id="tablesDropdown"></div>
+                    </div>
+
+                    <!-- Row 2: Fields, Filters, JOIN -->
+                    <div class="form-group">
+                        <label>Поля (SELECT):</label>
+                        <div class="param-inline">
+                            <input type="text" id="fieldInput" list="fieldSuggestions" placeholder="имя поля">
+                            <datalist id="fieldSuggestions"></datalist>
+                            <button type="button" class="btn btn-secondary" onclick="addItem('field')">+</button>
+                        </div>
+                        <div class="list-items" id="fieldsList"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Фильтры (WHERE):</label>
+                        <div class="param-inline">
+                            <input type="text" id="filterInput" placeholder="условие">
+                            <button type="button" class="btn btn-secondary" onclick="addItem('filter')">+</button>
+                        </div>
+                        <div class="list-items" id="filtersList"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>JOIN:</label>
+                        <div class="param-inline">
+                            <input type="text" id="joinInput" placeholder="JOIN ... ON ...">
+                            <button type="button" class="btn btn-secondary" onclick="addItem('join')">+</button>
+                        </div>
+                        <div class="list-items" id="joinsList"></div>
+                    </div>
+
+                    <!-- Row 3: GROUP BY, ORDER BY, HAVING -->
+                    <div class="form-group">
+                        <label>GROUP BY:</label>
+                        <div class="param-inline">
+                            <input type="text" id="groupInput" placeholder="поле">
+                            <button type="button" class="btn btn-secondary" onclick="addItem('group')">+</button>
+                        </div>
+                        <div class="list-items" id="groupsList"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>ORDER BY:</label>
+                        <div class="param-inline">
+                            <input type="text" id="orderInput" placeholder="name ASC">
+                            <button type="button" class="btn btn-secondary" onclick="addItem('order')">+</button>
+                        </div>
+                        <div class="list-items" id="ordersList"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>HAVING:</label>
+                        <div class="param-inline">
+                            <input type="text" id="havingInput" placeholder="COUNT(*) > 5">
+                            <button type="button" class="btn btn-secondary" onclick="addItem('having')">+</button>
+                        </div>
+                        <div class="list-items" id="havingsList"></div>
+                    </div>
+
+                    <!-- Row 4: LIMIT, OFFSET -->
+                    <div class="form-group">
+                        <label for="limitInput">LIMIT:</label>
+                        <div class="param-inline">
+                            <input type="number" id="limitInput" value="50" min="1" max="1000">
+                            <button type="button" class="btn btn-secondary" onclick="applyLimitOffset()">+</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="offsetInput">OFFSET:</label>
+                        <div class="param-inline">
+                            <input type="number" id="offsetInput" value="0" min="0">
+                            <button type="button" class="btn btn-secondary" onclick="applyLimitOffset()">+</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="display: flex; align-items: flex-end;">
+                        <span style="color: #7f8c8d; font-size: 0.85rem;">Нажмите <strong>+</strong> чтобы применить</span>
+                        <span style="color: #7f8c8d; font-size: 0.85rem;">Смотрите примеры на странице <a href="/query-builder">🔧 Query Builder</a></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!--2. Resulting JSON request-->
+        <div class="card">
+            <h2>📦 Результирующий JSON запрос</h2>
+            <div class="editor-container">
+                <textarea id="requestEditor"></textarea>
+            </div>
+            <div class="button-group" style="margin-top: 15px;">
+                <button type="button" class="btn btn-primary" onclick="executeQuery()">
+                    Выполнить запрос
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="resetForm()">
+                    Сбросить
+                </button>
+            </div>
+        </div>
+
+        <!--3. Result-->
+        <div class="card">
+            <h2>📋 Результат</h2>
+
+            <div id="loading" class="loading" style="display: none;">
+                Выполнение запроса...
+            </div>
+
+            <div id="resultInfo" class="result-info" style="display: none;">
+                <span id="statusBadge" class="status-badge status-success">200 OK</span>
+                <span id="messageText">Запрос выполнен</span>
+                <span id="countText" style="margin-left: 15px; color: #7f8c8d;"></span>
+            </div>
+
+            <div id="resultTableContainer" style="overflow-x: auto; max-height: 70vh;">
+                <table id="resultTable" style="display: none;">
+                    <thead id="tableHead"></thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+
+            <div id="paginationBar" class="pagination-bar" style="display: none;">
+                <button type="button" class="btn btn-secondary" onclick="goToPage(currentPage - 1)" id="prevPageBtn">← Назад</button>
+                <span class="page-info" id="pageInfo">Страница 1</span>
+                <button type="button" class="btn btn-secondary" onclick="goToPage(currentPage + 1)" id="nextPageBtn">Вперёд →</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CodeMirror JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/closebrackets.min.js"></script>
+
+<script>
+// Lists for storing items
+let fields = [];
+let filters = [];
+let joins = [];
+let groups = [];
+let orders = [];
+let havings = [];
+let tableAutocompleteAbortController = null;
+let fieldAutocompleteAbortController = null;
+let currentPage = 1;
+let totalRecords = 0;
+
+// Initialize the CodeMirror editor for the JSON request
+let requestEditor;
+
+document.addEventListener('DOMContentLoaded', function() {
+    requestEditor = CodeMirror.fromTextArea(document.getElementById('requestEditor'), {
+        mode: 'application/json',
+        theme: 'material-darker',
+        lineNumbers: true,
+        autoCloseBrackets: true,
+        matchBrackets: true,
+        indentUnit: 2,
+        tabSize: 2
+    });
+
+    loadTablesList();
+    updateRequestJson();
+
+    // Autocomplete while typing
+    const tableInput = document.getElementById('tableSelect');
+    const dropdown = document.getElementById('tablesDropdown');
+
+    tableInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        if (tableAutocompleteAbortController) tableAutocompleteAbortController.abort();
+        tableAutocompleteAbortController = new AbortController();
+
+        if (query.length >= 1) {
+            fetch(`/api/dynamic/meta/tables?q=${encodeURIComponent(query)}&limit=20&offset=0`, {
+                signal: tableAutocompleteAbortController.signal
+            })
+            .then(r => r.json())
+            .then(data => {
+                const tables = Array.isArray(data) ? data : (data.data || []);
+                dropdown.innerHTML = '';
+                tables.forEach(t => {
+                    const div = document.createElement('div');
+                    div.className = 'table-option';
+                    div.textContent = t;
+                    div.addEventListener('click', function() {
+                        document.getElementById('tableSelect').value = t;
+                        dropdown.style.display = 'none';
+                        updateRequestJson();
+                        fetchFieldSuggestions('');
+                    });
+                    dropdown.appendChild(div);
+                });
+                dropdown.style.display = tables.length > 0 ? 'block' : 'none';
+            })
+            .catch(() => { dropdown.style.display = 'none'; });
+        } else {
+            dropdown.style.display = 'none';
+        }
+    });
+
+    tableInput.addEventListener('focus', function() {
+        if (this.value.trim().length >= 1) dropdown.style.display = 'block';
+    });
+
+    document.addEventListener('click', function(e) {
+        if (!tableInput.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.style.display = 'none';
+        }
+    });
+});
+
+function toggleCollapsible(bodyId, iconId) {
+    const body = document.getElementById(bodyId);
+    const icon = document.getElementById(iconId);
+    body.classList.toggle('collapsed');
+    icon.classList.toggle('collapsed');
+}
+
+// Apply LIMIT/OFFSET from fields to JSON
+function applyLimitOffset() {
+    updateRequestJson();
+}
+
+async function loadTablesList() {
+    try {
+        const response = await fetch('/api/dynamic/meta/tables?limit=200&offset=0');
+        if (!response.ok) return;
+        const data = await response.json();
+        const tables = Array.isArray(data) ? data : (data.data || []);
+        const datalist = document.getElementById('tableList');
+        datalist.innerHTML = '';
+        tables.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t;
+            datalist.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('Failed to load tables:', e);
+    }
+}
+
+async function fetchFieldSuggestions(inputValue) {
+    const table = document.getElementById('tableSelect').value.trim();
+    if (!table) {
+        document.getElementById('fieldSuggestions').innerHTML = '';
+        return;
+    }
+
+    if (fieldAutocompleteAbortController) fieldAutocompleteAbortController.abort();
+    fieldAutocompleteAbortController = new AbortController();
+
+    try {
+        const response = await fetch(`/api/dynamic/meta/${encodeURIComponent(table)}/fields?q=${encodeURIComponent(inputValue || '')}`, {
+            signal: fieldAutocompleteAbortController.signal
+        });
+        if (!response.ok) {
+            document.getElementById('fieldSuggestions').innerHTML = '';
+            return;
+        }
+        const data = await response.json();
+        const items = Array.isArray(data) ? data : (data.data || []);
+        const datalist = document.getElementById('fieldSuggestions');
+        datalist.innerHTML = '';
+        items.forEach(item => {
+            const option = document.createElement('option');
+            option.value = item;
+            datalist.appendChild(option);
+        });
+    } catch (e) {
+        // ignore
+    }
+}
+
+// Function for adding an item to the list
+function addItem(type) {
+    const inputId = type + 'Input';
+    const listId = type + 'sList';
+    const input = document.getElementById(inputId);
+    const value = input.value.trim();
+
+    if (!value) { alert('Введите значение'); return; }
+
+    if (value.includes(',')) {
+        const items = value.split(',').map(item => item.trim()).filter(item => item !== '');
+        items.forEach(item => {
+            switch(type) {
+                case 'field': fields.push(item); break;
+                case 'filter': filters.push(item); break;
+                case 'join': joins.push(item); break;
+                case 'group': groups.push(item); break;
+                case 'order': orders.push(item); break;
+                case 'having': havings.push(item); break;
+            }
+        });
+    } else {
+        switch(type) {
+            case 'field': fields.push(value); break;
+            case 'filter': filters.push(value); break;
+            case 'join': joins.push(value); break;
+            case 'group': groups.push(value); break;
+            case 'order': orders.push(value); break;
+            case 'having': havings.push(value); break;
+        }
+    }
+
+    renderList(type);
+    input.value = '';
+    updateRequestJson();
+}
+
+// Function for removing an item from the list
+function removeItem(type, index) {
+    switch(type) {
+        case 'field': fields.splice(index, 1); break;
+        case 'filter': filters.splice(index, 1); break;
+        case 'join': joins.splice(index, 1); break;
+        case 'group': groups.splice(index, 1); break;
+        case 'order': orders.splice(index, 1); break;
+        case 'having': havings.splice(index, 1); break;
+    }
+    renderList(type);
+    updateRequestJson();
+}
+
+// Render the list
+function renderList(type) {
+    const listId = type + 'sList';
+    const container = document.getElementById(listId);
+    const array = getArrayByType(type);
+
+    container.innerHTML = '';
+    array.forEach((item, index) => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'list-item';
+        itemEl.innerHTML = `${item}<span class="remove-item" onclick="removeItem('${type}', ${index})">×</span>`;
+        container.appendChild(itemEl);
+    });
+}
+
+// Get an array by type
+function getArrayByType(type) {
+    switch(type) {
+        case 'field': return fields;
+        case 'filter': return filters;
+        case 'join': return joins;
+        case 'group': return groups;
+        case 'order': return orders;
+        case 'having': return havings;
+        default: return [];
+    }
+}
+
+// Generate a JSON request
+function generateRequestJson() {
+    const table = document.getElementById('tableSelect').value.trim();
+
+    const requestData = { method: 'GET', table: table, query: {} };
+
+    if (fields.length > 0) requestData.query.fields = fields;
+    if (filters.length > 0) requestData.query.filter = filters;
+    if (joins.length > 0) requestData.query.join = joins;
+    if (groups.length > 0) requestData.query.group_by = groups;
+    if (orders.length > 0) requestData.query.order_by = orders;
+    if (havings.length > 0) requestData.query.having = havings;
+
+    const limit = parseInt(document.getElementById('limitInput').value);
+    if (limit >= 0) requestData.query.limit = limit;
+
+    const offset = parseInt(document.getElementById('offsetInput').value);
+    if (offset >= 0) requestData.query.offset = offset;
+
+    if (Object.keys(requestData.query).length === 0) {
+        delete requestData.query;
+    }
+
+    return requestData;
+}
+
+// Update the JSON request editor
+function updateRequestJson() {
+    if (requestEditor) {
+        const jsonData = generateRequestJson();
+        requestEditor.setValue(JSON.stringify(jsonData, null, 2));
+    }
+}
+
+// Execute the request
+function executeQuery() {
+    const table = document.getElementById('tableSelect').value.trim();
+    if (!table) { alert('Пожалуйста, укажите имя таблицы'); return; }
+
+    let requestData;
+    try {
+        requestData = JSON.parse(requestEditor.getValue());
+    } catch (e) {
+        alert('Неверный JSON в редакторе запроса: ' + e.message);
+        return;
+    }
+
+    const offset = requestData.query ? (requestData.query.offset || 0) : 0;
+
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('resultInfo').style.display = 'none';
+    document.getElementById('resultTable').style.display = 'none';
+    document.getElementById('paginationBar').style.display = 'none';
+
+    fetch('/api/dynamic/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData)
+    })
+    .then(async r => {
+        const resultData = await r.json();
+        document.getElementById('loading').style.display = 'none';
+        if (!r.ok) {
+            displayError(JSON.stringify(resultData));
+            return;
+        }
+        displayResult(resultData, r.status, offset);
+    })
+    .catch(error => {
+        document.getElementById('loading').style.display = 'none';
+        displayError(error.message);
+    });
+}
+
+// Display the result
+function displayResult(resultData, status, offset) {
+    const resultInfo = document.getElementById('resultInfo');
+    const statusBadge = document.getElementById('statusBadge');
+    const messageText = document.getElementById('messageText');
+    const countText = document.getElementById('countText');
+    const resultTable = document.getElementById('resultTable');
+    const tableHead = document.getElementById('tableHead');
+    const tableBody = document.getElementById('tableBody');
+    const paginationBar = document.getElementById('paginationBar');
+
+    resultInfo.style.display = 'block';
+    resultTable.style.display = 'table';
+
+    statusBadge.textContent = `${status} ${getStatusText(status)}`;
+    statusBadge.className = 'status-badge ' + getStatusClass(status);
+
+    let data, count;
+    if (Array.isArray(resultData)) {
+        data = resultData;
+        count = resultData.length;
+    } else {
+        data = resultData.data || [];
+        count = resultData.count || data.length;
+    }
+
+    totalRecords = count;
+    const limit = parseInt(document.getElementById('limitInput').value) || 50;
+    currentPage = Math.floor((offset || 0) / limit) + 1;
+
+    messageText.textContent = resultData.message || 'Запрос выполнен';
+    countText.textContent = `Всего записей: ${count} | Показано: ${data.length}`;
+
+    // Headers
+    tableHead.innerHTML = '';
+    if (data.length > 0) {
+        const headerRow = document.createElement('tr');
+        Object.keys(data[0]).forEach(key => {
+            const th = document.createElement('th');
+            th.textContent = key;
+            headerRow.appendChild(th);
+        });
+        tableHead.appendChild(headerRow);
+    }
+
+    // Body
+    tableBody.innerHTML = '';
+    if (data.length === 0) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = Object.keys(data[0] || {}).length || 1;
+        cell.textContent = 'Нет данных для отображения';
+        cell.style.textAlign = 'center';
+        cell.style.padding = '20px';
+        row.appendChild(cell);
+        tableBody.appendChild(row);
+    } else {
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.style.cursor = 'pointer';
+            tr.title = 'Нажмите для детального просмотра';
+            tr.addEventListener('click', function() {
+                const table = document.getElementById('tableSelect').value.trim();
+                const id = row['id'] || row['ID'] || '';
+                if (id) {
+                    window.location.href = `/table/${encodeURIComponent(table)}/${encodeURIComponent(id)}`;
+                }
+            });
+            Object.keys(row).forEach(key => {
+                const td = document.createElement('td');
+                td.textContent = row[key] !== null && row[key] !== undefined ? row[key] : 'NULL';
+                tr.appendChild(td);
+            });
+            tableBody.appendChild(tr);
+        });
+    }
+
+    // Pagination
+    if (count > limit) {
+        paginationBar.style.display = 'flex';
+        document.getElementById('pageInfo').textContent = `Страница ${currentPage} из ${Math.ceil(count / limit)}`;
+        document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+        document.getElementById('nextPageBtn').disabled = currentPage >= Math.ceil(count / limit);
+    } else {
+        paginationBar.style.display = 'none';
+    }
+}
+
+function displayError(message) {
+    const resultInfo = document.getElementById('resultInfo');
+    const statusBadge = document.getElementById('statusBadge');
+    const messageText = document.getElementById('messageText');
+
+    resultInfo.style.display = 'block';
+    document.getElementById('resultTable').style.display = 'none';
+    document.getElementById('paginationBar').style.display = 'none';
+
+    statusBadge.textContent = 'Error';
+    statusBadge.className = 'status-badge status-error';
+    messageText.textContent = message;
+    document.getElementById('countText').textContent = '';
+}
+
+function goToPage(page) {
+    if (page < 1) return;
+    const limit = parseInt(document.getElementById('limitInput').value) || 50;
+    const offset = (page - 1) * limit;
+    document.getElementById('offsetInput').value = offset;
+    updateRequestJson();
+    executeQuery();
+}
+
+function resetForm() {
+    fields = []; filters = []; joins = []; groups = []; orders = []; havings = [];
+    renderList('field'); renderList('filter'); renderList('join');
+    renderList('group'); renderList('order'); renderList('having');
+    document.getElementById('tableSelect').value = '';
+    document.getElementById('limitInput').value = '50';
+    document.getElementById('offsetInput').value = '0';
+    document.getElementById('resultTable').style.display = 'none';
+    document.getElementById('resultInfo').style.display = 'none';
+    document.getElementById('paginationBar').style.display = 'none';
+    updateRequestJson();
+}
+
+function getStatusText(status) {
+    const codes = { 200: 'OK', 201: 'Created', 400: 'Bad Request', 404: 'Not Found', 500: 'Internal Server Error' };
+    return codes[status] || 'Unknown';
+}
+
+function getStatusClass(status) {
+    if (status >= 200 && status < 300) return 'status-success';
+    if (status >= 400 && status < 500) return 'status-error';
+    return 'status-not-found';
+}
+</script>
+</body>
+</html>

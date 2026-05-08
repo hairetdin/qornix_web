@@ -1,0 +1,22 @@
+# Qornix dynamic_web_query_builder_server configuration (YAML format, roadmap v0.0.3)
+#
+# This example initializes and uses the demo SQLite database from C++ code.
+# Active path:
+#   example/dynamic_web_query_builder_server/dynamic_web_query_builder_demo.sqlite3
+
+app:
+  name: dynamic_web_query_builder_server
+  version: 0.0.1
+
+server:
+  address: 127.0.0.1
+  port: 8008
+
+db:
+  driver: sqlite
+  connection_string: dynamic_web_query_builder_demo.sqlite3
+
+logging:
+  enabled: true
+  level: debug
+  to_file: false

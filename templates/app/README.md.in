@@ -1,0 +1,131 @@
+# @PROJECT_NAME@
+
+Generated Qornix Web application.
+
+This is the default application template created by:
+
+```bash
+./create_new_project.sh ../@PROJECT_NAME@
+```
+
+It is a clean C++ web application scaffold with:
+
+- landing page at `/`
+- JSON health endpoint at `/health`
+- documentation pages at `/docs`
+- route and handler examples
+- static asset serving from `/static/{filename}`
+- portable deploy bundle under `build/deploy/@PROJECT_NAME@`
+
+For Schema Manager, Dynamic API, Query Builder and Table Browser, generate a dynamic API app instead:
+
+```bash
+./create_new_project.sh ../my_api --with-dynamic-api
+```
+
+## Build
+
+```bash
+mkdir -p build
+cd build
+cmake ..
+cmake --build .
+```
+
+## Run from deploy bundle
+
+```bash
+cd build/deploy/@PROJECT_NAME@
+./@PROJECT_NAME@
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8008/
+http://127.0.0.1:8008/health
+http://127.0.0.1:8008/docs
+```
+
+## Development run
+
+You can also run the raw executable from the build directory:
+
+```bash
+cd build
+./@PROJECT_NAME@
+```
+
+The application can find resources from the source tree during development and from the deploy bundle in production.
+
+## Project structure
+
+```text
+@PROJECT_NAME@/
+├── CMakeLists.txt
+├── README.md
+├── config.yaml
+├── main.cpp
+├── routes.h
+├── app_paths.h
+├── handlers/
+├── templates/
+├── static/
+├── doc/
+├── route_extensions/
+└── logs/
+```
+
+## Add your first route
+
+Create a handler under `handlers/`, include it in `routes.h`, and register it:
+
+```cpp
+server.add_route("/hello", std::make_shared<HelloHandler>());
+```
+
+See:
+
+```text
+http://127.0.0.1:8008/docs/routing
+```
+
+## Deploy to another directory or machine
+
+Copy the full deploy bundle:
+
+```bash
+cp -R build/deploy/@PROJECT_NAME@ /opt/@PROJECT_NAME@
+cd /opt/@PROJECT_NAME@
+./@PROJECT_NAME@
+```
+
+Or run with an explicit application root:
+
+```bash
+QORNIX_APP_ROOT=/opt/@PROJECT_NAME@ /opt/@PROJECT_NAME@/@PROJECT_NAME@
+```
+
+The bundle includes app assets but does not include system shared libraries. Check them with:
+
+```bash
+ldd ./@PROJECT_NAME@
+```
+
+## Enable ORM
+
+ORM is disabled by default in generated applications to keep the first build minimal.
+Enable it when needed:
+
+```bash
+cmake -D@PROJECT_NAME_UPPER@_ENABLE_ORM=ON ..
+```
+
+## Framework path
+
+The generated `CMakeLists.txt` points to the Qornix Web checkout used by the generator.
+Override it if the framework moves:
+
+```bash
+cmake -DQORNIX_WEB_ROOT=/path/to/qornix_web ..
+```

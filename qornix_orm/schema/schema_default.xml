@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application>
+    <Name>Empty Schema Application</Name>
+    <Version>1.0.0</Version>
+    <Description>Minimal empty schema for Qornix application</Description>
+
+    <Configuration>
+        <DbConnectionString>postgresql://user:password@localhost:5432/mydb</DbConnectionString>
+        <LogLevel>INFO</LogLevel>
+        <Timeout>30</Timeout>
+        <DatabaseEngine>postgresql</DatabaseEngine>
+    </Configuration>
+
+    <DataStructure>
+    </DataStructure>
+</Application>

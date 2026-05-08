@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Getting Started · @PROJECT_NAME@</title><link rel="stylesheet" href="/static/app.css"></head>
+<body><div class="qx-shell"><header class="qx-topbar"><a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Getting started</small></span></a><nav class="qx-nav"><a href="/">Home</a><a href="/docs">Docs</a><a href="/docs/routing">Routing</a><a href="/docs/deployment">Deploy</a></nav></header>
+<section class="qx-page-intro"><p class="qx-kicker">First run</p><h1>Your generated application is ready.</h1><p class="qx-lead">The default template gives you a clean starting point for a custom C++ web app. It does not assume a database or a dynamic API; you add only the features you need.</p></section>
+<section class="qx-grid qx-grid-2"><article class="qx-card"><h2>Build</h2><pre class="qx-code">mkdir -p build
+cd build
+cmake ..
+cmake --build .</pre></article><article class="qx-card"><h2>Run</h2><pre class="qx-code">cd build/deploy/@PROJECT_NAME@
+./@PROJECT_NAME@</pre><p>Then open <code>http://127.0.0.1:8008/</code>.</p></article></section>
+<section class="qx-grid qx-grid-3"><article class="qx-card"><h2>Project layout</h2><ul class="qx-list"><li><code>main.cpp</code> starts the server.</li><li><code>routes.h</code> registers routes.</li><li><code>handlers/</code> contains request handlers.</li><li><code>templates/</code> contains HTML pages.</li><li><code>static/</code> contains CSS and assets.</li></ul></article><article class="qx-card"><h2>First useful edit</h2><p>Add a new handler under <code>handlers/</code>, include it in <code>routes.h</code>, register a path, rebuild and refresh the page.</p></article><article class="qx-card"><h2>When to use Dynamic API</h2><p>Use <code>--with-dynamic-api</code> when you want Schema Manager, query builder, table browser and schema-driven CRUD API out of the box.</p></article></section>
+<footer class="qx-footer"><span>Next: routing</span><a href="/docs/routing">Add your first route</a></footer></div></body></html>

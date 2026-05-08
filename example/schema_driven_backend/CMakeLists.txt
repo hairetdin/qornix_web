@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.10)
+project(schema_driven_backend LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_executable(schema_driven_backend main.cpp)
+target_include_directories(schema_driven_backend PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+target_link_libraries(schema_driven_backend PRIVATE qornix::web_core qornix::dynamic_api)

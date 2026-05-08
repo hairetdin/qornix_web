@@ -1,0 +1,11 @@
+Copyright (c) 2026 https://github.com/hairetdin
+
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
+
+You can freely use, modify, and distribute this software under the terms of the GPL, provided that you also distribute your source code under the same license.
+
+A separate commercial license is available for use in proprietary or closed-source products. For commercial licensing inquiries, please contact us via https://github.com/hairetdin.
+
+---
+
+For the full text of the GNU General Public License v3.0, see: https://www.gnu.org/licenses/gpl-3.0.txt

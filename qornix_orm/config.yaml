@@ -1,0 +1,13 @@
+# Qornix ORM configuration (YAML format, roadmap v0.0.3)
+# Keys are flattened to dot-separated format: db.host, db.port, etc.
+
+db:
+  driver: sqlite          # postgresql | mysql | sqlite
+  host: localhost
+  port: 5432
+  name: qornix_db
+  user: admin
+  password: password
+  # For SQLite: path to the database file
+  sqlite_path: ./my_database.db
+  connection_string: ./my_database.db

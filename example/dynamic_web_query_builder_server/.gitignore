@@ -1,0 +1,5 @@
+dynamic_web_query_builder_demo.sqlite3
+dynamic_web_query_builder_demo.sqlite3-*
+dynamic_web_query_builder_demo.schema.xml
+dynamic_web_query_builder_uploaded.schema.xml
+/perf_test/report.json

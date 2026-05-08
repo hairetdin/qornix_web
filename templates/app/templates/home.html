@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>@PROJECT_NAME@ · Qornix Web Application</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="qx-shell">
+  <header class="qx-topbar">
+    <a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Qornix Web application</small></span></a>
+    <nav class="qx-nav"><a href="/">Home</a><a href="/health">Health</a><a href="/docs">Docs</a><a href="/docs/deployment">Deploy</a></nav>
+  </header>
+
+  <section class="qx-hero">
+    <div>
+      <p class="qx-kicker">Generated Qornix Web app</p>
+      <h1>A clean C++ web application scaffold, ready for routes, handlers and services.</h1>
+      <p class="qx-lead">This project was generated from the default Qornix Web template. It includes a landing page, health endpoint, documentation, portable deploy layout and a simple route/handler structure you can extend immediately.</p>
+      <div class="qx-actions">
+        <a class="qx-btn" href="/docs/getting-started">Start building</a>
+        <a class="qx-btn qx-btn-secondary" href="/docs/routing">Add your first route</a>
+      </div>
+      <div class="qx-badges"><span>Boost.Beast server</span><span>Route handlers</span><span>Config.yaml</span><span>Portable deploy bundle</span></div>
+    </div>
+    <aside class="qx-card">
+      <h2>Application status</h2>
+      <div class="qx-status">
+        <div><span>Health endpoint</span><a href="/health"><code>GET /health</code></a></div>
+        <div><span>Documentation</span><a href="/docs"><code>GET /docs</code></a></div>
+        <div><span>Static assets</span><code>/static/*</code></div>
+        <div><span>Config file</span><code>config.yaml</code></div>
+      </div>
+    </aside>
+  </section>
+
+  <section class="qx-grid qx-grid-3">
+    <article class="qx-card"><h2>1. Add routes</h2><p>Edit <code>routes.h</code>, register a handler and rebuild. The default app starts with <code>/</code>, <code>/health</code> and documentation routes.</p></article>
+    <article class="qx-card"><h2>2. Create handlers</h2><p>Place handlers under <code>handlers/</code>. Derive from <code>HandlerBase</code> and override methods such as <code>handleGet</code> or <code>handlePost</code>.</p></article>
+    <article class="qx-card"><h2>3. Deploy the bundle</h2><p>After build, copy <code>build/deploy/@PROJECT_NAME@</code> to another directory or compatible machine and run the binary from that folder.</p></article>
+  </section>
+
+  <section class="qx-grid qx-grid-2">
+    <article class="qx-card">
+      <h2>Useful files</h2>
+      <ul class="qx-list">
+        <li><code>routes.h</code> - central route registration</li>
+        <li><code>handlers/health_handler.h</code> - minimal JSON handler example</li>
+        <li><code>templates/*.html</code> - UI pages served by the app</li>
+        <li><code>static/app.css</code> - shared UI styles</li>
+        <li><code>config.yaml</code> - server address, port and logging settings</li>
+      </ul>
+    </article>
+    <article class="qx-card">
+      <h2>Need a database-backed API?</h2>
+      <p>The default template is intentionally small. To start with Schema Manager, Dynamic API, Query Builder and Table Browser, generate a dynamic API application instead:</p>
+      <pre class="qx-code">./create_new_project.sh ../my_api --with-dynamic-api</pre>
+    </article>
+  </section>
+
+  <footer class="qx-footer"><span>Qornix Web · Default generated application</span><a href="/docs/getting-started">Open getting started guide</a></footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Qornix Schema Manager</title>
+  <link rel="stylesheet" href="/static/dynamic_api.css">
+</head>
+<body>
+<div class="qdx-shell">
+  <header class="qdx-topbar">
+    <a class="qdx-brand" href="/">
+      <span class="qdx-brand-mark">Qx</span>
+      <span>
+        <strong>Qornix Web</strong>
+        <small>Schema Manager</small>
+      </span>
+    </a>
+    <nav class="qdx-nav">
+      <a href="/">Home</a>
+      <a href="/schema-manager">Schema Manager</a>
+      <a href="/query-builder">Query Builder</a>
+      <a href="/table">Table Browser</a>
+      <a href="/api-playground">API Playground</a><a href="/docs">Docs</a><a href="/instructions">Next steps</a>
+      <a href="/openapi.json" target="_blank" rel="noreferrer">OpenAPI</a>
+    </nav>
+  </header>
+
+  <section class="qdx-page-intro">
+    <p class="qdx-kicker">Schema-driven Dynamic API</p>
+    <h1>Qornix Schema Manager</h1>
+    <p class="qdx-lead">Validate an XML schema, compare it with the current database, review the diff and SQL preview, then apply only a confirmed plan. For the first run, load the bundled demo schema: it creates categories, products, customers, and orders.</p>
+    <div class="qdx-actions-row"><a class="qdx-btn" href="/docs/schema">Read Schema Guide</a><a class="qdx-btn qdx-btn-secondary" href="/static/demo_schema.xml" target="_blank" rel="noreferrer">Open demo XML</a><a class="qdx-btn qdx-btn-secondary" href="/static/schema_app.xsd" target="_blank" rel="noreferrer">Open XSD</a></div>
+  </section>
+
+  <section class="qdx-grid qdx-grid-2">
+    <article class="qdx-card">
+      <h2>1. Current database schema</h2>
+      <p>Export the actual database schema and show it in the UI. This does not overwrite the desired XML schema.</p>
+      <div class="qdx-actions">
+        <button id="qdx-export-btn" type="button">Load current DB schema</button>
+        <button id="qdx-save-current-schema-btn" type="button" class="qdx-btn-secondary" disabled>Save schema</button>
+        <button id="qdx-reset-demo-db-btn" type="button" class="qdx-btn-secondary">Reset demo database</button>
+      </div>
+      <div id="qdx-current-schema-status" class="qdx-result muted">Load the current schema first, then you can save it as an XML file.</div>
+      <pre id="qdx-current-schema" class="qdx-code qdx-scroll">The database schema has not been loaded yet.</pre>
+    </article>
+
+    <article class="qdx-card">
+      <h2>2. Desired XML schema</h2>
+      <p>Paste XML manually, upload a file, or click <strong>Load demo schema</strong>. The demo schema is stored in <code>schema/app.schema.xml</code> and also served as <code>/static/demo_schema.xml</code> for the UI.</p>
+      <div class="qdx-actions">
+        <input id="qdx-file" type="file" accept=".xml,text/xml,application/xml">
+        <button id="qdx-load-demo-schema-btn" type="button" class="qdx-btn-secondary">Load demo schema</button>
+        <button id="qdx-validate-btn">Validate</button>
+      </div>
+      <textarea id="qdx-xml" spellcheck="false" placeholder="Paste &lt;Application schemaFormatVersion=&quot;1.0&quot;&gt;...&lt;/Application&gt;"></textarea>
+      <div id="qdx-validation" class="qdx-result muted">Validation results will appear here.</div>
+    </article>
+  </section>
+
+  <section class="qdx-grid qdx-grid-3">
+    <article class="qdx-card">
+      <h2>3. Diff</h2>
+      <button id="qdx-diff-btn">Build diff</button>
+      <pre id="qdx-diff" class="qdx-code qdx-scroll">The diff has not been built yet.</pre>
+    </article>
+
+    <article class="qdx-card">
+      <h2>4. Plan & risk</h2>
+      <button id="qdx-plan-btn">Build plan</button>
+      <div id="qdx-plan-summary" class="qdx-result muted">The plan has not been built yet.</div>
+      <pre id="qdx-risk" class="qdx-code qdx-scroll">Risk labels will appear here.</pre>
+    </article>
+
+    <article class="qdx-card">
+      <h2>5. SQL preview</h2>
+      <pre id="qdx-sql" class="qdx-code qdx-scroll">Build a plan to see the SQL preview.</pre>
+    </article>
+  </section>
+
+  <section class="qdx-grid qdx-grid-2">
+    <article class="qdx-card qdx-danger-zone">
+      <h2>6. Apply confirmed plan</h2>
+      <label><input type="checkbox" id="qdx-confirm-destructive"> I confirm destructive operations, if any</label><br>
+      <label><input type="checkbox" id="qdx-confirm-manual"> I confirm manual-review operations, if required</label><br>
+      <label><input type="checkbox" id="qdx-dry-run-only"> Dry-run only, do not change the database</label><br>
+      <p class="qdx-help-text">By default, <strong>Apply</strong> performs a live apply. Enable dry-run only when you want to test the pipeline without changing the database. If the database is already partially populated, or if you loaded an older roundtrip XML from the example app, click <strong>Reset demo database</strong> and apply the bundled demo schema again.</p>
+      <button id="qdx-apply-btn" disabled>Apply live plan</button>
+      <div id="qdx-apply-result" class="qdx-result muted">Apply results will appear here.</div>
+    </article>
+
+    <article class="qdx-card">
+      <h2>7. Schema history</h2>
+      <button id="qdx-history-btn">Refresh history</button>
+      <pre id="qdx-history" class="qdx-code qdx-scroll">History has not been loaded yet.</pre>
+    </article>
+  </section>
+
+  <footer class="qdx-footer">
+    <span>Need a schema reference?</span>
+    <a href="/docs/schema">Open Schema Guide</a>
+  </footer>
+</div>
+<script src="/static/schema_manager.js"></script>
+</body>
+</html>

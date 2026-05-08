@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qornix API Docs</title>
+  <link rel="stylesheet" href="/static/dynamic_api.css">
+</head>
+<body data-qdb-page="docs">
+<div class="qdx-shell">
+  <header class="qdx-topbar">
+    <a class="qdx-brand" href="/"><span class="qdx-brand-mark">Qx</span><span><strong>Qornix Web</strong><small>OpenAPI Docs</small></span></a>
+    <nav class="qdx-nav">
+      <a href="/">Home</a><a href="/schema-manager">Schema Manager</a><a href="/query-builder">Query Builder</a><a href="/table">Table Browser</a><a href="/api-playground">API Playground</a><a href="/openapi.json" target="_blank" rel="noreferrer">Raw JSON</a>
+    </nav>
+  </header>
+
+  <section class="qdx-card qdx-page-intro">
+    <p class="qdx-kicker">Generated OpenAPI</p>
+    <h1>Dynamic API Docs</h1>
+    <p class="qdx-lead">This lightweight viewer fetches <code>/openapi.json</code> and renders the available paths, methods and descriptions without external dependencies. For human-readable specifications, open <a href="/docs/schema">Schema Guide</a> and <a href="/docs/query-syntax">Query Syntax</a>.</p>
+  </section>
+
+  <section class="qdx-grid qdx-grid-2">
+    <article class="qdx-card">
+      <h2>API summary</h2>
+      <div id="qdb-openapi-summary" class="qdb-status-card">Loading OpenAPI...</div>
+      <div class="qdx-actions qdb-toolbar"><button id="qdb-load-openapi" type="button">Reload OpenAPI</button><a class="qdx-btn qdx-btn-secondary" href="/openapi.json" target="_blank" rel="noreferrer">Raw JSON</a></div>
+      <div id="qdb-status" class="qdb-status muted">Ready.</div>
+    </article>
+    <article class="qdx-card">
+      <h2>Key links</h2>
+      <div class="qdx-endpoints"><a href="/api/dynamic/meta/tables" target="_blank" rel="noreferrer">GET /api/dynamic/meta/tables</a><a href="/api/dynamic/schema/export" target="_blank" rel="noreferrer">GET /api/dynamic/schema/export</a><a href="/api/dynamic/openapi.json" target="_blank" rel="noreferrer">GET /api/dynamic/openapi.json</a><a href="/api-playground">GET /api-playground</a><a href="/docs/schema">GET /docs/schema</a><a href="/docs/query-syntax">GET /docs/query-syntax</a></div>
+    </article>
+  </section>
+
+  <section class="qdx-card">
+    <h2>Paths</h2>
+    <div id="qdb-openapi-paths" class="qdb-openapi-list"><div class="qdb-empty">Loading paths...</div></div>
+  </section>
+
+  <footer class="qdx-footer"><span>Want to run examples?</span><a href="/api-playground">Open API Playground</a></footer>
+</div>
+<script src="/static/dynamic_api_browser.js"></script>
+</body>
+</html>

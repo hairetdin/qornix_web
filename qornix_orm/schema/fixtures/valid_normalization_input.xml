@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application schemaFormatVersion="1.0">
+    <Name>  Normalization Schema  </Name>
+    <Version>1.0.0</Version>
+    <Description>Valid schema intentionally formatted for normalization tests.</Description>
+    <Configuration>
+        <DbConnectionString>sqlite://:memory:</DbConnectionString>
+        <LogLevel>INFO</LogLevel>
+        <Timeout>30</Timeout>
+        <DatabaseEngine>sqlite</DatabaseEngine>
+    </Configuration>
+    <DataStructure>
+        <Entity name=" Product " tableName=" products ">
+            <Field name=" id " type="INTEGER" primaryKey="true" autoIncrement="true"/>
+            <Field name=" name " type="VARCHAR" maxLength="160" nullable="false" defaultValue="(NULL)"/>
+            <Index name=" idx_products_name " type="BTREE">
+                <FieldName> name </FieldName>
+            </Index>
+        </Entity>
+        <Entity name=" Category " tableName=" categories ">
+            <Field name=" id " type="INTEGER" primaryKey="true" autoIncrement="true"/>
+            <Field name=" title " type="VARCHAR" maxLength="120" nullable="false"/>
+        </Entity>
+    </DataStructure>
+</Application>

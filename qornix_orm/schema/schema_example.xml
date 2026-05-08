@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application>
+    <Name>Sample Application</Name>
+    <Version>1.0.0</Version>
+    <Description>A sample application demonstrating the schema structure</Description>
+
+    <Configuration>
+        <DbConnectionString>postgresql://user:password@localhost:5432/mydb</DbConnectionString>
+        <LogLevel>INFO</LogLevel>
+        <Timeout>30</Timeout>
+        <DatabaseEngine>postgresql</DatabaseEngine>
+    </Configuration>
+
+    <DataStructure>
+        <!-- User Entity -->
+        <Entity name="User" tableName="users" verboseName="User" verboseNamePlural="Users">
+            <Field name="id" type="INTEGER" primaryKey="true" autoIncrement="true" />
+            <Field name="username" type="VARCHAR" maxLength="50" unique="true" />
+            <Field name="email" type="VARCHAR" maxLength="100" />
+            <Field name="created_at" type="TIMESTAMP" />
+            <Field name="is_active" type="BOOLEAN" defaultValue="true" />
+
+            <ForeignKeyField name="profile_id" type="FOREIGN_KEY" nullable="true" references="profile" toField="id" onDelete="CASCADE" />
+
+            <Index name="idx_user_email" unique="true">
+                <FieldName>email</FieldName>
+            </Index>
+
+            <Constraint constraintName="chk_email_format" type="CHECK">
+                <Name>Email Format Check</Name>
+                <Expression>email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'</Expression>
+            </Constraint>
+
+            <EntityFunctions>
+                <Function name="get_full_name" language="python">
+                    <Name>Get Full Name</Name>
+                    <Description>Returns the full name of the user</Description>
+                    <Parameters>
+                        <Parameter name="first_name" type="VARCHAR" required="true" />
+                        <Parameter name="last_name" type="VARCHAR" required="true" />
+                    </Parameters>
+                    <ReturnType>VARCHAR</ReturnType>
+                    <Code>
+def get_full_name(first_name, last_name):
+    return f"{first_name} {last_name}".strip()
+                    </Code>
+                </Function>
+            </EntityFunctions>
+        </Entity>
+
+        <!-- Profile Entity -->
+        <Entity name="Profile" tableName="profile">
+            <Field name="id" type="INTEGER" primaryKey="true" autoIncrement="true" />
+            <Field name="first_name" type="VARCHAR" maxLength="50" />
+            <Field name="last_name" type="VARCHAR" maxLength="50" />
+            <Field name="bio" type="TEXT" />
+            <Field name="birth_date" type="DATE" />
+        </Entity>
+
+        <Views>
+            <View viewName="active_users_view" isUpdatable="false">
+                <Name>Active Users</Name>
+                <Description>View of all active users</Description>
+                <Query>SELECT u.id, u.username, u.email, p.first_name, p.last_name FROM users u JOIN profiles p ON u.profile_id = p.id WHERE u.is_active = true</Query>
+            </View>
+        </Views>
+
+        <DatabaseFunctions>
+            <DatabaseFunction functionName="generate_slug" language="sql" volatile="STABLE">
+                <Name>Generate Slug</Name>
+                <Description>Generates a URL-friendly slug from text</Description>
+                <Parameters>
+                    <Parameter name="input_text" type="VARCHAR" />
+                </Parameters>
+                <ReturnType>VARCHAR</ReturnType>
+                <Code>
+                    RETURN LOWER(REGEXP_REPLACE(input_text, '[^a-zA-Z0-9]+', '-', 'g'));
+                </Code>
+            </DatabaseFunction>
+        </DatabaseFunctions>
+
+        <StoredProcedures>
+            <StoredProcedure procedureName="update_user_last_login" language="sql">
+                <Name>Update User Last Login</Name>
+                <Description>Updates the last login timestamp for a user</Description>
+                <Parameters>
+                    <Parameter name="user_id" type="INTEGER" mode="IN" required="true" />
+                </Parameters>
+                <Code>
+                    UPDATE users SET last_login = NOW() WHERE id = user_id;
+                </Code>
+            </StoredProcedure>
+        </StoredProcedures>
+
+        <Triggers>
+            <Trigger triggerName="update_user_timestamp" tableName="users" enabled="true">
+                <Name>Update User Timestamp</Name>
+                <Description>Updates the modified timestamp when a user is updated</Description>
+                <Event>UPDATE</Event>
+                <Timing>BEFORE</Timing>
+                <Function>UPDATE users SET modified_at = NOW() WHERE id = NEW.id;</Function>
+            </Trigger>
+        </Triggers>
+    </DataStructure>
+
+    <DatabaseMapping>
+        <EntityMapping entityName="User" tableName="users">
+            <FieldMapping fieldName="id" columnName="id" postgresqlType="SERIAL" />
+            <FieldMapping fieldName="username" columnName="username" postgresqlType="VARCHAR" />
+            <FieldMapping fieldName="email" columnName="email" postgresqlType="VARCHAR" />
+        </EntityMapping>
+
+        <TypeMapping>
+            <TypeMap appType="INTEGER" postgresqlType="INTEGER" mysqlType="INT" sqliteType="INTEGER" />
+            <TypeMap appType="VARCHAR" postgresqlType="VARCHAR" mysqlType="VARCHAR" sqliteType="TEXT" />
+            <TypeMap appType="BOOLEAN" postgresqlType="BOOLEAN" mysqlType="TINYINT" sqliteType="INTEGER" />
+            <TypeMap appType="TEXT" postgresqlType="TEXT" mysqlType="TEXT" sqliteType="TEXT" />
+        </TypeMapping>
+    </DatabaseMapping>
+</Application>

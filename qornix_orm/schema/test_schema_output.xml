@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application>
+	<Name>Generated Schema</Name>
+	<Version>1.0.0</Version>
+	<Description>Schema generated from existing database</Description>
+	<Configuration>
+		<DbConnectionString></DbConnectionString>
+		<LogLevel>INFO</LogLevel>
+		<Timeout>0</Timeout>
+		<DatabaseEngine></DatabaseEngine>
+	</Configuration>
+	<DataStructure>
+		<Entity name="categories" tableName="categories">
+			<Field name="id" type="INTEGER" nullable="false" primaryKey="true" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="name" type="VARCHAR" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="description" type="TEXT" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+		</Entity>
+		<Entity name="orders" tableName="orders">
+			<Field name="id" type="INTEGER" nullable="false" primaryKey="true" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="order_date" type="TIMESTAMP" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="quantity" type="INTEGER" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="product_id" type="INTEGER" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<ForeignKeyField name="product_id" type="INTEGER" nullable="false" primaryKey="false" unique="false" references="products" onDelete="CASCADE" onUpdate="CASCADE" toField="id" />
+		</Entity>
+		<Entity name="products" tableName="products">
+			<Field name="id" type="INTEGER" nullable="false" primaryKey="true" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="name" type="VARCHAR" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="price" type="VARCHAR" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="category_id" type="INTEGER" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<ForeignKeyField name="category_id" type="INTEGER" nullable="false" primaryKey="false" unique="false" references="categories" onDelete="CASCADE" onUpdate="CASCADE" toField="id" />
+		</Entity>
+		<Entity name="schema_snapshots" tableName="schema_snapshots">
+			<Field name="id" type="INTEGER" nullable="false" primaryKey="true" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="version" type="VARCHAR" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="hash" type="VARCHAR" nullable="false" primaryKey="false" unique="true" maxLength="255" autoIncrement="false" />
+			<Field name="snapshot_data" type="TEXT" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="saved_at" type="TIMESTAMP" nullable="true" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<Index name="schema_snapshots_hash_key" unique="true">
+				<FieldName>hash</FieldName>
+			</Index>
+			<Index name="schema_snapshots_hash_key" unique="true">
+				<FieldName>hash</FieldName>
+			</Index>
+		</Entity>
+		<Entity name="test_categories" tableName="test_categories">
+			<Field name="id" type="INTEGER" nullable="false" primaryKey="true" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="name" type="VARCHAR" nullable="false" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="description" type="TEXT" nullable="true" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+			<Field name="created_at" type="TIMESTAMP" nullable="true" primaryKey="false" unique="false" maxLength="255" autoIncrement="false" />
+		</Entity>
+		<Entity name="test_save_to_db" tableName="test_save_to_db" />
+	</DataStructure>
+</Application>

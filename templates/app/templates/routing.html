@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Routing · @PROJECT_NAME@</title><link rel="stylesheet" href="/static/app.css"></head>
+<body><div class="qx-shell"><header class="qx-topbar"><a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Routing</small></span></a><nav class="qx-nav"><a href="/">Home</a><a href="/docs">Docs</a><a href="/health">Health</a><a href="/docs/deployment">Deploy</a></nav></header>
+<section class="qx-page-intro"><p class="qx-kicker">Routes and handlers</p><h1>Add application behavior through small handler classes.</h1><p class="qx-lead">Routes map URL patterns to handler objects. Handlers derive from <code>HandlerBase</code> and override the HTTP methods they support.</p></section>
+<section class="qx-grid qx-grid-2"><article class="qx-card"><h2>Minimal JSON handler</h2><pre class="qx-code">class HelloHandler : public HandlerBase {
+protected:
+  void handleGet(const http::request&lt;http::string_body&gt;&,
+                 http::response&lt;http::string_body&gt;& res,
+                 const urls::url_view&,
+                 const std::map&lt;std::string,std::string&gt;&) override {
+    buildJsonResponse(res, http::status::ok, R"({"hello":"qornix"})");
+  }
+};</pre></article><article class="qx-card"><h2>Register it</h2><pre class="qx-code">#include "handlers/hello_handler.h"
+
+inline void setupRoutes(HttpServer& server) {
+  server.add_route("/hello", std::make_shared&lt;HelloHandler&gt;());
+}</pre></article></section>
+<section class="qx-grid qx-grid-3"><article class="qx-card"><h2>Path parameters</h2><p>Routes may use placeholders such as <code>/users/{id}</code>. The resolved values are passed to the handler as <code>path_params</code>.</p></article><article class="qx-card"><h2>Static files</h2><p>The template registers <code>/static/{filename}</code>. Put CSS, JS and small assets into <code>static/</code>.</p></article><article class="qx-card"><h2>HTML pages</h2><p>Use <code>AppPageHandler</code> for simple server-rendered HTML pages stored under <code>templates/</code>.</p></article></section>
+<footer class="qx-footer"><span>Routing guide</span><a href="/docs/raw/routing_and_handlers.md">Open bundled markdown</a></footer></div></body></html>

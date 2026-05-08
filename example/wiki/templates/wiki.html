@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WikiSpace</title>
+  <link rel="stylesheet" href="/static/wiki.css" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%232563eb'/%3E%3Ctext x='50' y='66' text-anchor='middle' font-size='58' font-family='Arial' font-weight='700' fill='white'%3EW%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">W</div>
+        <div>
+          <h1>WikiSpace</h1>
+          <p>База знаний команды</p>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Навигация</h3>
+        <ul class="nav-list">
+          <li><button class="nav-link active" data-view="all"><span>Все статьи</span><span class="count" id="allCount">0</span></button></li>
+          <li><button class="nav-link" data-view="favorites"><span>Избранное</span><span class="count" id="favoriteCount">0</span></button></li>
+          <li><button class="nav-link" data-view="recent"><span>Недавние</span><span class="count" id="recentCount">0</span></button></li>
+          <li><button class="nav-link" data-view="team"><span>Команда</span><span class="count" id="authorCount">0</span></button></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Категории</h3>
+        <ul class="space-list" id="categoryList"></ul>
+      </div>
+
+      <div class="team-card">
+        <h4>Создать новую статью</h4>
+        <p>Добавьте инструкцию, процесс или справочник, чтобы знания команды были всегда под рукой.</p>
+        <button id="sidebarCreateButton" type="button">+ Новая статья</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="search-box">
+          <span class="icon">⌕</span>
+          <input id="searchInput" type="search" placeholder="Поиск по статьям, тегам и авторам" autocomplete="off" />
+        </div>
+        <div class="topbar-actions">
+          <button class="ghost-btn" id="filterButton" type="button">Фильтры</button>
+          <button class="primary-btn" id="createButton" type="button">Написать статью</button>
+          <div class="auth-area" id="authArea">
+            <button class="ghost-btn" id="loginButton" type="button">Войти</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="filter-panel" id="filterPanel" hidden>
+        <label>
+          Категория
+          <select id="categoryFilter">
+            <option value="">Все категории</option>
+          </select>
+        </label>
+        <label>
+          Статус
+          <select id="statusFilter">
+            <option value="">Любой статус</option>
+            <option value="published">Опубликовано</option>
+            <option value="draft">Черновики</option>
+          </select>
+        </label>
+        <button class="ghost-btn compact" id="resetFiltersButton" type="button">Сбросить</button>
+      </section>
+
+      <section class="hero">
+        <div>
+          <h2>Современный интерфейс для корпоративной wiki</h2>
+          <p>Боковая навигация, быстрый поиск, карточки знаний, редактор статей и режим чтения работают с SQLite-базой через API текущего C++ фреймворка.</p>
+          <div class="hero-tags">
+            <div class="hero-tag">Knowledge Base</div>
+            <div class="hero-tag">SQLite</div>
+            <div class="hero-tag">Team Wiki</div>
+            <div class="hero-tag">Responsive Layout</div>
+          </div>
+        </div>
+
+        <div class="hero-card">
+          <h3>Состояние базы знаний</h3>
+          <div class="stats-grid">
+            <div class="stat">
+              <strong id="statArticles">0</strong>
+              <span>Статей</span>
+            </div>
+            <div class="stat">
+              <strong id="statAuthors">0</strong>
+              <span>Авторы</span>
+            </div>
+            <div class="stat">
+              <strong id="statFreshness">0%</strong>
+              <span>Актуальность</span>
+            </div>
+            <div class="stat">
+              <strong id="statDrafts">0</strong>
+              <span>Черновиков</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="main-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h3 id="listTitle">Популярные статьи</h3>
+            <button class="link-btn" id="refreshButton" type="button">Обновить</button>
+          </div>
+
+          <div class="article-list" id="articleList"></div>
+          <div class="empty-state" id="articleEmpty" hidden>Статьи не найдены</div>
+        </div>
+
+        <div class="panel reader" id="reader"></div>
+      </section>
+
+      <section class="bottom-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Недавняя активность</h3>
+            <button class="link-btn" id="activityRefreshButton" type="button">Журнал</button>
+          </div>
+
+          <div class="mini-list" id="activityList"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Шаблоны статей</h3>
+            <button class="link-btn" id="templateCreateButton" type="button">Создать</button>
+          </div>
+          <div class="template-list">
+            <button class="template-card" type="button" data-template="Guide">
+              <h4>Guide</h4>
+              <p>Пошаговая инструкция с вводным описанием, условиями и списком действий.</p>
+            </button>
+            <button class="template-card" type="button" data-template="Reference">
+              <h4>Reference</h4>
+              <p>Справочник соглашений, параметров, терминов и устойчивых правил команды.</p>
+            </button>
+            <button class="template-card" type="button" data-template="Checklist">
+              <h4>Checklist</h4>
+              <p>Короткий операционный список для подготовки, проверки и выпуска изменений.</p>
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Login Modal -->
+  <div class="modal-backdrop" id="loginModal" hidden>
+    <form class="modal auth-modal" id="loginForm">
+      <div class="modal-header">
+        <div>
+          <h2>Вход в аккаунт</h2>
+          <p>Введите учётные данные для доступа к базе знаний</p>
+        </div>
+        <button class="icon-btn" id="closeLoginModalButton" type="button" aria-label="Закрыть">×</button>
+      </div>
+      <div class="form-grid">
+        <label class="span-2">
+          Имя пользователя
+          <input id="loginUsername" name="username" required maxlength="80" placeholder="Введите логин" />
+        </label>
+        <label class="span-2">
+          Пароль
+          <input id="loginPassword" name="password" type="password" required maxlength="128" placeholder="Введите пароль" />
+        </label>
+      </div>
+      <div class="modal-actions">
+        <span class="modal-spacer"></span>
+        <button class="ghost-btn" id="cancelLoginModalButton" type="button">Отмена</button>
+        <button class="primary-btn" type="submit">Войти</button>
+      </div>
+      <div class="auth-footer">
+        <span>Нет аккаунта?</span>
+        <button class="link-btn" type="button" id="showRegisterButton">Зарегистрироваться</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Register Modal -->
+  <div class="modal-backdrop" id="registerModal" hidden>
+    <form class="modal auth-modal" id="registerForm">
+      <div class="modal-header">
+        <div>
+          <h2>Регистрация</h2>
+          <p>Создайте аккаунт для участия в работе базы знаний</p>
+        </div>
+        <button class="icon-btn" id="closeRegisterModalButton" type="button" aria-label="Закрыть">×</button>
+      </div>
+      <div class="form-grid">
+        <label class="span-2">
+          Имя пользователя
+          <input id="registerUsername" name="username" required maxlength="80" placeholder="Придумайте логин" />
+        </label>
+        <label class="span-2">
+          Email
+          <input id="registerEmail" name="email" type="email" required maxlength="120" placeholder="your@email.com" />
+        </label>
+        <label class="span-2">
+          Пароль
+          <input id="registerPassword" name="password" type="password" required minlength="6" maxlength="128" placeholder="Минимум 6 символов" />
+        </label>
+      </div>
+      <div class="modal-actions">
+        <span class="modal-spacer"></span>
+        <button class="ghost-btn" id="cancelRegisterModalButton" type="button">Отмена</button>
+        <button class="primary-btn" type="submit">Зарегистрироваться</button>
+      </div>
+      <div class="auth-footer">
+        <span>Уже есть аккаунт?</span>
+        <button class="link-btn" type="button" id="showLoginButton">Войти</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal-backdrop" id="articleModal" hidden>
+    <form class="modal" id="articleForm">
+      <div class="modal-header">
+        <div>
+          <h2 id="modalTitle">Новая статья</h2>
+          <p id="modalSubtitle">Материал будет сохранен в SQLite</p>
+        </div>
+        <button class="icon-btn" id="closeModalButton" type="button" aria-label="Закрыть">×</button>
+      </div>
+
+      <div class="form-grid">
+        <label class="span-2">
+          Заголовок
+          <input id="articleTitle" name="title" required maxlength="140" />
+        </label>
+        <label>
+          Категория
+          <input id="articleCategory" name="category" required maxlength="80" />
+        </label>
+        <label>
+          Статус
+          <select id="articleStatus" name="status">
+            <option value="published">Опубликовано</option>
+            <option value="draft">Черновик</option>
+          </select>
+        </label>
+        <label>
+          Автор
+          <input id="articleAuthor" name="author" required maxlength="80" />
+        </label>
+        <label>
+          Шаблон
+          <select id="articleTemplate" name="template">
+            <option value="Guide">Guide</option>
+            <option value="Reference">Reference</option>
+            <option value="Checklist">Checklist</option>
+            <option value="Template">Template</option>
+          </select>
+        </label>
+        <label>
+          Время чтения
+          <input id="articleReadingTime" name="readingTime" type="number" min="1" max="60" value="4" />
+        </label>
+        <label class="span-2">
+          Теги
+          <input id="articleTags" name="tags" placeholder="API, Backend, Process" />
+        </label>
+        <label class="span-2">
+          Краткое описание
+          <textarea id="articleSummary" name="summary" required rows="3"></textarea>
+        </label>
+        <label class="span-2">
+          Текст статьи
+          <textarea id="articleContent" name="content" required rows="12"></textarea>
+        </label>
+      </div>
+
+      <div class="modal-actions">
+        <button class="danger-btn" id="deleteArticleButton" type="button" hidden>Удалить</button>
+        <span class="modal-spacer"></span>
+        <button class="ghost-btn" id="cancelModalButton" type="button">Отмена</button>
+        <button class="primary-btn" type="submit">Сохранить</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/static/wiki.js"></script>
+</body>
+</html>

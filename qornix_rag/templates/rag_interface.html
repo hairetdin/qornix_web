@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qornix RAG - Поиск по коду</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        h1 { color: #667eea; margin-bottom: 10px; }
+        .subtitle { color: #666; }
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .search-box {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 16px;
+            margin-bottom: 15px;
+        }
+        .search-box:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .btn:hover { background: #5568d3; }
+        .btn:disabled { background: #ccc; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-item {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .stat-value { font-size: 2em; color: #667eea; font-weight: bold; }
+        .stat-label { color: #666; margin-top: 5px; }
+        .results-list { list-style: none; }
+        .result-item {
+            background: #f9f9f9;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+        }
+        .result-path {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+            font-family: 'Courier New', monospace;
+        }
+        .result-meta {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+        .score-badge {
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+        }
+        .snippet {
+            background: white;
+            padding: 10px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .loading { text-align: center; padding: 40px; color: #667eea; }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 Qornix RAG</h1>
+            <p class="subtitle">Интеллектуальный поиск по кодовой базе проекта</p>
+        </header>
+
+        <div class="card">
+            <h2>📊 Статистика проекта</h2>
+            <div id="stats" class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-value" id="total-files">-</div>
+                    <div class="stat-label">Файлов</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="total-lines">-</div>
+                    <div class="stat-label">Строк</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="total-size">-</div>
+                    <div class="stat-label">Размер (KB)</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="index-status">-</div>
+                    <div class="stat-label">Статус</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="embedding-backend">-</div>
+                    <div class="stat-label">Embeddings</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="index-time">-</div>
+                    <div class="stat-label">Индексация (ms)</div>
+                </div>
+            </div>
+            <button class="btn" onclick="reindexProject()" id="reindex-btn">
+                🔄 Переиндексировать
+            </button>
+        </div>
+
+        <div class="card">
+            <h2>🔎 Поиск</h2>
+            <input type="text" id="search-input" class="search-box"
+                   placeholder="Например: Как работает Dependency Injection?">
+            <button class="btn" onclick="performSearch()" id="search-btn">
+                🚀 Найти
+            </button>
+        </div>
+
+        <div class="card">
+            <h2>📋 Результаты поиска</h2>
+            <div id="results-container">
+                <p style="color: #666; text-align: center; padding: 40px;">
+                    Введите запрос для поиска
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let currentProjectRoot = '';
+
+        window.onload = async () => {
+            await loadStats();
+        };
+
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/stats`);
+                const data = await response.json();
+
+                if (data.success || data.stats) {
+                    const stats = data.stats;
+                    document.getElementById('total-files').textContent = stats.total_files || 0;
+                    document.getElementById('total-lines').textContent = (stats.total_lines || 0).toLocaleString();
+                    document.getElementById('total-size').textContent = stats.total_size_kb || 0;
+                    document.getElementById('index-status').textContent = data.indexed ? '✅' : '❌';
+                    document.getElementById('embedding-backend').textContent = `${data.embedding_backend || 'tfidf'} (${data.embedding_dim || 0})`;
+                    document.getElementById('index-time').textContent = stats.index_duration_ms || 0;
+                    currentProjectRoot = data.project_root || currentProjectRoot || '.';
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки статистики:', error);
+            }
+        }
+
+        async function reindexProject() {
+            const btn = document.getElementById('reindex-btn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Индексация...';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/index`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ project_path: currentProjectRoot || '.' })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert('✅ Проект проиндексирован!');
+                    await loadStats();
+                } else {
+                    alert('❌ Ошибка: ' + data.message);
+                }
+            } catch (error) {
+                alert('❌ Ошибка: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔄 Переиндексировать';
+            }
+        }
+
+        async function performSearch() {
+            const input = document.getElementById('search-input');
+            const query = input.value.trim();
+
+            if (!query) {
+                alert('Введите запрос!');
+                return;
+            }
+
+            const container = document.getElementById('results-container');
+            const btn = document.getElementById('search-btn');
+
+            btn.disabled = true;
+            btn.textContent = '⏳ Поиск...';
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>Поиск...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query, top_k: 10 })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayResults(data);
+                } else {
+                    container.innerHTML = `<div class="error-message">❌ Ошибка: ${data.message}</div>`;
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error-message">❌ Ошибка: ${error.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🚀 Найти';
+            }
+        }
+
+        function displayResults(data) {
+            const container = document.getElementById('results-container');
+
+            if (data.results.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666;">Ничего не найдено</p>';
+                return;
+            }
+
+            let html = '<ul class="results-list">';
+
+            data.results.forEach((result, idx) => {
+                html += `
+                    <li class="result-item">
+                        <div class="result-path">${idx + 1}. ${result.path}</div>
+                        <div class="result-meta">
+                            <span>Тип: ${result.type}</span>
+                            <span>Язык: ${result.language}</span>
+                            <span class="score-badge">Score: ${result.score.toFixed(4)}</span>
+                            <span>Строк: ${result.lines}</span>
+                        </div>
+                        <div class="snippet">${escapeHtml(result.snippet)}</div>
+                    </li>
+                `;
+            });
+
+            html += '</ul>';
+            container.innerHTML = html;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        document.getElementById('search-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+    </script>
+</body>
+</html>

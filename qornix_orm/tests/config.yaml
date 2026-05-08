@@ -1,0 +1,6 @@
+# Qornix ORM test configuration (YAML format)
+
+db:
+  driver: sqlite
+  name: ./qornix_orm_test.sqlite
+  connection_string: ./qornix_orm_test.sqlite

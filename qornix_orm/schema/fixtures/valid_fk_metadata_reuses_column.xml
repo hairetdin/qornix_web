@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application schemaFormatVersion="1.0">
+    <Name>Valid FK Metadata Reuses Column</Name>
+    <Version>1.0.0</Version>
+    <Description>Valid schema where a physical Field and ForeignKeyField metadata share the same column name.</Description>
+    <Configuration>
+        <DbConnectionString>sqlite://:memory:</DbConnectionString>
+        <LogLevel>INFO</LogLevel>
+        <Timeout>30</Timeout>
+        <DatabaseEngine>sqlite</DatabaseEngine>
+    </Configuration>
+    <DataStructure>
+        <Entity name="Customer" tableName="customers">
+            <Field name="id" type="INTEGER" primaryKey="true" autoIncrement="true"/>
+        </Entity>
+        <Entity name="Order" tableName="orders">
+            <Field name="id" type="INTEGER" primaryKey="true" autoIncrement="true"/>
+            <Field name="customer_id" type="INTEGER" nullable="false"/>
+            <ForeignKeyField name="customer_id" type="INTEGER" nullable="false" references="customers" toField="id" onDelete="CASCADE" onUpdate="CASCADE"/>
+        </Entity>
+    </DataStructure>
+</Application>
