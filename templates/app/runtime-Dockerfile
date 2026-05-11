@@ -1,0 +1,49 @@
+FROM ubuntu:24.04
+
+ARG QORNIX_UID=10001
+ARG QORNIX_GID=10001
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV QORNIX_APP_ROOT=/app
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libboost-json1.83.0 \
+        libboost-url1.83.0 \
+        libboost-log1.83.0 \
+        libboost-system1.83.0 \
+        libboost-filesystem1.83.0 \
+        libboost-thread1.83.0 \
+        libyaml-cpp0.8 \
+        libssl3t64 \
+        libsqlite3-0 \
+        libpugixml1v5 \
+        libxml2; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY build/deploy/@PROJECT_NAME@/ /app/
+
+RUN set -eux; \
+    chmod +x /app/@PROJECT_NAME@; \
+    if [ -f /app/config.yaml ]; then \
+        sed -i \
+            -e 's/address: 127\.0\.0\.1/address: 0.0.0.0/' \
+            -e 's|file_path: logs/server|file_path: /logs/server|' \
+            /app/config.yaml; \
+    fi; \
+    mkdir -p /data /logs /app/logs; \
+    groupadd --system --gid "${QORNIX_GID}" qornix; \
+    useradd --system --uid "${QORNIX_UID}" --gid qornix --home-dir /app --no-create-home --shell /usr/sbin/nologin qornix; \
+    chown -R qornix:qornix /app /data /logs
+
+USER qornix
+
+VOLUME ["/data", "/logs"]
+
+EXPOSE 8008
+
+CMD ["/app/@PROJECT_NAME@"]

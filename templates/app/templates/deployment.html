@@ -20,4 +20,6 @@ build/deploy/@PROJECT_NAME@/</pre></article><article class="qx-card"><h2>Run fro
 ├── doc/
 ├── route_extensions/
 └── logs/</pre><p class="qx-note">The bundle does not include system shared libraries. On another machine, install compatible runtime dependencies or use your normal package/container workflow.</p></section>
+<section class="qx-grid qx-grid-2"><article class="qx-card"><h2>Runtime image</h2><pre class="qx-code">docker build -f runtime-Dockerfile -t @PROJECT_NAME@:runtime .
+docker run --rm -p 8008:8008 @PROJECT_NAME@:runtime</pre></article><article class="qx-card"><h2>Container runtime</h2><p>The Dockerfile copies <code>build/deploy/@PROJECT_NAME@/</code> into <code>/app</code>, sets <code>QORNIX_APP_ROOT=/app</code> and makes the server listen on <code>0.0.0.0</code> inside the container.</p></article></section>
 <footer class="qx-footer"><span>Deployment guide</span><a href="/docs/raw/deployment.md">Open bundled markdown</a></footer></div></body></html>

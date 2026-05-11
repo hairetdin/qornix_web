@@ -249,21 +249,100 @@ The install layout contains the same required runtime assets:
 
 ## 10. Docker/container deployment pattern
 
-A simple container workflow is:
+The generated template includes `runtime-Dockerfile`. It builds a runtime image around the existing deploy bundle rather than rebuilding the C++ application inside Docker.
 
-```Dockerfile
-FROM debian:stable-slim
-RUN apt-get update && apt-get install -y \
-    libboost-system1.83.0 libboost-filesystem1.83.0 libsqlite3-0 \
-    libyaml-cpp0.8 libpugixml1v5 libxml2 \
-    && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY build/deploy/my_app/ /app/
-EXPOSE 8008
-CMD ["./my_app"]
+Build the app first, then build the image from the project root:
+
+```bash
+cmake --build build --target my_app_deploy
+docker build -f runtime-Dockerfile -t my_app:runtime .
 ```
 
-Adjust package names to the distribution and Boost version used by your build environment.
+Run with the config embedded in the image:
+
+```bash
+docker run --rm -p 8008:8008 my_app:runtime
+```
+
+The image keeps application files in `/app`, SQLite/schema state in `/data` and file logs in `/logs`. For persistent state, use named volumes:
+
+```bash
+docker volume create my_app_data
+docker volume create my_app_logs
+docker run -d --name my_app \
+  -p 8008:8008 \
+  -v my_app_data:/data \
+  -v my_app_logs:/logs \
+  my_app:runtime
+```
+
+For editable configuration, copy the generated config and mount it over `/app/config.yaml`:
+
+```bash
+mkdir -p docker/config data logs
+cp build/deploy/my_app/config.yaml docker/config/config.yaml
+```
+
+Use container paths for runtime files:
+
+```yaml
+server:
+  address: 0.0.0.0
+  port: 8008
+logging:
+  enabled: true
+  level: info
+  to_file: true
+  file_path: /logs/server
+database:
+  driver: sqlite
+  path: /data/app.sqlite3
+dynamic_api:
+  schema:
+    file: /data/schema/app.schema.xml
+    exported_file: /data/schema/database.schema.xml
+    history_file: /data/schema/schema_history.jsonl
+```
+
+Run with bind mounts:
+
+```bash
+sudo chown -R 10001:10001 data logs
+docker run -d --name my_app \
+  -p 8008:8008 \
+  -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/data:/data" \
+  -v "$PWD/logs:/logs" \
+  my_app:runtime
+```
+
+The container user is UID/GID `10001` by default. You can change it while building:
+
+```bash
+docker build -f runtime-Dockerfile \
+  --build-arg QORNIX_UID="$(id -u)" \
+  --build-arg QORNIX_GID="$(id -g)" \
+  -t my_app:runtime .
+```
+
+To move the app to another computer, either use a registry or export the image:
+
+```bash
+docker save my_app:runtime -o my_app-runtime.tar
+```
+
+Copy `my_app-runtime.tar`, external `docker/config/config.yaml`, and the `data/` directory if you need to move the SQLite database and schema history. On the target machine:
+
+```bash
+docker load -i my_app-runtime.tar
+docker run -d --name my_app -p 8008:8008 \
+  -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/data:/data" \
+  -v "$PWD/logs:/logs" \
+  my_app:runtime
+```
+
+The Dockerfile copies `build/deploy/my_app/` into `/app`, sets `QORNIX_APP_ROOT=/app`, makes the binary executable and changes the container config to listen on `0.0.0.0` so published ports work. It uses Ubuntu 24.04 runtime package names, including Boost.URL, Boost.JSON, Boost.Log, yaml-cpp, OpenSSL, SQLite, pugixml and libxml2. If you change the build distribution or enable PostgreSQL/MySQL drivers, inspect runtime dependencies with `ldd build/deploy/my_app/my_app` and adjust the package list.
 
 ## 11. Configuration in deployment
 
@@ -283,13 +362,13 @@ server:
   port: 8008
 ```
 
-The SQLite database path is currently derived from the app root:
+The SQLite database path is read from `database.path` in `config.yaml`. A relative path is resolved from the app root:
 
 ```text
 <app-root>/app.sqlite3
 ```
 
-Schema Manager runtime files are also kept under the app root:
+Schema Manager runtime files are configured under `dynamic_api.schema`. Relative paths are resolved from the app root:
 
 ```text
 <app-root>/schema/app.schema.xml
@@ -297,7 +376,23 @@ Schema Manager runtime files are also kept under the app root:
 <app-root>/schema/schema_history.jsonl
 ```
 
-Make sure the process has write permissions to the app root or to the directories where runtime files are stored.
+For containers, prefer absolute writable paths under mounted volumes:
+
+```yaml
+database:
+  driver: sqlite
+  path: /data/app.sqlite3
+dynamic_api:
+  schema:
+    file: /data/schema/app.schema.xml
+    exported_file: /data/schema/database.schema.xml
+    history_file: /data/schema/schema_history.jsonl
+logging:
+  to_file: true
+  file_path: /logs/server
+```
+
+Make sure the process has write permissions to the app root or to the mounted directories where runtime files are stored.
 
 ## 12. First run after deployment
 
@@ -357,10 +452,17 @@ Install matching runtime packages or use a packaging/container strategy that bun
 
 ### The app cannot write `app.sqlite3` or schema history
 
-Check permissions for the app root:
+Check permissions for the configured writable paths. For the default non-container layout:
 
 ```bash
 ls -ld /opt/my_app /opt/my_app/schema /opt/my_app/logs
+```
+
+For the container layout with bind mounts:
+
+```bash
+ls -ld data data/schema logs
+sudo chown -R 10001:10001 data logs
 ```
 
 The process must be allowed to create or update:

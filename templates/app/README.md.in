@@ -112,6 +112,63 @@ The bundle includes app assets but does not include system shared libraries. Che
 ldd ./@PROJECT_NAME@
 ```
 
+## Runtime Docker image
+
+The template includes `runtime-Dockerfile`, which builds a runtime image around the deploy bundle. Build the app first:
+
+```bash
+mkdir -p build
+cmake -S . -B build
+cmake --build build --target @PROJECT_NAME@_deploy
+docker build -f runtime-Dockerfile -t @PROJECT_NAME@:runtime .
+```
+
+Run with the config embedded in the image:
+
+```bash
+docker run --rm -p 8008:8008 @PROJECT_NAME@:runtime
+```
+
+To override config or persist file logs:
+
+```bash
+mkdir -p docker/config logs
+cp build/deploy/@PROJECT_NAME@/config.yaml docker/config/config.yaml
+```
+
+Set file logging in `docker/config/config.yaml` when needed:
+
+```yaml
+server:
+  address: 0.0.0.0
+  port: 8008
+logging:
+  enabled: true
+  to_file: true
+  file_path: /logs/server
+```
+
+Run with mounted config and logs:
+
+```bash
+sudo chown -R 10001:10001 logs
+docker run -d --name @PROJECT_NAME@ \
+  -p 8008:8008 \
+  -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/logs:/logs" \
+  @PROJECT_NAME@:runtime
+```
+
+To move the app to another computer without a registry:
+
+```bash
+docker save @PROJECT_NAME@:runtime -o @PROJECT_NAME@-runtime.tar
+```
+
+Copy `@PROJECT_NAME@-runtime.tar` plus any external config/log directories you want to keep. On the target machine, run `docker load -i @PROJECT_NAME@-runtime.tar` and start the container with the same `docker run` command.
+
+The Dockerfile copies `build/deploy/@PROJECT_NAME@/` into `/app`, sets `QORNIX_APP_ROOT=/app`, makes the binary executable and changes the container config to listen on `0.0.0.0` so published ports work. It uses Ubuntu 24.04 runtime package names; if you change enabled modules or database drivers, inspect `ldd build/deploy/@PROJECT_NAME@/@PROJECT_NAME@` and adjust the package list.
+
 ## Enable ORM
 
 ORM is disabled by default in generated applications to keep the first build minimal.

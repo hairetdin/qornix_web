@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app_paths.h"
+#include "runtime_config.h"
 #include "handler_base.h"
 #include "database_interface.h"
 #include "config.h"
@@ -50,10 +51,7 @@ private:
 namespace dynamic_api_app_demo {
 
 inline DatabaseConfig databaseConfig() {
-    DatabaseConfig config;
-    config.driver = "sqlite";
-    config.dbname = dynamic_api_app_paths::databasePath().string();
-    return config;
+    return dynamic_api_app_runtime::config().databaseConfig;
 }
 
 inline std::string loadDemoSchemaXml() {
@@ -68,8 +66,9 @@ inline std::string loadDemoSchemaXml() {
 }
 
 inline void writeDemoSchemaCopy(const std::string& xml) {
-    std::filesystem::create_directories(dynamic_api_app_paths::schemaDir());
-    std::ofstream out(dynamic_api_app_paths::uploadedSchemaPath(), std::ios::binary | std::ios::trunc);
+    const auto& path = dynamic_api_app_runtime::config().uploadedSchemaPath;
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << xml;
 }
 
@@ -88,11 +87,12 @@ inline void removePath(const std::filesystem::path& path, boost::json::object& r
 }
 
 inline boost::json::object resetFiles() {
+    const auto& runtime = dynamic_api_app_runtime::config();
     boost::json::object removed;
-    removePath(dynamic_api_app_paths::databasePath(), removed, "database");
-    removePath(dynamic_api_app_paths::uploadedSchemaPath(), removed, "uploaded_schema");
-    removePath(dynamic_api_app_paths::exportedSchemaPath(), removed, "exported_schema");
-    removePath(dynamic_api_app_paths::historyPath(), removed, "schema_history");
+    removePath(runtime.databaseConfig.dbname, removed, "database");
+    removePath(runtime.uploadedSchemaPath, removed, "uploaded_schema");
+    removePath(runtime.exportedSchemaPath, removed, "exported_schema");
+    removePath(runtime.historyPath, removed, "schema_history");
     return removed;
 }
 
@@ -178,8 +178,8 @@ protected:
             payload["message"] = "Demo database initialized";
             payload["removed"] = dynamic_api_app_demo::resetFiles();
             dynamic_api_app_demo::writeDemoSchemaCopy(xml);
-            payload["uploaded_schema_path"] = dynamic_api_app_paths::uploadedSchemaPath().string();
-            payload["database_path"] = dynamic_api_app_paths::databasePath().string();
+            payload["uploaded_schema_path"] = dynamic_api_app_runtime::config().uploadedSchemaPath.string();
+            payload["database_path"] = dynamic_api_app_runtime::config().databaseConfig.dbname;
             payload["seeded"] = dynamic_api_app_demo::createDemoDatabase();
             boost::json::array tables;
             tables.emplace_back("categories");
@@ -274,4 +274,3 @@ inline std::shared_ptr<DynamicAppPageHandler> makeSchemaDocsPageHandler() {
         R"HTML(<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Qornix Schema Guide</title></head><body><h1>Qornix Schema Manager and XML Schema Guide</h1><p>Schema documentation template file was not found.</p><p><a href="/docs">Back to docs</a></p></body></html>)HTML"
     );
 }
-

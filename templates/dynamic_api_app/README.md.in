@@ -98,6 +98,103 @@ Install-style layout is also available:
 cmake --install . --prefix /opt/@PROJECT_NAME@
 ```
 
+## Runtime Docker image
+
+The template includes `runtime-Dockerfile`, which builds a runtime image around the existing deploy bundle. Build the app first:
+
+```bash
+mkdir -p build
+cmake -S . -B build
+cmake --build build --target @PROJECT_NAME@_deploy
+docker build -f runtime-Dockerfile -t @PROJECT_NAME@:runtime .
+```
+
+Run with the config embedded in the image:
+
+```bash
+docker run --rm -p 8008:8008 @PROJECT_NAME@:runtime
+```
+
+The image stores application files in `/app`, data in `/data` and file logs in `/logs`. For persistent SQLite data and logs, use named volumes:
+
+```bash
+docker volume create @PROJECT_NAME@_data
+docker volume create @PROJECT_NAME@_logs
+docker run -d --name @PROJECT_NAME@ \
+  -p 8008:8008 \
+  -v @PROJECT_NAME@_data:/data \
+  -v @PROJECT_NAME@_logs:/logs \
+  @PROJECT_NAME@:runtime
+```
+
+To override config, copy the generated config and mount it over `/app/config.yaml`:
+
+```bash
+mkdir -p docker/config data logs
+cp build/deploy/@PROJECT_NAME@/config.yaml docker/config/config.yaml
+```
+
+Use absolute container paths for mutable files:
+
+```yaml
+server:
+  address: 0.0.0.0
+  port: 8008
+logging:
+  enabled: true
+  level: info
+  to_file: true
+  file_path: /logs/server
+database:
+  driver: sqlite
+  path: /data/app.sqlite3
+dynamic_api:
+  schema:
+    file: /data/schema/app.schema.xml
+    exported_file: /data/schema/database.schema.xml
+    history_file: /data/schema/schema_history.jsonl
+```
+
+Run with bind-mounted config, data and logs:
+
+```bash
+sudo chown -R 10001:10001 data logs
+docker run -d --name @PROJECT_NAME@ \
+  -p 8008:8008 \
+  -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/data:/data" \
+  -v "$PWD/logs:/logs" \
+  @PROJECT_NAME@:runtime
+```
+
+The container user is UID/GID `10001` by default. Change it at image build time if your host policy requires another owner:
+
+```bash
+docker build -f runtime-Dockerfile \
+  --build-arg QORNIX_UID="$(id -u)" \
+  --build-arg QORNIX_GID="$(id -g)" \
+  -t @PROJECT_NAME@:runtime .
+```
+
+To move the app to another computer, either push/pull the image through a registry or export it:
+
+```bash
+docker save @PROJECT_NAME@:runtime -o @PROJECT_NAME@-runtime.tar
+```
+
+Copy `@PROJECT_NAME@-runtime.tar` plus your external `docker/config/config.yaml` and `data/` directory if you keep state outside the image. On the target machine:
+
+```bash
+docker load -i @PROJECT_NAME@-runtime.tar
+docker run -d --name @PROJECT_NAME@ -p 8008:8008 \
+  -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/data:/data" \
+  -v "$PWD/logs:/logs" \
+  @PROJECT_NAME@:runtime
+```
+
+If you change the build distribution or enable more database drivers, inspect `ldd build/deploy/@PROJECT_NAME@/@PROJECT_NAME@` and adjust the package list in `runtime-Dockerfile`.
+
 ## Pages
 
 ```text
@@ -199,7 +296,7 @@ products
 orders
 ```
 
-Use `/schema-manager` -> `Load demo schema` to load it into the editor. `Build plan` is a preview step. `Apply live plan` changes `app.sqlite3` unless `Only dry-run` is checked.
+Use `/schema-manager` -> `Load demo schema` to load it into the editor. `Build plan` is a preview step. `Apply live plan` changes the configured SQLite database path unless `Only dry-run` is checked.
 
 
 ## Showcase pages
