@@ -6,7 +6,7 @@ This document describes how to build and deploy an application generated with:
 ./create_new_project.sh ../my_app --with-dynamic-api
 ```
 
-It focuses on the `templates/dynamic_api_app` template. A plain application generated without `--with-dynamic-api` is still a minimal development template and does not assemble the full deploy bundle described below.
+It focuses on the `templates/dynamic_api_app` template. A plain application generated without `--with-dynamic-api` also has a deploy bundle and `runtime-Dockerfile`, but it does not include Dynamic API schema, database and Schema Manager runtime files.
 
 ## 1. Development build
 

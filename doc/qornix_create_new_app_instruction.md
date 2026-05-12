@@ -32,7 +32,8 @@ The generated application includes:
 - getting started, routing, configuration and deployment documents;
 - static asset serving through `/static/{filename}`;
 - markdown document preview through `/docs/raw/{filename}`;
-- a portable deploy bundle under `build/deploy/<app>`.
+- a portable deploy bundle under `build/deploy/<app>`;
+- `runtime-Dockerfile` for building a runtime image around the deploy bundle.
 
 ### Schema-driven Dynamic API application
 
@@ -106,6 +107,7 @@ my_app/
 ├── main.cpp
 ├── routes.h
 ├── app_paths.h
+├── runtime-Dockerfile
 ├── handlers/
 │   ├── health_handler.h
 │   └── page_handlers.h
@@ -134,7 +136,8 @@ The script:
 4. substitutes `@PROJECT_NAME@`, `@PROJECT_NAME_UPPER@` and `@QORNIX_WEB_ROOT@`;
 5. creates the `logs` directory;
 6. does not copy framework sources into the application;
-7. prints build commands, run commands and the deploy bundle path.
+7. includes `runtime-Dockerfile`;
+8. prints build commands, run commands, the deploy bundle path and Docker image commands.
 
 ## 6. Portable deploy bundle
 
@@ -161,10 +164,83 @@ cd /opt/my_app
 If the binary is not launched from the bundle root, pass the root explicitly:
 
 ```bash
-./my_app --root /opt/my_app
+QORNIX_APP_ROOT=/opt/my_app /opt/my_app/my_app
 ```
 
-## 7. Runtime dependencies
+## 7. Runtime Docker image
+
+Generated applications include `runtime-Dockerfile`. It does not build the C++ app; it copies the already assembled deploy bundle into an Ubuntu 24.04 runtime image.
+
+Build the app and image:
+
+```bash
+mkdir -p build
+cmake -S . -B build
+cmake --build build --target my_app_deploy
+docker build -f runtime-Dockerfile -t my_app:runtime .
+```
+
+Run with the config embedded in the image:
+
+```bash
+docker run --rm -p 8008:8008 my_app:runtime
+```
+
+For editable config and persistent runtime files:
+
+```bash
+mkdir -p docker/config data logs
+cp build/deploy/my_app/config.yaml docker/config/config.yaml
+```
+
+For a Dynamic API app, set container paths in `docker/config/config.yaml`:
+
+```yaml
+server:
+  address: 0.0.0.0
+  port: 8008
+logging:
+  to_file: true
+  file_path: /logs/server
+database:
+  driver: sqlite
+  path: /data/app.sqlite3
+dynamic_api:
+  schema:
+    file: /data/schema/app.schema.xml
+    exported_file: /data/schema/database.schema.xml
+    history_file: /data/schema/schema_history.jsonl
+```
+
+Run with bind mounts:
+
+```bash
+docker run -d --name my_app \
+  -p 8008:8008 \
+  -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/data:/data" \
+  -v "$PWD/logs:/logs" \
+  my_app:runtime
+```
+
+To move the application to another computer without a registry:
+
+```bash
+docker save my_app:runtime -o my_app-runtime.tar
+```
+
+Copy `my_app-runtime.tar`, `docker/config/config.yaml` and `data/` if the app uses local SQLite/schema state. On the target machine:
+
+```bash
+docker load -i my_app-runtime.tar
+docker run -d --name my_app -p 8008:8008 \
+  -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/data:/data" \
+  -v "$PWD/logs:/logs" \
+  my_app:runtime
+```
+
+## 8. Runtime dependencies
 
 The deploy bundle contains the binary, config, templates, static assets and documentation. It does not include system shared libraries.
 
@@ -176,7 +252,9 @@ ldd build/deploy/my_app/my_app
 
 A target machine must provide compatible versions of the runtime libraries used during build.
 
-## 8. Adding an endpoint
+The runtime Docker image installs the expected Ubuntu 24.04 runtime packages. If you enable additional modules or database drivers, inspect dependencies with `ldd build/deploy/my_app/my_app` and update `runtime-Dockerfile`.
+
+## 9. Adding an endpoint
 
 Create a handler, for example `handlers/hello_handler.h`, inherit it from `HandlerBase`, then register it in `routes.h`:
 
@@ -191,7 +269,7 @@ handlers/health_handler.h
 routes.h
 ```
 
-## 9. Enabling ORM and JWT
+## 10. Enabling ORM and JWT
 
 ORM is disabled by default in the default template:
 
@@ -207,7 +285,7 @@ cmake .. -DMY_APP_ENABLE_JWT=ON
 
 Auth is enabled by default through the `MY_APP_ENABLE_AUTH` option.
 
-## 10. If the framework was moved
+## 11. If the framework was moved
 
 You can override the path to `qornix_web` during configuration:
 

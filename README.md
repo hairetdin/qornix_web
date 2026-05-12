@@ -36,7 +36,7 @@ target_link_libraries(my_app PRIVATE qornix::web_core)
 
 ### Default application template is beginner-friendly
 
-`./create_new_project.sh ../my_app` generates a default web application with a landing page, built-in docs, a health endpoint, static asset serving and a portable deploy bundle. After build, run the app from:
+`./create_new_project.sh ../my_app` generates a default web application with a landing page, built-in docs, a health endpoint, static asset serving, a portable deploy bundle and a `runtime-Dockerfile`. After build, run the app from:
 
 ```bash
 cd build/deploy/my_app
@@ -52,6 +52,13 @@ http://127.0.0.1:8008/health
 ```
 
 See [`doc/default_app_template.md`](doc/default_app_template.md) for the default template guide.
+
+From the generated project root, build a runtime container image around the deploy bundle:
+
+```bash
+docker build -f runtime-Dockerfile -t my_app:runtime .
+docker run --rm -p 8008:8008 my_app:runtime
+```
 
 ### Generated application previews
 
@@ -191,6 +198,64 @@ Expected response:
 }
 ```
 
+From the generated project root, build and run the generated runtime image:
+
+```bash
+docker build -f runtime-Dockerfile -t my_app:runtime .
+docker run --rm -p 8008:8008 my_app:runtime
+```
+
+For a Dynamic API app, mount writable state outside the container:
+
+```bash
+mkdir -p docker/config data logs
+cp build/deploy/my_app/config.yaml docker/config/config.yaml
+```
+
+Set runtime paths in `docker/config/config.yaml`:
+
+```yaml
+server:
+  address: 0.0.0.0
+  port: 8008
+logging:
+  to_file: true
+  file_path: /logs/server
+database:
+  driver: sqlite
+  path: /data/app.sqlite3
+dynamic_api:
+  schema:
+    file: /data/schema/app.schema.xml
+    exported_file: /data/schema/database.schema.xml
+    history_file: /data/schema/schema_history.jsonl
+```
+
+Run with mounted config, data and logs:
+
+```bash
+docker run -d --name my_app \
+  -p 8008:8008 \
+  -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/data:/data" \
+  -v "$PWD/logs:/logs" \
+  my_app:runtime
+```
+
+To move the image to another computer without a registry:
+
+```bash
+docker save my_app:runtime -o my_app-runtime.tar
+```
+
+Copy `my_app-runtime.tar` plus external `docker/config/config.yaml` and `data/` if you need to move SQLite data and schema history.
+
+On the target machine:
+
+```bash
+docker load -i my_app-runtime.tar
+```
+
 ## What `create_new_project.sh` does
 
 The script creates an application from the `templates/app` template.
@@ -203,7 +268,9 @@ It performs the following actions:
 4. substitutes the project name in `CMakeLists.txt` and the generated README;
 5. writes the relative path to the `qornix_web` directory;
 6. creates the `logs` directory;
-7. creates a project that links the framework through `qornix::web_core`.
+7. includes `runtime-Dockerfile` for building a runtime image around `build/deploy/<app>`;
+8. creates a project that links the framework through `qornix::web_core`;
+9. prints build, run, deploy bundle and Docker image commands.
 
 Examples:
 
@@ -233,6 +300,7 @@ my_app/
 ├── main.cpp
 ├── routes.h
 ├── app_paths.h
+├── runtime-Dockerfile
 ├── handlers/
 │   ├── health_handler.h
 │   └── page_handlers.h

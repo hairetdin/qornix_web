@@ -47,7 +47,8 @@ It includes:
 - getting started, routing, configuration and deployment guides;
 - static assets under `/static/{filename}`;
 - bundled markdown docs rendered as in-app preview pages under `/docs/raw/{filename}`;
-- portable deploy bundle under `build/deploy/<app>`.
+- portable deploy bundle under `build/deploy/<app>`;
+- `runtime-Dockerfile` for building a runtime image around the deploy bundle.
 
 ## Generated layout
 
@@ -59,6 +60,7 @@ my_app/
 ├── main.cpp
 ├── routes.h
 ├── app_paths.h
+├── runtime-Dockerfile
 ├── handlers/
 │   ├── health_handler.h
 │   └── page_handlers.h
@@ -120,6 +122,58 @@ QORNIX_APP_ROOT=/opt/my_app /opt/my_app/my_app
 ```
 
 The bundle contains app assets and documentation, but it does not bundle system shared libraries. Use `ldd ./my_app` to check runtime dependencies.
+
+## Runtime Docker image
+
+From the generated project root, build a runtime image after the deploy bundle exists:
+
+```bash
+cmake --build build --target my_app_deploy
+docker build -f runtime-Dockerfile -t my_app:runtime .
+```
+
+Run with the generated config embedded in the image:
+
+```bash
+docker run --rm -p 8008:8008 my_app:runtime
+```
+
+Run with editable config and persistent file logs:
+
+```bash
+mkdir -p docker/config logs
+cp build/deploy/my_app/config.yaml docker/config/config.yaml
+```
+
+Set file logging in `docker/config/config.yaml`:
+
+```yaml
+server:
+  address: 0.0.0.0
+  port: 8008
+logging:
+  enabled: true
+  to_file: true
+  file_path: /logs/server
+```
+
+Start the container:
+
+```bash
+docker run -d --name my_app \
+  -p 8008:8008 \
+  -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/logs:/logs" \
+  my_app:runtime
+```
+
+To move the app to another computer without a registry:
+
+```bash
+docker save my_app:runtime -o my_app-runtime.tar
+```
+
+Copy `my_app-runtime.tar` and any external config/log directories. On the target machine, run `docker load -i my_app-runtime.tar` and start the container with the same `docker run` shape.
 
 ## Resource lookup
 

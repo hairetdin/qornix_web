@@ -79,4 +79,54 @@ The app root can also be set explicitly:
 QORNIX_APP_ROOT=/opt/my_app /opt/my_app/my_app
 ```
 
-See [`dynamic_api_app_deployment.md`](dynamic_api_app_deployment.md) for deployment layouts, `cmake --install`, runtime root discovery, shared libraries and troubleshooting.
+See [`dynamic_api_app_deployment.md`](dynamic_api_app_deployment.md) for deployment layouts, `cmake --install`, runtime root discovery, runtime Docker images, shared libraries and troubleshooting.
+
+## Runtime Docker image
+
+Generated Dynamic API applications include `runtime-Dockerfile`. From the generated project root, it builds a runtime image around `build/deploy/my_app/`:
+
+```bash
+cmake --build build --target my_app_deploy
+docker build -f runtime-Dockerfile -t my_app:runtime .
+```
+
+For a simple run:
+
+```bash
+docker run --rm -p 8008:8008 my_app:runtime
+```
+
+For persistent SQLite/schema state and logs, mount external paths and use container paths in `config.yaml`:
+
+```bash
+mkdir -p docker/config data logs
+cp build/deploy/my_app/config.yaml docker/config/config.yaml
+```
+
+```yaml
+server:
+  address: 0.0.0.0
+  port: 8008
+logging:
+  to_file: true
+  file_path: /logs/server
+database:
+  driver: sqlite
+  path: /data/app.sqlite3
+dynamic_api:
+  schema:
+    file: /data/schema/app.schema.xml
+    exported_file: /data/schema/database.schema.xml
+    history_file: /data/schema/schema_history.jsonl
+```
+
+```bash
+docker run -d --name my_app \
+  -p 8008:8008 \
+  -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/data:/data" \
+  -v "$PWD/logs:/logs" \
+  my_app:runtime
+```
+
+To transfer without a registry, use `docker save my_app:runtime -o my_app-runtime.tar`, then copy the tar file plus external config and `data/` to the target machine.
