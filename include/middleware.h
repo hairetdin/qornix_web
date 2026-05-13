@@ -8,14 +8,13 @@
 #ifndef MIDDLEWARE_H
 #define MIDDLEWARE_H
 
-#include <boost/beast/http.hpp>
 #include <boost/url.hpp>
 #include <memory>
 #include <functional>
 #include <map>
 
-namespace beast = boost::beast;
-namespace http = beast::http;
+#include "http_response.h"
+
 namespace urls = boost::urls;
 
 // Type for the next handler in the chain
@@ -28,10 +27,10 @@ public:
 
     // Request handling method
     virtual void handle(
-        const http::request<http::string_body>& req,
-        http::response<http::string_body>& res,
+        const Request& req,
+        Response& res,
         const urls::url_view& url_view,
-        const std::map<std::string, std::string>& path_params,
+        const Params& path_params,
         NextHandler next
     ) = 0;
 };

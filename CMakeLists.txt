@@ -1,8 +1,9 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20)
 project(qornix_web)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(QORNIX_BUILD_APP "Build qornix_web demo application" ON)
 option(QORNIX_BUILD_EXAMPLES "Build qornix example applications" OFF)
@@ -85,7 +86,7 @@ target_include_directories(qornix_web_core
         ${QORNIX_YAML_INCLUDE_DIRS}
 )
 
-target_compile_features(qornix_web_core PUBLIC cxx_std_17)
+target_compile_features(qornix_web_core PUBLIC cxx_std_20)
 
 target_link_libraries(qornix_web_core
     PUBLIC
@@ -135,6 +136,7 @@ if(QORNIX_BUILD_APP)
 endif()
 
 if(QORNIX_BUILD_EXAMPLES)
+    add_subdirectory(example/async_routes_server)
     add_subdirectory(example/dynamic_entity_server)
     add_subdirectory(example/dynamic_web_query_builder_server)
     add_subdirectory(example/schema_driven_backend)
@@ -156,4 +158,26 @@ if(QORNIX_BUILD_TESTS)
     )
     target_link_libraries(config_parser_test PRIVATE qornix_web_core)
     add_test(NAME config_parser_test COMMAND config_parser_test)
+
+    add_executable(http_server_smoke_test tests/http_server_smoke_test.cpp)
+    target_include_directories(http_server_smoke_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(http_server_smoke_test PRIVATE qornix_web_core)
+    add_test(NAME http_server_smoke_test COMMAND http_server_smoke_test)
+
+    add_executable(baseline_benchmark_server tests/baseline_benchmark_server.cpp)
+    target_include_directories(baseline_benchmark_server PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(baseline_benchmark_server PRIVATE qornix_web_core)
+
+    if(TARGET qornix_dynamic_api)
+        add_executable(dynamic_openapi_service_test tests/dynamic_openapi_service_test.cpp)
+        target_include_directories(dynamic_openapi_service_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/qornix_dynamic_api
+        )
+        target_link_libraries(dynamic_openapi_service_test PRIVATE qornix_dynamic_api)
+        add_test(NAME dynamic_openapi_service_test COMMAND dynamic_openapi_service_test)
+    endif()
 endif()

@@ -9,7 +9,7 @@
 
 #include <memory>
 #include <string>
-#include <openssl/sha.h>
+#include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <sstream>
 #include <iomanip>
@@ -48,12 +48,14 @@ private:
     }
 
     static std::string sha256(const std::string& input) {
-        unsigned char hash[SHA256_DIGEST_LENGTH];
-        SHA256_CTX sha256;
-        SHA256_Init(&sha256);
-        SHA256_Update(&sha256, input.c_str(), input.size());
-        SHA256_Final(hash, &sha256);
-        return bytesToHex(hash, SHA256_DIGEST_LENGTH);
+        unsigned char hash[EVP_MAX_MD_SIZE];
+        unsigned int hash_length = 0;
+
+        if (EVP_Digest(input.data(), input.size(), hash, &hash_length, EVP_sha256(), nullptr) != 1) {
+            throw std::runtime_error("Failed to calculate SHA-256 digest");
+        }
+
+        return bytesToHex(hash, hash_length);
     }
 
 public:

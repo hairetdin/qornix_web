@@ -83,7 +83,7 @@ qornix_orm/
 
 ### Requirements
 
-- C++17 or newer.
+- C++20 or newer.
 - CMake 4.0 or newer.
 - Boost libraries.
 - Database client libraries depending on enabled drivers:
@@ -846,5 +846,5 @@ The tests verify:
 
 - **Databases**: SQLite is enabled by default; PostgreSQL and MySQL are available as optional drivers.
 - **OS**: Linux, Windows, macOS.
-- **C++ standard**: C++17.
+- **C++ standard**: C++20.
 - **Architectures**: x86, x64.

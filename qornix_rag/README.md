@@ -44,7 +44,7 @@ Qornix RAG solves the problem of finding information quickly in large codebases.
 
 ## Features
 
-- **Pure C++17 implementation**: no Python dependency for the core service.
+- **Pure C++20 implementation**: no Python dependency for the core service.
 - **Hybrid search**: combination of vector and text search.
 - **TF-IDF vectorization**: document representation as vectors.
 - **HNSW-style nearest-neighbor search**: fast approximate retrieval where the vector backend is enabled.
@@ -92,7 +92,7 @@ Done. You can now search the project code.
 
 ### Requirements
 
-- **Compiler**: GCC 7+ or Clang 5+ with C++17 support.
+- **Compiler**: GCC 10+ or Clang 10+ with C++20 support.
 - **CMake**: 3.10+.
 - **Boost libraries**: system, filesystem, url and json, version 1.75+.
 - **Xapian**: full-text search engine.

@@ -20,7 +20,7 @@ See `doc/schema_driven_dynamic_api.md` and `example/schema_driven_backend`.
 
 ## Framework
 
-**Qornix Web** is a C++17 framework for building HTTP servers, REST APIs and web applications on top of Boost.Beast, Boost.URL and Boost.JSON.
+**Qornix Web** is a C++20 framework for building HTTP servers, REST APIs and web applications on top of Boost.Beast, Boost.URL and Boost.JSON.
 
 The framework provides a server core, routing, a middleware pipeline, a DI container, YAML-based configuration, dynamic route extensions and optional modules: ORM, Auth and RAG.
 
@@ -522,7 +522,7 @@ ORM is disabled by default in the application template to keep the initial build
 
 Minimum:
 
-- C++17 compiler: GCC 7+, Clang 5+ or compatible;
+- C++20 compiler: GCC 10+, Clang 10+ or compatible;
 - CMake 3.10+;
 - Boost 1.75+ with `url`, `json`, `log` components;
 - yaml-cpp.
@@ -636,6 +636,77 @@ public:
         const http::request<http::string_body>& req,
         const std::unordered_map<std::string, std::string>& path_params) override;
 };
+```
+
+### Async routes
+
+Qornix also supports coroutine-based route handlers for operations that can suspend without blocking an `io_context` thread.
+
+Use sync routes for CPU-cheap work that finishes immediately, static responses, and existing `HandlerBase` code. Use async routes for timers, async database clients, async HTTP clients, Redis, queues, or other I/O where the handler can `co_await` instead of sleeping or blocking a thread.
+
+```cpp
+server.get_async("/sleep/{ms}",
+    [](Request req, Url, Params params) -> net::awaitable<Response> {
+        auto executor = co_await net::this_coro::executor;
+
+        net::steady_timer timer(executor);
+        timer.expires_after(std::chrono::milliseconds(std::stoi(params.at("ms"))));
+        co_await timer.async_wait(net::use_awaitable);
+
+        co_return response::text("ok", req.version());
+    });
+```
+
+Available async route helpers:
+
+```cpp
+server.get_async(path, handler);
+server.post_async(path, handler);
+server.put_async(path, handler);
+server.patch_async(path, handler);
+server.delete_async(path, handler);
+server.head_async(path, handler);
+server.options_async(path, handler);
+server.any_async(path, handler);
+```
+
+Async handlers receive `Request`, owning `Url`, and `Params` by value:
+
+```cpp
+using AsyncRouteHandler = std::function<net::awaitable<Response>(
+    Request,
+    Url,
+    Params
+)>;
+```
+
+Do not keep references or pointers to request, URL, or params data across `co_await`. Copy values you need, or use the value parameters directly. Async handlers must return a `Response` value. Exceptions thrown inside an async handler are converted to `500 Internal Server Error`.
+
+Do not put blocking work inside async handlers:
+
+```cpp
+// Avoid this inside async handlers.
+std::this_thread::sleep_for(std::chrono::seconds(1));
+blocking_database_query();
+```
+
+Blocking code holds an `io_context` thread and can stop other connections from making progress. Use native async APIs or move blocking work to a dedicated worker pool.
+
+Response helpers for async and sync handlers:
+
+```cpp
+co_return response::text("hello", req.version());
+co_return response::json(R"({"ok":true})", req.version());
+co_return response::status(http::status::accepted, req.version(), "queued");
+co_return response::redirect("/login", req.version());
+```
+
+Runnable example:
+
+```bash
+cmake -S . -B build/async_examples -DQORNIX_BUILD_EXAMPLES=ON -DQORNIX_BUILD_TESTS=OFF
+cmake --build build/async_examples --target async_routes_server --parallel
+./build/async_examples/example/async_routes_server/async_routes_server 8010
 ```
 
 ### Middleware

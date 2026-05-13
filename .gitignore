@@ -8,4 +8,4 @@ qornix_rag/xapian_index/
 qornix_rag/hnsw_index/
 qornix_rag/models/semantic_model.onnx
 local/
-/doc/project_doc/
+#/doc/project_doc/
