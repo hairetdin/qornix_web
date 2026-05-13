@@ -15,6 +15,24 @@ option(QORNIX_ENABLE_SQLITE "Build qornix_orm SQLite driver" ON)
 option(QORNIX_ENABLE_POSTGRES "Build qornix_orm PostgreSQL driver" OFF)
 option(QORNIX_ENABLE_MYSQL "Build qornix_orm MySQL driver" OFF)
 option(QORNIX_BUILD_ORM_TESTS "Build qornix_orm tests" ON)
+option(QORNIX_ENABLE_ASYNC_DB "Build qornix_orm async DB facade and common driver contracts" ON)
+option(QORNIX_ENABLE_ASYNC_POSTGRES "Build qornix_orm async PostgreSQL driver when libpq async backend is available" OFF)
+option(QORNIX_ENABLE_ASYNC_MYSQL "Build qornix_orm async MySQL driver when an Asio-compatible backend is available" OFF)
+
+set(QORNIX_ASYNC_POSTGRES_TEST_URL "$ENV{QORNIX_ASYNC_POSTGRES_URL}" CACHE STRING "PostgreSQL DSN passed to qornix_orm_async_postgres_smoke_test")
+set(QORNIX_ASYNC_MYSQL_TEST_URL "$ENV{QORNIX_ASYNC_MYSQL_URL}" CACHE STRING "MySQL DSN passed to qornix_orm_async_mysql_smoke_test")
+set(QORNIX_ASYNC_MYSQL_TEST_HOST "$ENV{QORNIX_ASYNC_MYSQL_HOST}" CACHE STRING "MySQL host passed to qornix_orm_async_mysql_smoke_test")
+set(QORNIX_ASYNC_MYSQL_TEST_PORT "$ENV{QORNIX_ASYNC_MYSQL_PORT}" CACHE STRING "MySQL port passed to qornix_orm_async_mysql_smoke_test")
+set(QORNIX_ASYNC_MYSQL_TEST_USER "$ENV{QORNIX_ASYNC_MYSQL_USER}" CACHE STRING "MySQL user passed to qornix_orm_async_mysql_smoke_test")
+set(QORNIX_ASYNC_MYSQL_TEST_PASSWORD "$ENV{QORNIX_ASYNC_MYSQL_PASSWORD}" CACHE STRING "MySQL password passed to qornix_orm_async_mysql_smoke_test")
+set(QORNIX_ASYNC_MYSQL_TEST_DATABASE "$ENV{QORNIX_ASYNC_MYSQL_DATABASE}" CACHE STRING "MySQL database passed to qornix_orm_async_mysql_smoke_test")
+
+function(qornix_append_test_environment out_var name value)
+    if(NOT "${value}" STREQUAL "")
+        list(APPEND ${out_var} "${name}=${value}")
+        set(${out_var} "${${out_var}}" PARENT_SCOPE)
+    endif()
+endfunction()
 
 if(QORNIX_BUILD_ORM_TESTS AND NOT QORNIX_ENABLE_SQLITE)
     message(FATAL_ERROR "QORNIX_BUILD_ORM_TESTS requires QORNIX_ENABLE_SQLITE because default tests are self-contained SQLite tests.")
@@ -26,7 +44,7 @@ find_package(PkgConfig REQUIRED)
 set(QORNIX_DB_LIBRARIES)
 set(QORNIX_DB_INCLUDE_DIRS)
 
-if(QORNIX_ENABLE_POSTGRES)
+if(QORNIX_ENABLE_POSTGRES OR QORNIX_ENABLE_ASYNC_POSTGRES)
     pkg_check_modules(LIBPQ REQUIRED libpq)
     list(APPEND QORNIX_DB_LIBRARIES ${LIBPQ_LIBRARIES})
     list(APPEND QORNIX_DB_INCLUDE_DIRS ${LIBPQ_INCLUDE_DIRS})
@@ -42,6 +60,28 @@ if(QORNIX_ENABLE_MYSQL)
     pkg_check_modules(MYSQL REQUIRED mysqlclient)
     list(APPEND QORNIX_DB_LIBRARIES ${MYSQL_LIBRARIES})
     list(APPEND QORNIX_DB_INCLUDE_DIRS ${MYSQL_INCLUDE_DIRS})
+endif()
+
+if(QORNIX_ENABLE_ASYNC_MYSQL)
+    find_package(OpenSSL REQUIRED)
+    include(CheckCXXSourceCompiles)
+    set(QORNIX_SAVED_CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES})
+    set(QORNIX_SAVED_CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES})
+    set(CMAKE_REQUIRED_INCLUDES ${Boost_INCLUDE_DIRS} ${OPENSSL_INCLUDE_DIR})
+    set(CMAKE_REQUIRED_LIBRARIES OpenSSL::SSL OpenSSL::Crypto)
+    check_cxx_source_compiles([=[
+#include <boost/mysql.hpp>
+
+int main() {
+    return 0;
+}
+]=] QORNIX_HAS_BOOST_MYSQL_WITH_OPENSSL)
+    set(CMAKE_REQUIRED_INCLUDES ${QORNIX_SAVED_CMAKE_REQUIRED_INCLUDES})
+    set(CMAKE_REQUIRED_LIBRARIES ${QORNIX_SAVED_CMAKE_REQUIRED_LIBRARIES})
+    if(NOT QORNIX_HAS_BOOST_MYSQL_WITH_OPENSSL)
+        message(FATAL_ERROR "QORNIX_ENABLE_ASYNC_MYSQL requires Boost.MySQL headers (boost/mysql.hpp) and OpenSSL link dependencies")
+    endif()
+    list(APPEND QORNIX_DB_LIBRARIES OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
 # Try to find pugixml (it might not be installed)
@@ -113,6 +153,13 @@ set(DATABASE_SOURCES
     database/config.cpp
 )
 
+if(QORNIX_ENABLE_ASYNC_DB)
+    list(APPEND DATABASE_SOURCES
+        database/async_database_interface.cpp
+        database/async_table_manager.cpp
+    )
+endif()
+
 if(QORNIX_ENABLE_SQLITE)
     list(APPEND DATABASE_SOURCES database/drivers/SQLite/SQLiteDriver.cpp)
 endif()
@@ -123,6 +170,14 @@ endif()
 
 if(QORNIX_ENABLE_POSTGRES)
     list(APPEND DATABASE_SOURCES database/drivers/PostgreSQL/PostgreSQLDriver.cpp)
+endif()
+
+if(QORNIX_ENABLE_ASYNC_POSTGRES)
+    list(APPEND DATABASE_SOURCES database/drivers/PostgreSQL/PostgresAsyncDriver.cpp)
+endif()
+
+if(QORNIX_ENABLE_ASYNC_MYSQL)
+    list(APPEND DATABASE_SOURCES database/drivers/MySQL/MySqlAsyncDriver.cpp)
 endif()
 
 # All source files combined
@@ -151,6 +206,9 @@ target_compile_definitions(qornix_orm PUBLIC
     QORNIX_ENABLE_SQLITE=$<BOOL:${QORNIX_ENABLE_SQLITE}>
     QORNIX_ENABLE_POSTGRES=$<BOOL:${QORNIX_ENABLE_POSTGRES}>
     QORNIX_ENABLE_MYSQL=$<BOOL:${QORNIX_ENABLE_MYSQL}>
+    QORNIX_ENABLE_ASYNC_DB=$<BOOL:${QORNIX_ENABLE_ASYNC_DB}>
+    QORNIX_ENABLE_ASYNC_POSTGRES=$<BOOL:${QORNIX_ENABLE_ASYNC_POSTGRES}>
+    QORNIX_ENABLE_ASYNC_MYSQL=$<BOOL:${QORNIX_ENABLE_ASYNC_MYSQL}>
 )
 
 # Add pugixml if found
@@ -175,6 +233,8 @@ target_include_directories(qornix_orm PUBLIC
         core
         database
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
         ${QORNIX_DB_INCLUDE_DIRS}
 )
 
@@ -378,6 +438,14 @@ if(QORNIX_BUILD_ORM_TESTS)
         set_tests_properties(qornix_orm_schema_history_test PROPERTIES LABELS "qornix_orm;schema-plan;schema-history")
     endif()
 
+
+    if(QORNIX_ENABLE_ASYNC_DB)
+        add_executable(async_db_mock_test tests/async_db_mock_test.cpp)
+        target_link_libraries(async_db_mock_test qornix_orm)
+        add_test(NAME qornix_orm_async_db_mock_test COMMAND async_db_mock_test)
+        set_tests_properties(qornix_orm_async_db_mock_test PROPERTIES LABELS "qornix_orm;async-db;mock")
+    endif()
+
     if(QORNIX_ENABLE_MYSQL)
         add_executable(mysql_driver_test tests/mysql_driver_test.cpp)
         target_link_libraries(mysql_driver_test qornix_orm)
@@ -390,5 +458,63 @@ if(QORNIX_BUILD_ORM_TESTS)
         target_link_libraries(postgres_driver_test qornix_orm)
         add_test(NAME qornix_orm_postgres_driver_test COMMAND postgres_driver_test)
         set_tests_properties(qornix_orm_postgres_driver_test PROPERTIES LABELS "qornix_orm;integration-postgres")
+    endif()
+
+    if(QORNIX_ENABLE_ASYNC_POSTGRES)
+        add_executable(async_postgres_smoke_test tests/async_postgres_smoke_test.cpp)
+        target_link_libraries(async_postgres_smoke_test qornix_orm)
+        add_test(NAME qornix_orm_async_postgres_smoke_test COMMAND async_postgres_smoke_test)
+        set(QORNIX_ASYNC_POSTGRES_TEST_ENV)
+        qornix_append_test_environment(QORNIX_ASYNC_POSTGRES_TEST_ENV
+            QORNIX_ASYNC_POSTGRES_URL
+            "${QORNIX_ASYNC_POSTGRES_TEST_URL}"
+        )
+        if(QORNIX_ASYNC_POSTGRES_TEST_ENV)
+            set_tests_properties(qornix_orm_async_postgres_smoke_test PROPERTIES
+                LABELS "qornix_orm;async-db;integration-postgres"
+                ENVIRONMENT "${QORNIX_ASYNC_POSTGRES_TEST_ENV}"
+            )
+        else()
+            set_tests_properties(qornix_orm_async_postgres_smoke_test PROPERTIES LABELS "qornix_orm;async-db;integration-postgres")
+        endif()
+    endif()
+
+    if(QORNIX_ENABLE_ASYNC_MYSQL)
+        add_executable(async_mysql_smoke_test tests/async_mysql_smoke_test.cpp)
+        target_link_libraries(async_mysql_smoke_test qornix_orm)
+        add_test(NAME qornix_orm_async_mysql_smoke_test COMMAND async_mysql_smoke_test)
+        set(QORNIX_ASYNC_MYSQL_TEST_ENV)
+        qornix_append_test_environment(QORNIX_ASYNC_MYSQL_TEST_ENV
+            QORNIX_ASYNC_MYSQL_URL
+            "${QORNIX_ASYNC_MYSQL_TEST_URL}"
+        )
+        qornix_append_test_environment(QORNIX_ASYNC_MYSQL_TEST_ENV
+            QORNIX_ASYNC_MYSQL_HOST
+            "${QORNIX_ASYNC_MYSQL_TEST_HOST}"
+        )
+        qornix_append_test_environment(QORNIX_ASYNC_MYSQL_TEST_ENV
+            QORNIX_ASYNC_MYSQL_PORT
+            "${QORNIX_ASYNC_MYSQL_TEST_PORT}"
+        )
+        qornix_append_test_environment(QORNIX_ASYNC_MYSQL_TEST_ENV
+            QORNIX_ASYNC_MYSQL_USER
+            "${QORNIX_ASYNC_MYSQL_TEST_USER}"
+        )
+        qornix_append_test_environment(QORNIX_ASYNC_MYSQL_TEST_ENV
+            QORNIX_ASYNC_MYSQL_PASSWORD
+            "${QORNIX_ASYNC_MYSQL_TEST_PASSWORD}"
+        )
+        qornix_append_test_environment(QORNIX_ASYNC_MYSQL_TEST_ENV
+            QORNIX_ASYNC_MYSQL_DATABASE
+            "${QORNIX_ASYNC_MYSQL_TEST_DATABASE}"
+        )
+        if(QORNIX_ASYNC_MYSQL_TEST_ENV)
+            set_tests_properties(qornix_orm_async_mysql_smoke_test PROPERTIES
+                LABELS "qornix_orm;async-db;integration-mysql"
+                ENVIRONMENT "${QORNIX_ASYNC_MYSQL_TEST_ENV}"
+            )
+        else()
+            set_tests_properties(qornix_orm_async_mysql_smoke_test PROPERTIES LABELS "qornix_orm;async-db;integration-mysql")
+        endif()
     endif()
 endif()

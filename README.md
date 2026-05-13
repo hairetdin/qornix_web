@@ -946,7 +946,21 @@ server.get_async("/users/{id}", [blocking_pool](Request req, Url, Params params)
 });
 ```
 
-`qornix::async::AsyncDbPool` is a thin awaitable pool facade for async DB-style workloads and examples. It models bounded connection acquisition, waiter limits and query timeout behavior so application code can be migrated to a real Asio-compatible PostgreSQL/MySQL client without creating one database connection per HTTP request.
+`qornix::async::AsyncDbPool` is a thin awaitable pool facade for async DB-style workloads and examples. It models bounded connection acquisition, waiter limits and query timeout behavior so application code can be migrated to the dedicated async DB layer without creating one database connection per HTTP request.
+
+### Async DB layer
+
+The dedicated async DB foundation lives in `include/db/*` and `qornix_orm/database/async_*`. It provides:
+
+- `qornix::db::AsyncDatabase`, `AsyncDbConnection` and `AsyncTransaction`;
+- bounded `AsyncConnectionPool` with acquire timeout and waiter limits;
+- `CancellationToken` and `QueryOptions` for query deadline control;
+- `IAsyncDatabaseDriver` for real async PostgreSQL/MySQL driver implementations;
+- `MockAsyncDriver` for tests and examples;
+- `SyncOffloadedAsyncDriver` for explicitly marked legacy blocking drivers;
+- `AsyncDatabaseInterface` and `AsyncTableManager` for ORM-facing coroutine code.
+
+See `doc/async_db.md` for usage examples and `doc/project_doc/roadmap_async_db_changelog.md` for implementation status. PostgreSQL/MySQL should only be advertised as real async once their non-blocking driver integrations and DB benchmarks are completed.
 
 Graceful shutdown stops accepting new connections, waits for active requests until a deadline, then stops the `io_context`:
 
