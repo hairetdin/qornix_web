@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
-"""Qornix sprint 0 baseline benchmark runner.
+"""Qornix async benchmark runner for reproducible HTTP load scenarios.
 
-The script starts tests/baseline_benchmark_server, runs reproducible HTTP/1.1
-keep-alive scenarios, and prints Markdown tables with latency/resource metrics.
-It intentionally uses only the Python standard library.
+The script starts tests/baseline_benchmark_server, runs HTTP/1.1 keep-alive
+scenarios, writes a Markdown report to doc/benchmark.md by default, and also
+prints the report to stdout. It intentionally uses only the Python standard
+library.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import signal
 import socket
 import subprocess
 import sys
 import time
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -27,8 +30,12 @@ class ScenarioResult:
     path: str
     concurrency: int
     duration_s: float
-    requests: int
+    responses: int
     errors: int
+    status_2xx: int
+    status_4xx: int
+    status_5xx: int
+    client_errors: int
     rps: float
     p50_ms: float
     p95_ms: float
@@ -36,6 +43,11 @@ class ScenarioResult:
     rss_kb: int | None
     threads: int | None
     fds: int | None
+    cpu_percent: float | None
+    active_requests_end: int | None
+    rejected_requests_delta: int | None
+    timed_out_requests_delta: int | None
+    rejected_db_waiters_delta: int | None
 
 
 @dataclass
@@ -78,6 +90,47 @@ def read_proc_metrics(pid: int) -> tuple[int | None, int | None, int | None]:
         fds = None
 
     return rss_kb, threads, fds
+
+
+def read_proc_cpu_ticks(pid: int) -> int | None:
+    try:
+        parts = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()
+        return int(parts[13]) + int(parts[14])
+    except (FileNotFoundError, PermissionError, ValueError, IndexError):
+        return None
+
+
+def calculate_cpu_percent(start_ticks: int | None, end_ticks: int | None, elapsed_s: float) -> float | None:
+    if start_ticks is None or end_ticks is None or elapsed_s <= 0:
+        return None
+    try:
+        hz = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+    except (KeyError, ValueError, OSError):
+        hz = 100
+    return ((end_ticks - start_ticks) / hz) / elapsed_s * 100.0
+
+
+def fetch_server_metrics(host: str, port: int) -> dict[str, int | float]:
+    request = (
+        "GET /qornix/metrics HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+    ).encode("ascii")
+    try:
+        with socket.create_connection((host, port), timeout=1.0) as sock:
+            sock.sendall(request)
+            data = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        _, _, body = data.partition(b"\r\n\r\n")
+        parsed = json.loads(body.decode("utf-8"))
+        return parsed if isinstance(parsed, dict) else {}
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
 
 
 async def sample_proc_metrics(pid: int,
@@ -131,7 +184,8 @@ async def worker(host: str,
                  path: str,
                  deadline: float,
                  latencies: list[float],
-                 errors: list[int]) -> None:
+                 statuses: list[int],
+                 client_errors: list[int]) -> None:
     request = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}:{port}\r\n"
@@ -142,7 +196,7 @@ async def worker(host: str,
     try:
         reader, writer = await asyncio.open_connection(host, port)
     except OSError:
-        errors.append(1)
+        client_errors.append(1)
         return
 
     try:
@@ -152,18 +206,35 @@ async def worker(host: str,
             await writer.drain()
             status = await read_response(reader)
             elapsed_ms = (time.perf_counter() - started) * 1000.0
-            if status != 200:
-                errors.append(1)
-            else:
-                latencies.append(elapsed_ms)
+            statuses.append(status)
+            latencies.append(elapsed_ms)
     except (OSError, asyncio.IncompleteReadError, ConnectionError, ValueError):
-        errors.append(1)
+        client_errors.append(1)
     finally:
         writer.close()
         try:
             await writer.wait_closed()
         except OSError:
             pass
+
+
+def metric_int(metrics: dict[str, int | float], key: str) -> int | None:
+    if key not in metrics:
+        return None
+    try:
+        return int(metrics[key])
+    except (TypeError, ValueError):
+        return None
+
+
+def metric_delta(before: dict[str, int | float],
+                 after: dict[str, int | float],
+                 key: str) -> int | None:
+    start = metric_int(before, key)
+    end = metric_int(after, key)
+    if start is None or end is None:
+        return None
+    return max(0, end - start)
 
 
 async def run_scenario(host: str,
@@ -174,37 +245,61 @@ async def run_scenario(host: str,
                        concurrency: int,
                        duration_s: float) -> ScenarioResult:
     latencies: list[float] = []
-    errors: list[int] = []
+    statuses: list[int] = []
+    client_errors: list[int] = []
     metric_samples: list[tuple[int | None, int | None, int | None]] = []
     stop_sampling = asyncio.Event()
     deadline = time.perf_counter() + duration_s
+    before_server_metrics = fetch_server_metrics(host, port)
     started = time.perf_counter()
+    start_cpu_ticks = read_proc_cpu_ticks(pid)
     sampler = asyncio.create_task(sample_proc_metrics(pid, stop_sampling, metric_samples))
     try:
         await asyncio.gather(*[
-            worker(host, port, path, deadline, latencies, errors)
+            worker(host, port, path, deadline, latencies, statuses, client_errors)
             for _ in range(concurrency)
         ])
     finally:
         elapsed = max(time.perf_counter() - started, 0.001)
+        end_cpu_ticks = read_proc_cpu_ticks(pid)
         metric_samples.append(read_proc_metrics(pid))
         stop_sampling.set()
         await sampler
+
+    after_server_metrics = fetch_server_metrics(host, port)
+    active_requests_end = metric_int(after_server_metrics, "active_requests")
+    if active_requests_end is not None:
+        # The metrics request itself is active while the snapshot is produced.
+        active_requests_end = max(0, active_requests_end - 1)
+    responses = len(statuses)
+    status_2xx = sum(1 for status in statuses if 200 <= status < 300)
+    status_4xx = sum(1 for status in statuses if 400 <= status < 500)
+    status_5xx = sum(1 for status in statuses if 500 <= status < 600)
+    errors = (responses - status_2xx) + len(client_errors)
 
     return ScenarioResult(
         name=name,
         path=path,
         concurrency=concurrency,
         duration_s=elapsed,
-        requests=len(latencies),
-        errors=len(errors),
-        rps=len(latencies) / elapsed,
+        responses=responses,
+        errors=errors,
+        status_2xx=status_2xx,
+        status_4xx=status_4xx,
+        status_5xx=status_5xx,
+        client_errors=len(client_errors),
+        rps=responses / elapsed,
         p50_ms=percentile(latencies, 0.50),
         p95_ms=percentile(latencies, 0.95),
         p99_ms=percentile(latencies, 0.99),
         rss_kb=max_metric(metric_samples, 0),
         threads=max_metric(metric_samples, 1),
         fds=max_metric(metric_samples, 2),
+        cpu_percent=calculate_cpu_percent(start_cpu_ticks, end_cpu_ticks, elapsed),
+        active_requests_end=active_requests_end,
+        rejected_requests_delta=metric_delta(before_server_metrics, after_server_metrics, "rejected_requests"),
+        timed_out_requests_delta=metric_delta(before_server_metrics, after_server_metrics, "timed_out_requests"),
+        rejected_db_waiters_delta=metric_delta(before_server_metrics, after_server_metrics, "rejected_db_waiters"),
     )
 
 
@@ -323,33 +418,51 @@ def fmt(value: int | float | None) -> str:
     return str(value)
 
 
-def print_markdown(results: Iterable[ScenarioResult], idle: IdleResult | None, args: argparse.Namespace) -> None:
-    print("# Qornix Sprint 0 Baseline Benchmark")
-    print()
-    print(f"- server: `{args.server}`")
-    print(f"- address: `{args.host}:{args.port}`")
-    print(f"- server threads: `{args.server_threads}`")
-    print(f"- scenario duration target: `{args.duration}s`")
-    print()
-    print("| scenario | endpoint | concurrency | requests | errors | RPS | p50 ms | p95 ms | p99 ms | RSS KB | threads | fd |")
-    print("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+def render_markdown(results: Iterable[ScenarioResult], idle: IdleResult | None, args: argparse.Namespace) -> str:
+    lines: list[str] = []
+    generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+
+    lines.append("# Qornix Async Benchmark")
+    lines.append("")
+    lines.append(f"- generated at: `{generated_at}`")
+    lines.append(f"- server: `{args.server}`")
+    lines.append(f"- address: `{args.host}:{args.port}`")
+    lines.append(f"- server threads: `{args.server_threads}`")
+    lines.append(f"- scenario duration target: `{args.duration}s`")
+    lines.append(f"- extended load scenarios: `{'enabled' if args.extended_load else 'disabled'}`")
+    lines.append("")
+    lines.append("Counters marked as `delta` are per-scenario increments measured from `/qornix/metrics`, not cumulative process totals.")
+    lines.append("")
+    lines.append("| scenario | endpoint | concurrency | responses | errors | 2xx | 4xx | 5xx | client errors | RPS | p50 ms | p95 ms | p99 ms | RSS KB | CPU % | threads | fd | active end | rejected delta | timeout delta | DB reject delta |")
+    lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for result in results:
-        print(
-            f"| {result.name} | `{result.path}` | {result.concurrency} | {result.requests} | "
-            f"{result.errors} | {result.rps:.2f} | {result.p50_ms:.2f} | {result.p95_ms:.2f} | "
-            f"{result.p99_ms:.2f} | {fmt(result.rss_kb)} | {fmt(result.threads)} | {fmt(result.fds)} |"
+        lines.append(
+            f"| {result.name} | `{result.path}` | {result.concurrency} | {result.responses} | "
+            f"{result.errors} | {result.status_2xx} | {result.status_4xx} | {result.status_5xx} | "
+            f"{result.client_errors} | {result.rps:.2f} | {result.p50_ms:.2f} | {result.p95_ms:.2f} | "
+            f"{result.p99_ms:.2f} | {fmt(result.rss_kb)} | {fmt(result.cpu_percent)} | "
+            f"{fmt(result.threads)} | {fmt(result.fds)} | {fmt(result.active_requests_end)} | "
+            f"{fmt(result.rejected_requests_delta)} | {fmt(result.timed_out_requests_delta)} | "
+            f"{fmt(result.rejected_db_waiters_delta)} |"
         )
-    print()
+    lines.append("")
 
     if idle is None:
-        print("Idle keep-alive scenario: not requested.")
+        lines.append("Idle keep-alive scenario: not requested.")
     else:
-        print("| idle keep-alive requested | opened | failed | hold s | RSS KB | threads | fd |")
-        print("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
-        print(
+        lines.append("| idle keep-alive requested | opened | failed | hold s | RSS KB | threads | fd |")
+        lines.append("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+        lines.append(
             f"| {idle.requested} | {idle.opened} | {idle.failed} | {idle.hold_s:.2f} | "
             f"{fmt(idle.rss_kb)} | {fmt(idle.threads)} | {fmt(idle.fds)} |"
         )
+
+    return "\n".join(lines) + "\n"
+
+
+def write_report(markdown: str, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(markdown, encoding="utf-8")
 
 
 async def async_main(args: argparse.Namespace) -> int:
@@ -358,10 +471,27 @@ async def async_main(args: argparse.Namespace) -> int:
         wait_until_ready(args.host, args.port, timeout_s=10.0)
         results = [
             await run_scenario(args.host, args.port, process.pid, "fast", "/bench/fast", args.concurrency, args.duration),
-            await run_scenario(args.host, args.port, process.pid, "delay_10ms", "/bench/delay/10", args.concurrency, args.duration),
-            await run_scenario(args.host, args.port, process.pid, "delay_100ms", "/bench/delay/100", args.concurrency, args.duration),
+            await run_scenario(args.host, args.port, process.pid, "async_delay_10ms", "/bench/delay/10", args.concurrency, args.duration),
+            await run_scenario(args.host, args.port, process.pid, "async_delay_100ms", "/bench/delay/100", args.concurrency, args.duration),
             await run_scenario(args.host, args.port, process.pid, "fast_1k_concurrent", "/bench/fast", 1000, args.duration),
         ]
+        if args.extended_load:
+            for concurrency in args.load_concurrency:
+                results.append(await run_scenario(
+                    args.host, args.port, process.pid, f"load_fast_{concurrency}", "/health", concurrency, args.duration
+                ))
+                results.append(await run_scenario(
+                    args.host, args.port, process.pid, f"load_async_sleep_{concurrency}", "/sleep?ms=100", concurrency, args.duration
+                ))
+            results.append(await run_scenario(
+                args.host, args.port, process.pid, "db_pool_normal", "/users/42", args.db_normal_concurrency, args.duration
+            ))
+            results.append(await run_scenario(
+                args.host, args.port, process.pid, "db_pool_overload", "/users/42", args.db_concurrency, args.duration
+            ))
+            results.append(await run_scenario(
+                args.host, args.port, process.pid, "timeout_guard", "/sleep?ms=3000", args.concurrency, args.duration
+            ))
         idle = None
         if args.idle_connections > 0:
             idle = await run_idle_keepalive(
@@ -372,7 +502,10 @@ async def async_main(args: argparse.Namespace) -> int:
                 args.idle_hold,
                 args.idle_batch_size,
             )
-        print_markdown(results, idle, args)
+        markdown = render_markdown(results, idle, args)
+        write_report(markdown, args.output)
+        print(markdown, end="")
+        print(f"Benchmark report written to {args.output}", file=sys.stderr)
         return 0
     finally:
         stop_server(process)
@@ -390,6 +523,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--idle-connections", type=int, default=0)
     parser.add_argument("--idle-hold", type=float, default=5.0)
     parser.add_argument("--idle-batch-size", type=int, default=500)
+    parser.add_argument("--extended-load", action="store_true", help="run additional high-concurrency load scenarios")
+    parser.add_argument("--load-concurrency", type=int, nargs="*", default=[1000, 5000, 10000])
+    parser.add_argument("--db-normal-concurrency", type=int, default=128, help="concurrency for the normal DB pool scenario")
+    parser.add_argument("--db-concurrency", type=int, default=10000, help="concurrency for the DB pool overload scenario")
+    parser.add_argument("--output", type=Path, default=Path("doc/benchmark.md"), help="Markdown report path")
     args = parser.parse_args()
 
     if args.port == 0:

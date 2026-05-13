@@ -882,7 +882,8 @@ target_link_libraries(my_app PRIVATE qornix::web_core)
 | Document | Purpose |
 |----------|---------|
 | [`doc/qornix_create_new_app_instruction.md`](doc/qornix_create_new_app_instruction.md) | Detailed guide for creating a standalone application based on Qornix Web |
-| [`doc/roadmap_step_by_step_example.md`](doc/project_doc/roadmap_step_by_step_example.md) | Step-by-step example of creating an application and using core framework modules |
+| [`doc/benchmark.md`](doc/benchmark.md) | Last generated performance benchmark report |
+| [`changelog.md`](changelog.md) | User-facing project changes and new capabilities |
 | [`example/dynamic_web_query_builder_server/README.md`](example/dynamic_web_query_builder_server/README.md) | Dynamic API, QueryBuilder UI and XML schema manager example |
 | `README.md` | Framework overview, quick start, architecture and main capabilities |
 
@@ -894,3 +895,101 @@ target_link_libraries(my_app PRIVATE qornix::web_core)
 4. Register routes in the application `routes.h`.
 5. Configure the application through `config.yaml`.
 6. Enable additional capabilities through CMake options and framework modules.
+
+## Async production controls
+
+The async server has a small production-oriented control layer for coroutine routes and middleware.
+The defaults are intentionally conservative and can be tuned with `HttpServerOptions` or setter methods:
+
+```cpp
+HttpServerOptions options;
+options.route_timeout = std::chrono::seconds{3};
+options.read_timeout = std::chrono::seconds{30};
+options.write_timeout = std::chrono::seconds{30};
+options.max_active_requests = 10000;
+options.max_request_body_size = 1024 * 1024;
+options.structured_access_log = true;
+
+HttpServer server(ioc, endpoint, options);
+server.set_route_timeout("/sleep", std::chrono::milliseconds{250});
+server.set_route_concurrency_limit("/users/{id}", 100);
+server.add_metrics_route(); // GET /qornix/metrics
+```
+
+Route timeout expiry returns `504 Gateway Timeout`. Global overload returns `503 Service Unavailable`, while a per-route concurrency limit returns `429 Too Many Requests`. The session tracks cancellation state and suppresses late coroutine responses after a timeout or disconnect.
+
+Async middleware can perform coroutine work before the route handler:
+
+```cpp
+server.add_async_middleware([](RequestContext& ctx)
+    -> net::awaitable<std::optional<Response>> {
+    if (ctx.url.path() == "/private" && !authorized(ctx)) {
+        co_return response::status(http::status::unauthorized,
+                                   ctx.request->version(),
+                                   "unauthorized");
+    }
+    co_return std::nullopt; // continue pipeline
+});
+```
+
+For existing blocking drivers, use the offload pool instead of blocking an `io_context` thread:
+
+```cpp
+auto blocking_pool = std::make_shared<qornix::async::BlockingTaskPool>(8, 1024, server.metrics_ptr());
+
+server.get_async("/users/{id}", [blocking_pool](Request req, Url, Params params)
+    -> net::awaitable<Response> {
+    auto user_json = co_await blocking_pool->submit([id = params.at("id")] {
+        return blocking_db_fetch_user(id);
+    }, std::chrono::seconds{1});
+    co_return response::json(user_json, req.version());
+});
+```
+
+`qornix::async::AsyncDbPool` is a thin awaitable pool facade for async DB-style workloads and examples. It models bounded connection acquisition, waiter limits and query timeout behavior so application code can be migrated to a real Asio-compatible PostgreSQL/MySQL client without creating one database connection per HTTP request.
+
+Graceful shutdown stops accepting new connections, waits for active requests until a deadline, then stops the `io_context`:
+
+```cpp
+server.graceful_shutdown(std::chrono::seconds{10});
+```
+
+## Performance benchmark
+
+The benchmark runner starts `baseline_benchmark_server`, runs reproducible HTTP load scenarios, prints a Markdown report, and writes the latest result to `doc/benchmark.md` by default.
+
+Build the benchmark server:
+
+```bash
+cmake -S . -B build/perf -DCMAKE_BUILD_TYPE=Release -DQORNIX_BUILD_TESTS=ON -DQORNIX_BUILD_RAG=OFF
+cmake --build build/perf --target baseline_benchmark_server --parallel
+```
+
+Run the standard benchmark:
+
+```bash
+scripts/baseline_benchmark.py \
+  --server build/perf/baseline_benchmark_server \
+  --duration 5 \
+  --concurrency 64
+```
+
+Run the full performance benchmark used for the checked-in report:
+
+```bash
+scripts/baseline_benchmark.py \
+  --server build/perf/baseline_benchmark_server \
+  --port 18080 \
+  --server-threads 32 \
+  --duration 10 \
+  --concurrency 256 \
+  --extended-load \
+  --load-concurrency 1000 5000 10000 \
+  --db-normal-concurrency 128 \
+  --db-concurrency 10000 \
+  --idle-connections 10000
+```
+
+The report is saved to `doc/benchmark.md`. Use `--output path/to/report.md` to write it elsewhere. The report separates successful responses, managed HTTP overload responses and client-side errors. Metrics columns marked as `delta` are per-scenario increments, not cumulative process totals.
+
+The current reference run in `doc/benchmark.md` demonstrates 10k idle keep-alive connections opened successfully, 10k active HTTP load without client errors, async timer routes without blocking worker threads, a clean normal DB-pool scenario at 128 concurrency, and controlled overload/timeout accounting for stress scenarios.

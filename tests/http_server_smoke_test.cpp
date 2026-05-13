@@ -11,6 +11,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <future>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -248,6 +249,140 @@ void assert_async_does_not_block_other_requests() {
     }
 }
 
+
+void assert_timeout_limits_middleware_and_pools() {
+    const auto port = allocate_loopback_port();
+
+    net::io_context ioc;
+    HttpServerOptions options;
+    options.route_timeout = std::chrono::milliseconds{60};
+    options.read_timeout = std::chrono::seconds{5};
+    options.write_timeout = std::chrono::seconds{5};
+    options.max_active_requests = 64;
+
+    HttpServer server(ioc, tcp::endpoint{net::ip::make_address("127.0.0.1"), port}, options);
+    server.add_metrics_route();
+
+    auto metrics = server.metrics_ptr();
+    auto blocking_pool = std::make_shared<qornix::async::BlockingTaskPool>(2, 8, metrics);
+    auto db_pool = std::make_shared<qornix::async::AsyncDbPool>(1, 4, metrics);
+
+    server.add_async_middleware([](RequestContext& ctx) -> net::awaitable<std::optional<Response>> {
+        auto executor = co_await net::this_coro::executor;
+        net::steady_timer timer(executor);
+        timer.expires_after(std::chrono::milliseconds{1});
+        co_await timer.async_wait(net::use_awaitable);
+
+        if (ctx.url.path() == "/middleware/stop") {
+            co_return response::status(http::status::unauthorized,
+                                       ctx.request ? ctx.request->version() : 11,
+                                       "stopped-by-async-middleware");
+        }
+        ctx.state["async_middleware"] = "pass";
+        co_return std::nullopt;
+    });
+
+    server.add_route("/health", [](const auto&, auto& res, const auto&, const auto&) {
+        set_text_response(res, http::status::ok, "healthy");
+    });
+
+    server.add_route("/limited-body", [](const auto&, auto& res, const auto&, const auto&) {
+        set_text_response(res, http::status::ok, "body-ok");
+    }, RouteOptions{std::nullopt, std::nullopt, std::size_t{4}});
+
+    server.get_async("/timeout", [](Request req, Url, Params) -> net::awaitable<Response> {
+        auto executor = co_await net::this_coro::executor;
+        net::steady_timer timer(executor);
+        timer.expires_after(std::chrono::milliseconds{150});
+        co_await timer.async_wait(net::use_awaitable);
+        co_return response::text("late", req.version());
+    }, RouteOptions{std::chrono::milliseconds{20}, std::nullopt, std::nullopt});
+
+    server.get_async("/route-limited", [](Request req, Url, Params) -> net::awaitable<Response> {
+        auto executor = co_await net::this_coro::executor;
+        net::steady_timer timer(executor);
+        timer.expires_after(std::chrono::milliseconds{120});
+        co_await timer.async_wait(net::use_awaitable);
+        co_return response::text("limited-ok", req.version());
+    }, RouteOptions{std::chrono::milliseconds{500}, std::size_t{1}, std::nullopt});
+
+    server.get_async("/blocking", [blocking_pool](Request req, Url, Params) -> net::awaitable<Response> {
+        auto value = co_await blocking_pool->submit([] {
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+            return std::string{"blocking-ok"};
+        }, std::chrono::milliseconds{200});
+        co_return response::text(std::move(value), req.version());
+    });
+
+    server.get_async("/db/{id}", [db_pool](Request req, Url, Params params) -> net::awaitable<Response> {
+        auto conn = co_await db_pool->acquire(std::chrono::milliseconds{200});
+        auto user = co_await conn.fetch_user(params.at("id"), std::chrono::milliseconds{5});
+        co_return response::json(std::move(user), req.version());
+    });
+
+    server.add_route("/middleware/pass", [](const auto&, auto& res, const auto&, const auto&) {
+        set_text_response(res, http::status::ok, "middleware-pass-ok");
+    });
+
+    server.run();
+    std::vector<std::thread> io_threads;
+    for (int i = 0; i < 2; ++i) {
+        io_threads.emplace_back([&ioc]() { ioc.run(); });
+    }
+
+    auto join_io_threads = [&io_threads]() {
+        for (auto& thread : io_threads) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+    };
+
+    try {
+        wait_for_server(port);
+        expect_response(port, "/timeout", http::status::gateway_timeout, "Gateway Timeout");
+        expect_response(port, http::verb::post, "/limited-body", "toolong", http::status::payload_too_large, "too large");
+        expect_response(port, "/middleware/stop", http::status::unauthorized, "stopped-by-async-middleware");
+        expect_response(port, "/middleware/pass", http::status::ok, "middleware-pass-ok");
+        expect_response(port, "/blocking", http::status::ok, "blocking-ok");
+        expect_response(port, "/db/42", http::status::ok, "\"id\":\"42\"");
+
+        net::io_context client_ioc;
+        beast::tcp_stream first_stream(client_ioc);
+        tcp::resolver resolver(client_ioc);
+        first_stream.connect(resolver.resolve("127.0.0.1", std::to_string(port)));
+        http::request<http::empty_body> first_req{http::verb::get, "/route-limited", 11};
+        first_req.set(http::field::host, "127.0.0.1");
+        first_req.keep_alive(false);
+        http::write(first_stream, first_req);
+
+        auto rejected = request_once(port, "/route-limited");
+        assert(rejected.result() == http::status::too_many_requests);
+
+        beast::flat_buffer buffer;
+        http::response<http::string_body> first_res;
+        http::read(first_stream, buffer, first_res);
+        assert(first_res.result() == http::status::ok);
+        assert(first_res.body() == "limited-ok");
+
+        beast::error_code ec;
+        first_stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+
+        auto metrics_res = request_once(port, "/qornix/metrics");
+        assert(metrics_res.result() == http::status::ok);
+        assert(metrics_res.body().find("total_requests") != std::string::npos);
+        assert(metrics->snapshot().timed_out_requests >= 1);
+        assert(metrics->snapshot().rejected_requests >= 1);
+    } catch (...) {
+        server.graceful_shutdown(std::chrono::milliseconds{100});
+        join_io_threads();
+        throw;
+    }
+
+    server.graceful_shutdown(std::chrono::milliseconds{100});
+    join_io_threads();
+}
+
 } // namespace
 
 int main() {
@@ -406,6 +541,7 @@ int main() {
     join_io_threads();
 
     assert_async_does_not_block_other_requests();
+    assert_timeout_limits_middleware_and_pools();
 
     std::cout << "http_server_smoke_test passed" << std::endl;
     return 0;

@@ -1,5 +1,154 @@
 # Async Roadmap Changelog
 
+## 2026-05-13 - Sprints 6-12: Timeout, backpressure, offload pool, async middleware, observability и load testing
+
+Выполнено по Sprint 6:
+
+- Добавлен `HttpServerOptions` с настройками:
+  - `route_timeout`;
+  - `read_timeout`;
+  - `write_timeout`;
+  - `graceful_shutdown_timeout`;
+  - `max_active_requests`;
+  - `max_queued_requests`;
+  - `max_request_body_size`;
+  - `structured_access_log`.
+- Добавлены per-route настройки через `RouteOptions`:
+  - `timeout`;
+  - `max_concurrent_requests`;
+  - `max_request_body_size`.
+- Добавлены runtime setters:
+  - `set_global_route_timeout(...)`;
+  - `set_read_timeout(...)`;
+  - `set_write_timeout(...)`;
+  - `set_route_timeout(...)`;
+  - `set_route_concurrency_limit(...)`;
+  - `set_route_body_limit(...)`.
+- `Session` получила read/write/request timers.
+- Async route timeout возвращает `504 Gateway Timeout`.
+- Late coroutine response после timeout/disconnect подавляется через generation check и cancellation flag.
+- Введен `RequestContext` с request id, deadline, route pattern, state и cancellation flag.
+
+Выполнено по Sprint 7:
+
+- Добавлен global active request limit.
+- Добавлен per-route concurrent request limit.
+- Добавлен `qornix::async::AsyncSemaphore` с RAII `Permit`, max active и max waiters.
+- Добавлен max request body size на global и per-route уровнях.
+- Overload behavior:
+  - global limit -> `503 Service Unavailable`;
+  - route limit -> `429 Too Many Requests`;
+  - body limit -> `413 Payload Too Large`.
+- Метрики учитывают rejected, timed out, cancelled и active requests.
+
+Выполнено по Sprint 8:
+
+- Добавлен header-only `qornix::async::BlockingTaskPool`.
+- Pool исполняет blocking callbacks в отдельном `boost::asio::thread_pool`.
+- Добавлены ограничения thread pool queue и timeout ожидания результата.
+- Добавлена публикация metrics:
+  - active blocking tasks;
+  - queued blocking tasks;
+  - rejected blocking tasks.
+- README дополнен примером безопасного offload для blocking DB/API вызовов.
+
+Выполнено по Sprint 9:
+
+- Добавлен thin awaitable `qornix::async::AsyncDbPool` и `AsyncDbConnection` как migration facade для настоящего async DB layer.
+- Pool ограничивает max connections и max waiters через `AsyncSemaphore`.
+- `acquire()` поддерживает timeout.
+- Mock `fetch_user(...)` показывает awaitable DB-style API без блокировки `io_context` thread.
+- README описывает назначение facade и переход к реальному Asio-compatible PostgreSQL/MySQL client.
+
+Выполнено по Sprint 10:
+
+- Добавлен `AsyncMiddleware`:
+  - `net::awaitable<std::optional<Response>>(RequestContext&)`.
+- Добавлен `HttpServer::add_async_middleware(...)`.
+- Middleware может:
+  - вернуть `std::nullopt` и продолжить pipeline;
+  - вернуть `Response` и остановить pipeline.
+- Sync middleware API сохранен без breaking changes.
+- Exceptions из async middleware переводятся в 500/503/504 в зависимости от типа ошибки.
+- Pipeline timeout распространяется на async middleware и route handler.
+
+Выполнено по Sprint 11:
+
+- Добавлен `qornix::async::HttpMetrics` и snapshot/json/prometheus форматирование.
+- Добавлен `HttpServer::metrics()` и `metrics_ptr()`.
+- Добавлен `HttpServer::add_metrics_route()`; default endpoint `/qornix/metrics`.
+- Метрики включают:
+  - total/active/completed/failed requests;
+  - timed out/cancelled/rejected requests;
+  - latency p50/p95/p99;
+  - blocking pool queue;
+  - DB active/queued/rejected counters.
+- Добавлен structured access log с request id, route, status, duration и cancellation reason.
+- Добавлен graceful shutdown:
+  - stop accepting new connections;
+  - wait for active requests until deadline;
+  - stop `io_context` after deadline.
+
+Выполнено по Sprint 12:
+
+- `baseline_benchmark_server` расширен endpoint'ами:
+  - `/sleep` и `/sleep/{ms}` для async sleep;
+  - `/users/{id}` для DB-pool-limited сценария;
+  - `/blocking/{ms}` для blocking offload scenario;
+  - `/qornix/metrics` для observability checks.
+- `scripts/baseline_benchmark.py` расширен:
+  - `--extended-load` включает дополнительные high-concurrency сценарии;
+  - `--load-concurrency` задает уровни concurrency, default `1000 5000 10000`;
+  - `--db-normal-concurrency` задает normal DB pool concurrency, default `128`;
+  - `--db-concurrency` задает DB pool overload HTTP concurrency, default `10000`;
+  - `--output` задает путь markdown-отчета, default `doc/benchmark.md`;
+  - отчет теперь включает CPU %, статус-классы `2xx/4xx/5xx`, client-side errors и per-scenario delta для rejected/timeout metrics.
+- Доработка после контрольного прогона:
+  - `/bench/delay/10` и `/bench/delay/100` переведены на async timer, чтобы benchmark не измерял blocking sleep на worker threads;
+  - DB scenario разделен на `db_pool_normal` и `db_pool_overload`;
+  - cumulative counters в отчете заменены на per-scenario delta, чтобы overload/timeout сценарии не загрязняли следующие строки отчета.
+- Добавлен пользовательский `changelog.md` с кратким описанием async-фич.
+- Пользовательская документация очищена от sprint-терминологии; sprint-детали оставлены только в `doc/project_doc`.
+- Smoke-test расширен проверками:
+  - route timeout -> 504;
+  - per-route body limit -> 413;
+  - async middleware stop/pass;
+  - blocking offload pool;
+  - async DB facade;
+  - per-route concurrency limit -> 429;
+  - metrics endpoint and counters.
+
+Контрольный benchmark после доработок:
+
+- Команда: `python3 scripts/baseline_benchmark.py --server cmake-build-debug/baseline_benchmark_server --port 18080 --server-threads 32 --duration 10 --concurrency 256 --extended-load --load-concurrency 1000 5000 10000 --db-normal-concurrency 128 --db-concurrency 10000 --idle-connections 10000`.
+- Fast endpoint: `8799.87` RPS at 256 concurrency, p50 `30.26 ms`, p95 `40.49 ms`, errors `0`.
+- Async delay 10 ms: `8373.80` RPS, p50 `30.43 ms`, p95 `37.14 ms`, errors `0`.
+- Async delay 100 ms: `2465.51` RPS, p50 `102.81 ms`, p95 `104.57 ms`, errors `0`; результат соответствует async timer model (`256 / 0.1s ~= 2560 RPS`).
+- Fast 10k active load: `6963.31` RPS, p50 `1463.45 ms`, errors `0`.
+- Async sleep 10k active load: `3970.39` RPS, p50 `2065.51 ms`, errors `0`.
+- DB normal at 128 concurrency: `6430.50` RPS, p50 `17.13 ms`, p95 `33.23 ms`, errors `0`.
+- DB overload at 10k concurrency: controlled overload with `33475` DB rejects and `42545` timeouts; сценарий считается защитным stress test, а не normal operation.
+- Timeout guard: `/sleep?ms=3000` returns `1280` controlled timeout responses, p50 `2005.98 ms`, `timeout delta = 1280`.
+- 10k idle keep-alive: opened `10000/10000`, failed `0`, RSS about `75 MB`, threads `65`, fd `10007`.
+- Результат сохранен в пользовательском отчете `doc/benchmark.md`.
+
+Проверка:
+
+- `g++ -std=c++20 -Iinclude -c server/http_server.cpp -o /tmp/http_server.o` - ok.
+- `g++ -std=c++20 -Iinclude -fsyntax-only tests/http_server_smoke_test.cpp` - ok.
+- `g++ -std=c++20 -Iinclude -fsyntax-only tests/baseline_benchmark_server.cpp` - ok.
+- `python3 -m py_compile scripts/baseline_benchmark.py` - ok.
+
+Ограничение проверки в текущем окружении:
+
+- Полный CMake build не запускался до конца, потому что в контейнере отсутствует `yaml-cpp`; root `CMakeLists.txt` останавливает configure с `yaml-cpp not found. Install with: apt-get install libyaml-cpp-dev`.
+
+Не делалось:
+
+- Реальный PostgreSQL/MySQL async driver не подключался; добавлен совместимый facade и DB mock для migration path.
+- Жесткая принудительная остановка уже выполняющейся user coroutine не делалась; модель cancellation cooperative, late response suppression уже включен.
+- Полный 10k benchmark не прогонялся в контейнере из-за отсутствующего `yaml-cpp` и системных лимитов окружения; контрольный 10k benchmark выполнен пользователем локально и зафиксирован выше.
+
 ## 2026-05-13 - Sprint 5: Полный async HTTP API и examples
 
 Выполнено:
