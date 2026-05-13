@@ -8,6 +8,60 @@
 #include "async_database_interface.h"
 #include "async_table_manager.h"
 
+#include <cctype>
+#include <chrono>
+#include <cstdlib>
+#include <initializer_list>
+#include <string>
+
+
+namespace {
+
+std::string getFirstConfigValue(const Config& config, const std::initializer_list<const char*>& keys) {
+    for (const char* key : keys) {
+        const auto value = config.get(key);
+        if (!value.empty()) {
+            return value;
+        }
+    }
+    return {};
+}
+
+std::size_t getSizeConfigValue(const Config& config,
+                               const std::initializer_list<const char*>& keys,
+                               std::size_t fallback) {
+    const auto value = getFirstConfigValue(config, keys);
+    if (value.empty()) {
+        return fallback;
+    }
+    return static_cast<std::size_t>(std::stoull(value));
+}
+
+std::chrono::milliseconds getMsConfigValue(const Config& config,
+                                           const std::initializer_list<const char*>& keys,
+                                           std::chrono::milliseconds fallback) {
+    const auto value = getFirstConfigValue(config, keys);
+    if (value.empty()) {
+        return fallback;
+    }
+    return std::chrono::milliseconds{std::stoll(value)};
+}
+
+bool getBoolConfigValue(const Config& config,
+                        const std::initializer_list<const char*>& keys,
+                        bool fallback) {
+    auto value = getFirstConfigValue(config, keys);
+    if (value.empty()) {
+        return fallback;
+    }
+    for (char& ch : value) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return value == "1" || value == "true" || value == "yes" || value == "on";
+}
+
+} // namespace
+
 AsyncDatabaseInterface::AsyncDatabaseInterface(
     boost::asio::any_io_executor executor,
     qornix::db::AsyncDriverFactory factory,
@@ -29,6 +83,27 @@ std::shared_ptr<AsyncDatabaseInterface> AsyncDatabaseInterface::createMock(
         options);
     iface->setDatabaseConfig(std::move(config));
     return iface;
+}
+
+
+qornix::db::AsyncPoolOptions AsyncDatabaseInterface::poolOptionsFromConfig(const Config& config) {
+    qornix::db::AsyncPoolOptions options;
+    options.pool_name = getFirstConfigValue(config, {"db.pool.name", "database.pool.name"});
+    if (options.pool_name.empty()) {
+        options.pool_name = "default";
+    }
+    options.driver_name = getFirstConfigValue(config, {"db.driver", "database.driver"});
+    options.min_connections = getSizeConfigValue(config, {"db.pool.min_connections", "database.pool.min_connections"}, options.min_connections);
+    options.max_connections = getSizeConfigValue(config, {"db.pool.max_connections", "database.pool.max_connections"}, options.max_connections);
+    options.max_waiters = getSizeConfigValue(config, {"db.pool.max_waiters", "database.pool.max_waiters"}, options.max_waiters);
+    options.acquire_timeout = getMsConfigValue(config, {"db.pool.acquire_timeout_ms", "database.pool.acquire_timeout_ms"}, options.acquire_timeout);
+    options.query_timeout = getMsConfigValue(config, {"db.pool.query_timeout_ms", "database.pool.query_timeout_ms"}, options.query_timeout);
+    options.idle_timeout = getMsConfigValue(config, {"db.pool.idle_timeout_ms", "database.pool.idle_timeout_ms"}, options.idle_timeout);
+    options.max_lifetime = getMsConfigValue(config, {"db.pool.max_lifetime_ms", "database.pool.max_lifetime_ms"}, options.max_lifetime);
+    options.health_check_interval = getMsConfigValue(config, {"db.pool.health_check_interval_ms", "database.pool.health_check_interval_ms"}, options.health_check_interval);
+    options.shutdown_timeout = getMsConfigValue(config, {"db.pool.shutdown_timeout_ms", "database.pool.shutdown_timeout_ms"}, options.shutdown_timeout);
+    options.validate_idle_on_acquire = getBoolConfigValue(config, {"db.pool.validate_idle_on_acquire", "database.pool.validate_idle_on_acquire"}, options.validate_idle_on_acquire);
+    return options;
 }
 
 AsyncTableManager AsyncDatabaseInterface::table(const std::string& table_name) {

@@ -9,6 +9,8 @@
 
 #include <boost/asio.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <memory>
 #include <utility>
 
@@ -93,18 +95,19 @@ public:
         QueryParams params = {},
         QueryOptions options = {},
         CancellationToken token = {}) {
+        auto start = std::chrono::steady_clock::now();
+        auto effective_options = resolve_query_options(std::move(options), token);
         if (metrics_) { metrics_->record_query_started(); }
-        auto conn = co_await acquire(token);
         try {
-            auto result = co_await conn.query(std::move(sql), std::move(params), std::move(options), std::move(token));
+            throw_if_token_stopped(token);
+            auto conn = co_await acquire(token);
+            auto result = co_await conn.query(std::move(sql), std::move(params), effective_options, std::move(token));
+            record_query_latency(start);
             if (metrics_) { metrics_->record_query_success(); }
             co_return result;
         } catch (const DbError& error) {
-            if (metrics_) {
-                if (error.code() == DbErrorCode::Timeout || error.code() == DbErrorCode::PoolTimeout) { metrics_->record_query_timeout(); }
-                else if (error.code() == DbErrorCode::Cancelled) { metrics_->record_query_cancelled(); }
-                else { metrics_->record_query_error(); }
-            }
+            record_query_latency(start);
+            record_query_error(error, effective_options.timeout_source, token);
             throw;
         }
     }
@@ -116,18 +119,19 @@ public:
         CancellationToken token = {}) {
         options.single_row = true;
         options.max_rows = 1;
+        auto start = std::chrono::steady_clock::now();
+        auto effective_options = resolve_query_options(std::move(options), token);
         if (metrics_) { metrics_->record_query_started(); }
-        auto conn = co_await acquire(token);
         try {
-            auto result = co_await conn.query(std::move(sql), std::move(params), std::move(options), std::move(token));
+            throw_if_token_stopped(token);
+            auto conn = co_await acquire(token);
+            auto result = co_await conn.query(std::move(sql), std::move(params), effective_options, std::move(token));
+            record_query_latency(start);
             if (metrics_) { metrics_->record_query_success(); }
             co_return result;
         } catch (const DbError& error) {
-            if (metrics_) {
-                if (error.code() == DbErrorCode::Timeout || error.code() == DbErrorCode::PoolTimeout) { metrics_->record_query_timeout(); }
-                else if (error.code() == DbErrorCode::Cancelled) { metrics_->record_query_cancelled(); }
-                else { metrics_->record_query_error(); }
-            }
+            record_query_latency(start);
+            record_query_error(error, effective_options.timeout_source, token);
             throw;
         }
     }
@@ -137,18 +141,19 @@ public:
         QueryParams params = {},
         QueryOptions options = {},
         CancellationToken token = {}) {
+        auto start = std::chrono::steady_clock::now();
+        auto effective_options = resolve_query_options(std::move(options), token);
         if (metrics_) { metrics_->record_query_started(); }
-        auto conn = co_await acquire(token);
         try {
-            auto result = co_await conn.execute(std::move(sql), std::move(params), std::move(options), std::move(token));
+            throw_if_token_stopped(token);
+            auto conn = co_await acquire(token);
+            auto result = co_await conn.execute(std::move(sql), std::move(params), effective_options, std::move(token));
+            record_query_latency(start);
             if (metrics_) { metrics_->record_query_success(); }
             co_return result;
         } catch (const DbError& error) {
-            if (metrics_) {
-                if (error.code() == DbErrorCode::Timeout || error.code() == DbErrorCode::PoolTimeout) { metrics_->record_query_timeout(); }
-                else if (error.code() == DbErrorCode::Cancelled) { metrics_->record_query_cancelled(); }
-                else { metrics_->record_query_error(); }
-            }
+            record_query_latency(start);
+            record_query_error(error, effective_options.timeout_source, token);
             throw;
         }
     }
@@ -167,6 +172,67 @@ public:
     AsyncDbMetricsSnapshot metrics_snapshot() const { return pool_->metrics_snapshot(); }
 
 private:
+    QueryOptions resolve_query_options(QueryOptions options, const CancellationToken& token) const {
+        const auto query_timeout = options.timeout;
+        options.timeout_source = query_timeout.count() > 0 ? DbTimeoutSource::QueryOption : DbTimeoutSource::None;
+
+        const auto pool_timeout = pool_->options().query_timeout;
+        if (pool_timeout.count() > 0 &&
+            (options.timeout.count() <= 0 || pool_timeout < options.timeout)) {
+            options.timeout = pool_timeout;
+            options.timeout_source = DbTimeoutSource::PoolDefault;
+        }
+
+        if (const auto remaining = token.remaining()) {
+            if (options.timeout.count() <= 0 || *remaining < options.timeout) {
+                options.timeout = *remaining;
+                options.timeout_source = DbTimeoutSource::RequestDeadline;
+            }
+        }
+
+        return options;
+    }
+
+    static void throw_if_token_stopped(const CancellationToken& token) {
+        if (token.is_cancelled()) {
+            throw db_cancelled();
+        }
+        if (token.deadline_expired()) {
+            throw db_timeout("database query skipped because request deadline expired");
+        }
+    }
+
+    void record_query_latency(std::chrono::steady_clock::time_point start) const {
+        if (!metrics_) {
+            return;
+        }
+        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start);
+        metrics_->record_query_latency(elapsed);
+    }
+
+    void record_query_error(const DbError& error,
+                            DbTimeoutSource timeout_source,
+                            const CancellationToken& token) const {
+        if (!metrics_) {
+            return;
+        }
+        if (error.code() == DbErrorCode::Timeout) {
+            metrics_->record_query_timeout();
+            if (timeout_source == DbTimeoutSource::RequestDeadline || token.deadline_expired()) {
+                metrics_->record_request_deadline_timeout();
+            } else if (timeout_source == DbTimeoutSource::PoolDefault) {
+                metrics_->record_query_pool_default_timeout();
+            } else if (timeout_source == DbTimeoutSource::QueryOption) {
+                metrics_->record_query_option_timeout();
+            }
+        } else if (error.code() == DbErrorCode::Cancelled) {
+            metrics_->record_query_cancelled();
+        } else {
+            metrics_->record_query_error();
+        }
+    }
+
     std::shared_ptr<AsyncDbMetrics> metrics_;
     std::shared_ptr<AsyncConnectionPool> pool_;
 };

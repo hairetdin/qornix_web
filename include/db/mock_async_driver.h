@@ -51,7 +51,12 @@ public:
         if (!open_) {
             throw DbError(DbErrorCode::Connection, "mock async driver is not connected");
         }
-        co_await wait_or_throw(latency_, options, token);
+        try {
+            co_await wait_or_throw(latency_, options, token);
+        } catch (const DbError& error) {
+            mark_closed_after_stop(error);
+            throw;
+        }
 
         QueryResult result;
         result.command_tag = starts_with_select(sql) ? "SELECT" : "OK";
@@ -81,22 +86,42 @@ public:
 
     net::awaitable<void> prepare(std::string name, std::string sql, CancellationToken token = {}) override {
         QueryOptions options;
-        co_await wait_or_throw(latency_, options, token);
+        try {
+            co_await wait_or_throw(latency_, options, token);
+        } catch (const DbError& error) {
+            mark_closed_after_stop(error);
+            throw;
+        }
         prepared_[std::move(name)] = std::move(sql);
     }
 
     net::awaitable<void> begin(CancellationToken token = {}) override {
-        co_await wait_or_throw(latency_, QueryOptions{}, token);
+        try {
+            co_await wait_or_throw(latency_, QueryOptions{}, token);
+        } catch (const DbError& error) {
+            mark_closed_after_stop(error);
+            throw;
+        }
         in_transaction_ = true;
     }
 
     net::awaitable<void> commit(CancellationToken token = {}) override {
-        co_await wait_or_throw(latency_, QueryOptions{}, token);
+        try {
+            co_await wait_or_throw(latency_, QueryOptions{}, token);
+        } catch (const DbError& error) {
+            mark_closed_after_stop(error);
+            throw;
+        }
         in_transaction_ = false;
     }
 
     net::awaitable<void> rollback(CancellationToken token = {}) override {
-        co_await wait_or_throw(latency_, QueryOptions{}, token);
+        try {
+            co_await wait_or_throw(latency_, QueryOptions{}, token);
+        } catch (const DbError& error) {
+            mark_closed_after_stop(error);
+            throw;
+        }
         in_transaction_ = false;
     }
 
@@ -109,6 +134,13 @@ private:
             return static_cast<char>(std::toupper(ch));
         });
         return sql.rfind("SELECT", 0) == 0;
+    }
+
+    void mark_closed_after_stop(const DbError& error) noexcept {
+        if (error.code() == DbErrorCode::Timeout || error.code() == DbErrorCode::Cancelled) {
+            open_ = false;
+            in_transaction_ = false;
+        }
     }
 
     net::awaitable<void> wait_or_throw(std::chrono::milliseconds latency,

@@ -31,6 +31,8 @@ public:
         qornix::db::AsyncPoolOptions options = {},
         std::chrono::milliseconds latency = std::chrono::milliseconds{1});
 
+    static qornix::db::AsyncPoolOptions poolOptionsFromConfig(const Config& config = Config::getInstance());
+
     AsyncTableManager table(const std::string& table_name);
 
     boost::asio::awaitable<void> warmup(qornix::db::CancellationToken token = {});

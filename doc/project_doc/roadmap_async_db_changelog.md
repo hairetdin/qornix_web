@@ -467,3 +467,136 @@ Full suite was also validated with shell DB environment variables removed:
 100% tests passed, 0 tests failed out of 22
 Total Test time (real) = 0.87 sec
 ```
+
+## 2026-05-13 — Phase 4 async pool hardening pass
+
+### Completed
+
+- Hardened `AsyncConnectionPool` connection lifecycle metadata:
+  - assigned stable per-pool connection ids;
+  - tracked created-at and last-used timestamps;
+  - retained driver name metadata for diagnostics.
+- Added lazy idle/lifetime validation:
+  - stale idle connections are discarded before reuse;
+  - `idle_timeout` and `max_lifetime` are enforced by the pool;
+  - closed or invalid idle drivers are not handed out.
+- Added FIFO waiter fairness:
+  - queued acquires are ordered by ticket;
+  - direct/new acquires do not bypass an existing waiter queue;
+  - `max_waiters` still produces controlled `PoolRejected` errors.
+- Hardened shutdown behavior:
+  - `close()` marks the pool closing and rejects new acquires;
+  - idle connections are closed explicitly;
+  - active connections are waited on up to `shutdown_timeout` and then discarded on release.
+- Extended pool options and config materialization:
+  - `pool_name`;
+  - `driver_name`;
+  - `shutdown_timeout`;
+  - `validate_idle_on_acquire`;
+  - `AsyncDatabaseInterface::poolOptionsFromConfig(...)` for `db.pool.*` / `database.pool.*` settings.
+- Extended metrics:
+  - created/closed/discarded connection counters;
+  - failed connect counter;
+  - query latency p50/p95/p99 snapshot fields.
+- Updated `qornix_orm_async_db_mock_test` with pool config parsing, idle expiry/reconnect, shutdown reject and new metric assertions.
+- Kept the mock test in a GCC-safe coroutine shape using compiler fences around move-only connection/transaction locals.
+- Updated async DB documentation and benchmark-report field guidance for Phase 4 pool metrics.
+
+### Roadmap phase status update
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 4 — Pool hardening | Implemented basic production safeguards | Warmup/lazy create/acquire/release/quarantine-by-discard, FIFO waiter fairness, shutdown reject/wait and pool lifecycle metrics are implemented. Proactive background health checks remain a follow-up; validation is lazy on acquire/release. |
+| Phase 5 — Query timeout and cancellation semantics | Partially improved | High-level `AsyncDatabase` now applies pool default query timeout as part of effective query options and records query latency. Driver-specific mid-operation cancellation semantics remain backend work. |
+| Phase 9 — Benchmarks | Partially improved | New lifecycle and latency metrics are exposed for future DB benchmark scripts; no live DB benchmark numbers were generated in this pass. |
+
+### Validation performed
+
+```bash
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_db_mock_test.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/database/async_database_interface.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/database/async_table_manager.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core \
+  qornix_orm/tests/async_db_mock_test.cpp \
+  qornix_orm/database/async_database_interface.cpp \
+  qornix_orm/database/async_table_manager.cpp \
+  qornix_orm/database/config.cpp \
+  -lpthread -o /tmp/async_db_mock_test_phase4
+/tmp/async_db_mock_test_phase4
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_mysql_smoke_test.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_postgres_smoke_test.cpp
+```
+
+### Validation limitations
+
+- Full CMake configure/build was not possible in this container because the root project requires yaml-cpp and the standalone ORM configure could not find the `Boost::json` CMake component package. Direct g++ validation and the linked mock runtime test passed.
+- No live PostgreSQL/MySQL benchmark run was performed in this pass.
+
+## 2026-05-13 — Phase 5 query timeout and cancellation semantics pass
+
+### Completed
+
+- Added explicit query timeout-source classification through `DbTimeoutSource` on `QueryOptions`:
+  - query option timeout;
+  - pool default query timeout;
+  - request deadline timeout.
+- Added `CancellationToken::deadline_expired()` and high-level pre-flight checks so DB work is not started after an already-expired request deadline.
+- Implemented the Phase 5 effective timeout resolution in `AsyncDatabase`:
+
+```text
+effective_query_timeout = min(
+    QueryOptions.timeout,
+    AsyncPoolOptions.query_timeout,
+    CancellationToken.deadline - now
+)
+```
+
+- Hardened checked-out connection behavior after timeout/cancellation:
+  - `AsyncDbConnection` now marks connections non-reusable after `Timeout`, `Cancelled`, `Connection` or `ConnectionLost` driver errors;
+  - timed-out/cancelled mock driver operations close the mock connection so tests validate discard/reconnect behavior;
+  - pool acquisition stopped by request deadline now reports `DbErrorCode::Timeout` instead of being counted as pool overload.
+- Fixed metrics classification:
+  - `PoolTimeout` is no longer counted as query timeout;
+  - `acquire_timeouts` remains the pool-overload/acquire-timeout counter;
+  - added `query_option_timeouts`, `query_pool_default_timeouts` and `request_deadline_timeouts`;
+  - explicit token cancellation continues to increment `query_cancelled`.
+- Expanded `qornix_orm_async_db_mock_test` to cover:
+  - query-option timeout metrics;
+  - pool-default timeout metrics;
+  - request-deadline timeout metrics;
+  - explicit cancellation metrics;
+  - pool acquisition timeout metrics without incrementing query timeout;
+  - connection discard after timeout/cancellation paths.
+- Updated `doc/async_db.md` and `doc/benchmark_async_db.md` with Phase 5 timeout/cancellation semantics and benchmark fields.
+
+### Roadmap phase status update
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 5 — Query timeout and cancellation semantics | Implemented common semantics | Effective timeout resolution, request-deadline pre-flight checks, non-reusable connection discard and metrics classification are implemented in the common layer. PostgreSQL already closes/discards timed-out/cancelled operations through libpq cancellation. MySQL closes/discards failed/expired operations once control returns from Boost.MySQL; strict out-of-band mid-operation cancellation remains backend-specific hardening work. |
+| Phase 9 — Benchmarks | Partially improved | Benchmark field list now separates query-option, pool-default, request-deadline and acquire timeout counters. Live DB benchmark numbers still need to be generated. |
+
+### Validation performed
+
+```bash
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_db_mock_test.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/tests/async_db_mock_test.cpp -o /tmp/async_db_mock_test.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/async_database_interface.cpp -o /tmp/async_database_interface.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/async_table_manager.cpp -o /tmp/async_table_manager.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/config.cpp -o /tmp/config.o
+g++ /tmp/async_db_mock_test.o /tmp/async_database_interface.o /tmp/async_table_manager.o /tmp/config.o -lpthread -o /tmp/async_db_mock_test_phase5
+/tmp/async_db_mock_test_phase5
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core $(pkg-config --cflags libpq) -fsyntax-only qornix_orm/tests/async_postgres_smoke_test.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_mysql_smoke_test.cpp
+```
+
+Reported result:
+
+```text
+async_db_mock_test passed
+```
+
+### Validation limitations
+
+- Full CMake configure/build was still not run in this container because the same environment limitations from Phase 4 remain: root configure requires yaml-cpp and the standalone ORM configure could not find the `Boost::json` CMake component package.
+- No live PostgreSQL/MySQL benchmark run was performed in this pass.

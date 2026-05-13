@@ -8,8 +8,8 @@ Implemented in this iteration:
 
 - common awaitable DB types in `include/db/*`;
 - `IAsyncDatabaseDriver` contract;
-- bounded `AsyncConnectionPool` with `max_connections`, `max_waiters` and acquire timeout;
-- query timeout and cancellation token primitives;
+- bounded `AsyncConnectionPool` with `max_connections`, `max_waiters`, acquire timeout, FIFO waiters, idle/max-lifetime checks and graceful shutdown;
+- Phase 5 query timeout/deadline resolution and cancellation token primitives;
 - `AsyncDatabase`, `AsyncDbConnection` and `AsyncTransaction` facades;
 - mock async driver for unit tests and examples;
 - explicit sync/offloaded adapter for legacy blocking drivers;
@@ -25,10 +25,14 @@ PostgreSQL is implemented as a real non-blocking driver path when enabled and ha
 boost::asio::io_context ioc;
 
 qornix::db::AsyncPoolOptions options;
+options.pool_name = "api-primary";
 options.max_connections = 32;
 options.max_waiters = 1024;
 options.acquire_timeout = std::chrono::milliseconds{200};
 options.query_timeout = std::chrono::milliseconds{2000};
+options.idle_timeout = std::chrono::milliseconds{30000};
+options.max_lifetime = std::chrono::milliseconds{1800000};
+options.shutdown_timeout = std::chrono::milliseconds{5000};
 
 auto db = std::make_shared<qornix::db::AsyncDatabase>(
     ioc.get_executor(),
@@ -75,7 +79,59 @@ auto result = co_await db->query(
 );
 ```
 
-The effective timeout is the minimum of the query option timeout and the remaining cancellation token deadline.
+The effective timeout is resolved before the query starts as:
+
+```text
+effective_query_timeout = min(
+    QueryOptions.timeout,
+    AsyncPoolOptions.query_timeout,
+    CancellationToken.deadline - now
+)
+```
+
+The selected timeout source is stored in `QueryOptions::timeout_source` for metrics classification. `DbErrorCode::Timeout` now covers query-option timeout, pool-default query timeout and request-deadline timeout; `AsyncDbMetricsSnapshot` exposes separate counters for `query_option_timeouts`, `query_pool_default_timeouts` and `request_deadline_timeouts`. Pool acquisition timeouts remain separate as `DbErrorCode::PoolTimeout` plus `acquire_timeouts`, so overload and slow-query failures are not conflated. Explicit cancellation still maps to `DbErrorCode::Cancelled` and increments `query_cancelled`.
+
+If a DB operation times out or is cancelled after it has been handed to a driver, `AsyncDbConnection` marks the checked-out connection non-reusable before returning it to the pool. PostgreSQL requests cancellation and marks the libpq connection unusable; MySQL closes the connection on timeout/cancel/error paths where the backend operation reports back; sync/offloaded operations are cooperative and timed-out checked-out connections are discarded rather than returned to the async pool.
+
+## Pool hardening and configuration
+
+`AsyncConnectionPool` now keeps metadata for each pooled connection: connection id, creation time, last-used time and driver name. The pool enforces:
+
+- bounded active connections and bounded waiters;
+- FIFO waiter fairness, so new acquires do not jump ahead of queued requests;
+- lazy idle connection validation on acquire;
+- `idle_timeout` and `max_lifetime` checks before returning a connection to the pool;
+- close/shutdown mode that rejects new acquires, closes idle connections and waits for active connections up to `shutdown_timeout`;
+- metrics for created, closed, discarded and failed connection attempts, timeout/cancel source counters, plus query latency p50/p95/p99 over the in-process sample window.
+
+YAML/INI configuration can use the Phase 4 pool layout:
+
+```yaml
+db:
+  driver: postgresql
+  async: true
+  pool:
+    name: api-primary
+    min_connections: 2
+    max_connections: 32
+    max_waiters: 1024
+    acquire_timeout_ms: 200
+    query_timeout_ms: 2000
+    idle_timeout_ms: 30000
+    max_lifetime_ms: 1800000
+    health_check_interval_ms: 10000
+    shutdown_timeout_ms: 5000
+    validate_idle_on_acquire: true
+```
+
+Use `AsyncDatabaseInterface::poolOptionsFromConfig()` to materialize these settings into `qornix::db::AsyncPoolOptions`:
+
+```cpp
+Config::getInstance().loadFromFile("config.yaml");
+auto pool_options = AsyncDatabaseInterface::poolOptionsFromConfig();
+```
+
+`health_check_interval_ms` is parsed and stored in `AsyncPoolOptions`; proactive background health checks are intentionally not started yet, so health validation remains lazy on acquire/release in this pass. Active queries are not force-cancelled by `close()` because the pool does not own an out-of-band cancellation handle for already checked-out connections; released active connections are discarded while the pool is closing.
 
 
 ## PostgreSQL async driver
