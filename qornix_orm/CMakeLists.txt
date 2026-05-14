@@ -444,6 +444,11 @@ if(QORNIX_BUILD_ORM_TESTS)
         target_link_libraries(async_db_mock_test qornix_orm)
         add_test(NAME qornix_orm_async_db_mock_test COMMAND async_db_mock_test)
         set_tests_properties(qornix_orm_async_db_mock_test PROPERTIES LABELS "qornix_orm;async-db;mock")
+
+        add_executable(async_query_builder_test tests/async_query_builder_test.cpp)
+        target_link_libraries(async_query_builder_test qornix_orm)
+        add_test(NAME qornix_orm_async_query_builder_test COMMAND async_query_builder_test)
+        set_tests_properties(qornix_orm_async_query_builder_test PROPERTIES LABELS "qornix_orm;async-db;query-builder;mock")
     endif()
 
     if(QORNIX_ENABLE_MYSQL)

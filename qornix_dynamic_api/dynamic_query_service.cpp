@@ -7,9 +7,11 @@
 #include "dynamic_query_service.h"
 
 #include <algorithm>
+#include <boost/system/system_error.hpp>
 #include <cctype>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace qornix_dynamic_api {
 
@@ -53,6 +55,16 @@ bool startsWithCaseInsensitive(const std::string& value, const std::string& pref
 
 DynamicQueryService::DynamicQueryService(DynamicApiConfig config)
     : config_(std::move(config)) {}
+
+#if QORNIX_ENABLE_ASYNC_DB
+DynamicQueryService::DynamicQueryService(
+    DynamicApiConfig config,
+    std::shared_ptr<AsyncDatabaseInterface> asyncDatabase,
+    DynamicSchemaAllowlist allowlist)
+    : config_(std::move(config)),
+      asyncDatabase_(std::move(asyncDatabase)),
+      asyncAllowlist_(std::move(allowlist)) {}
+#endif
 
 std::shared_ptr<DatabaseInterface> DynamicQueryService::openSharedDatabase() const {
     auto db = DatabaseInterface::init(config_.databaseConfig);
@@ -316,6 +328,225 @@ DynamicApiResponse DynamicQueryService::applyBodyToBuilder(const DynamicQueryReq
 
     return DynamicApiResponse::ok(okEnvelope("builder prepared"));
 }
+
+
+#if QORNIX_ENABLE_ASYNC_DB
+DynamicApiResponse DynamicQueryService::validateStructuredQuery(
+    const std::string& table,
+    const boost::json::object& query,
+    const DynamicSchemaAllowlist& allowlist,
+    AsyncQueryBuilder& builder) const {
+    auto fieldsIt = query.find("fields");
+    if (fieldsIt != query.end() && fieldsIt->value().is_array()) {
+        for (const auto& value : fieldsIt->value().as_array()) {
+            if (!value.is_string()) {
+                return DynamicApiResponse::error(boost::beast::http::status::bad_request, "invalid_field", "fields must contain strings");
+            }
+            std::string field = value.as_string().c_str();
+            if (!allowlist.canReadField(table, field)) {
+                return DynamicApiResponse::error(boost::beast::http::status::bad_request, "field_not_allowed", "Field is not readable by schema metadata: " + field);
+            }
+            builder.addValue(field);
+        }
+    }
+
+    auto whereIt = query.find("where");
+    if (whereIt != query.end() && whereIt->value().is_array()) {
+        for (const auto& itemValue : whereIt->value().as_array()) {
+            if (!itemValue.is_object()) {
+                return DynamicApiResponse::error(boost::beast::http::status::bad_request, "invalid_where", "where items must be objects");
+            }
+            const auto& item = itemValue.as_object();
+            std::string field = getStringMember(item, "field");
+            auto dot = field.rfind('.');
+            if (dot != std::string::npos) {
+                field = field.substr(dot + 1);
+            }
+            std::string op = normalizeOperator(getStringMember(item, "op", "eq"));
+            if (field.empty() || op.empty() || item.find("value") == item.end()) {
+                return DynamicApiResponse::error(boost::beast::http::status::bad_request, "invalid_where", "where item requires field, op and value");
+            }
+            if (!allowlist.canFilterField(table, field)) {
+                return DynamicApiResponse::error(boost::beast::http::status::bad_request, "field_not_filterable", "Field is not filterable by schema metadata: " + field);
+            }
+            builder.addFilter(field + op + jsonValueToSqlLiteral(item.at("value")));
+        }
+    }
+
+    auto filterIt = query.find("filter");
+    if (filterIt != query.end() && filterIt->value().is_array()) {
+        for (const auto& value : filterIt->value().as_array()) {
+            if (!value.is_string()) {
+                return DynamicApiResponse::error(boost::beast::http::status::bad_request, "invalid_filter", "filter must contain strings");
+            }
+            std::string condition = value.as_string().c_str();
+            auto field = extractFieldNameFromRawCondition(condition);
+            if (field.empty() || !allowlist.canFilterField(table, field)) {
+                return DynamicApiResponse::error(boost::beast::http::status::bad_request, "field_not_filterable", "Raw filter references a field not allowed by schema metadata: " + field);
+            }
+            builder.addFilter(condition);
+        }
+    }
+
+    auto orderIt = query.find("order_by");
+    if (orderIt != query.end() && orderIt->value().is_array()) {
+        for (const auto& value : orderIt->value().as_array()) {
+            if (!value.is_string()) {
+                return DynamicApiResponse::error(boost::beast::http::status::bad_request, "invalid_order", "order_by must contain strings");
+            }
+            std::string order = value.as_string().c_str();
+            std::string field = order;
+            auto space = field.find(' ');
+            if (space != std::string::npos) field = field.substr(0, space);
+            auto dot = field.rfind('.');
+            if (dot != std::string::npos) field = field.substr(dot + 1);
+            if (!allowlist.canSortField(table, field)) {
+                return DynamicApiResponse::error(boost::beast::http::status::bad_request, "field_not_sortable", "Field is not sortable by schema metadata: " + field);
+            }
+            builder.addOrderBy(order);
+        }
+    }
+
+    auto joinIt = query.find("join");
+    if (joinIt != query.end() && joinIt->value().is_array()) {
+        if (!config_.allowRawJoin) {
+            return DynamicApiResponse::error(boost::beast::http::status::bad_request, "raw_join_disabled", "Raw join DSL is disabled by default. Use schema-defined relations in future API versions.");
+        }
+        for (const auto& value : joinIt->value().as_array()) {
+            if (value.is_string()) builder.addJoin(value.as_string().c_str());
+        }
+    }
+
+    auto groupsIt = query.find("group_by");
+    if (groupsIt != query.end() && groupsIt->value().is_array()) {
+        for (const auto& value : groupsIt->value().as_array()) {
+            if (value.is_string()) builder.addGroupBy(value.as_string().c_str());
+        }
+    }
+
+    auto havingIt = query.find("having");
+    if (havingIt != query.end() && havingIt->value().is_array()) {
+        for (const auto& value : havingIt->value().as_array()) {
+            if (value.is_string()) builder.addHaving(value.as_string().c_str());
+        }
+    }
+
+    const int rawLimit = getIntMember(query, "limit", static_cast<int>(config_.defaultLimit));
+    const int limit = std::max(1, std::min(rawLimit, static_cast<int>(config_.maxLimit)));
+    builder.setLimit(limit);
+
+    return DynamicApiResponse::ok(okEnvelope("query allowed"));
+}
+
+DynamicApiResponse DynamicQueryService::applyBodyToBuilder(
+    const DynamicQueryRequest& request,
+    const boost::json::object* body,
+    const DynamicSchemaAllowlist& allowlist,
+    AsyncQueryBuilder& builder) const {
+    std::string table = request.table;
+    std::string method = request.method;
+    if (body) {
+        table = table.empty() ? getStringMember(*body, "table") : table;
+        method = getStringMember(*body, "method", method);
+    }
+    builder.setTable(table);
+    builder.setMethod(method);
+
+    if (!request.id.empty()) {
+        builder.addFilter("id=" + request.id);
+    }
+
+    if (body) {
+        auto queryIt = body->find("query");
+        if (queryIt != body->end() && queryIt->value().is_object()) {
+            auto queryResponse = validateStructuredQuery(table, queryIt->value().as_object(), allowlist, builder);
+            if (queryResponse.status != boost::beast::http::status::ok) {
+                return queryResponse;
+            }
+        } else {
+            builder.setLimit(static_cast<int>(config_.defaultLimit));
+        }
+
+        auto dataIt = body->find("data");
+        if (dataIt != body->end() && dataIt->value().is_object()) {
+            boost::json::object filteredData;
+            for (const auto& [key, value] : dataIt->value().as_object()) {
+                std::string fieldName(key);
+                if (!allowlist.canWriteField(table, fieldName)) {
+                    return DynamicApiResponse::error(boost::beast::http::status::bad_request, "field_not_writable", "Field is not writable by schema metadata: " + fieldName);
+                }
+                filteredData[fieldName] = value;
+            }
+            builder.setData(filteredData);
+        }
+    } else if (!request.rawQuery.empty()) {
+        if (!config_.allowRawFilter) {
+            return DynamicApiResponse::error(boost::beast::http::status::bad_request, "raw_query_disabled", "Raw URL query DSL is disabled by default");
+        }
+        builder.parseRequest(request.rawQuery, table, method);
+    } else {
+        builder.setLimit(static_cast<int>(config_.defaultLimit));
+    }
+
+    return DynamicApiResponse::ok(okEnvelope("builder prepared"));
+}
+
+qornix::db::QueryOptions DynamicQueryService::queryOptionsFromConfig() const {
+    qornix::db::QueryOptions options;
+    options.timeout = config_.dynamicQueryTimeout;
+    options.max_rows = config_.maxLimit;
+    options.prepared = config_.preparedDynamicQueries;
+    return options;
+}
+
+boost::asio::awaitable<DynamicApiResponse> DynamicQueryService::executeAsync(
+    const DynamicQueryRequest& request,
+    qornix::db::CancellationToken token) const {
+    try {
+        if (!asyncDatabase_) {
+            co_return DynamicApiResponse::error(boost::beast::http::status::service_unavailable, "async_database_not_configured", "Dynamic async query service requires AsyncDatabaseInterface");
+        }
+        if (!asyncAllowlist_) {
+            co_return DynamicApiResponse::error(boost::beast::http::status::internal_server_error, "async_allowlist_not_configured", "Dynamic async query service requires a preloaded allowlist");
+        }
+
+        boost::json::object parsedBody;
+        boost::json::object* body = nullptr;
+        if (!request.rawBody.empty()) {
+            auto parsed = boost::json::parse(request.rawBody);
+            if (!parsed.is_object()) {
+                co_return DynamicApiResponse::error(boost::beast::http::status::bad_request, "invalid_json", "Dynamic API request body must be a JSON object");
+            }
+            parsedBody = parsed.as_object();
+            body = &parsedBody;
+        }
+
+        const auto& allowlist = *asyncAllowlist_;
+        auto validation = validateRequest(request, body, allowlist);
+        if (validation.status != boost::beast::http::status::ok) {
+            co_return validation;
+        }
+
+        AsyncQueryBuilder builder{asyncDatabase_};
+        builder.queryOptions(queryOptionsFromConfig());
+        auto prepared = applyBodyToBuilder(request, body, allowlist, builder);
+        if (prepared.status != boost::beast::http::status::ok) {
+            co_return prepared;
+        }
+
+        auto result = co_await builder.exec(std::move(token));
+        DynamicApiResponse response;
+        response.status = result.status;
+        response.message = result.message;
+        response.body = responseDataToJson(result);
+        co_return response;
+    } catch (const boost::system::system_error& e) {
+        co_return DynamicApiResponse::error(boost::beast::http::status::bad_request, "invalid_json", e.what());
+    } catch (const std::exception& e) {
+        co_return DynamicApiResponse::error(boost::beast::http::status::internal_server_error, "dynamic_async_query_failed", e.what());
+    }
+}
+#endif
 
 DynamicApiResponse DynamicQueryService::execute(const DynamicQueryRequest& request) const {
     try {

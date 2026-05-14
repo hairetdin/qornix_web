@@ -9,7 +9,9 @@
 
 #include <boost/asio.hpp>
 
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -50,7 +52,19 @@ public:
         qornix::db::QueryOptions options = {},
         qornix::db::CancellationToken token = {});
 
+    boost::asio::awaitable<std::optional<qornix::db::Row>> queryOptional(
+        std::string sql,
+        qornix::db::QueryParams params = {},
+        qornix::db::QueryOptions options = {},
+        qornix::db::CancellationToken token = {});
+
     boost::asio::awaitable<qornix::db::QueryResult> execute(
+        std::string sql,
+        qornix::db::QueryParams params = {},
+        qornix::db::QueryOptions options = {},
+        qornix::db::CancellationToken token = {});
+
+    boost::asio::awaitable<qornix::db::QueryResult> executeReturning(
         std::string sql,
         qornix::db::QueryParams params = {},
         qornix::db::QueryOptions options = {},
@@ -61,6 +75,11 @@ public:
 
     qornix::db::AsyncDbMetricsSnapshot metricsSnapshot() const;
     std::shared_ptr<qornix::db::AsyncDatabase> database() const noexcept { return database_; }
+    const qornix::db::AsyncPoolOptions& poolOptions() const noexcept;
+    std::string driverName() const;
+    qornix::db::SqlPlaceholderStyle placeholderStyle() const;
+    std::string placeholder(std::size_t one_based_index) const;
+    bool supportsReturning() const;
 
     DatabaseConfig getDatabaseConfig() const { return db_config_; }
     void setDatabaseConfig(DatabaseConfig config) { db_config_ = std::move(config); }

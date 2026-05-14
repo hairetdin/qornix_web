@@ -12,6 +12,8 @@ This template is intended to showcase the full schema-driven backend flow out of
 6. Run API recipes.
 7. Read generated OpenAPI docs and text specifications for schema XML and query payloads.
 
+When `QORNIX_ENABLE_ASYNC_DB=ON`, the generated app registers Dynamic API CRUD routes through the async DB path. The default SQLite demo uses the explicit `sqlite_sync_offloaded` adapter; PostgreSQL/MySQL builds can use real async drivers by enabling `QORNIX_ENABLE_ASYNC_POSTGRES=ON` or `QORNIX_ENABLE_ASYNC_MYSQL=ON` and setting the database config accordingly.
+
 ## Build and run
 
 ```bash

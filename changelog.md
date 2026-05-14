@@ -1,5 +1,12 @@
 # Changelog
 
+## Async DB benchmark tooling and examples
+
+- Added `async_db_benchmark_server` and `scripts/db_benchmark.py` for live async PostgreSQL/MySQL benchmark runs.
+- The benchmark report captures HTTP latency/status counts, process RSS/thread/fd/CPU metrics and async DB metric deltas from `AsyncDbMetricsSnapshot`.
+- Added runnable examples for async PostgreSQL, async MySQL and the ORM-facing async facade.
+- `doc/benchmark_async_db.md` now documents the benchmark runner and required live DB matrix; release-grade benchmark numbers still need a live PostgreSQL/MySQL run.
+
 ## Async MySQL driver
 
 - Added optional real async MySQL driver behind `QORNIX_ENABLE_ASYNC_MYSQL`.

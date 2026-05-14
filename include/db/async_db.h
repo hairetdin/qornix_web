@@ -13,6 +13,7 @@
 #include <chrono>
 #include <memory>
 #include <utility>
+#include <type_traits>
 
 #include "async_db_pool.h"
 
@@ -22,29 +23,81 @@ namespace net = boost::asio;
 
 class AsyncTransaction {
 public:
+    enum class State {
+        Empty,
+        Active,
+        Committed,
+        RolledBack,
+        Failed,
+        Abandoned
+    };
+
     AsyncTransaction() = default;
-    explicit AsyncTransaction(AsyncDbConnection connection) : connection_(std::move(connection)) {}
+    explicit AsyncTransaction(AsyncDbConnection connection)
+        : connection_(std::move(connection)), state_(State::Active) {}
 
     AsyncTransaction(const AsyncTransaction&) = delete;
     AsyncTransaction& operator=(const AsyncTransaction&) = delete;
-    AsyncTransaction(AsyncTransaction&&) noexcept = default;
-    AsyncTransaction& operator=(AsyncTransaction&&) noexcept = default;
+
+    AsyncTransaction(AsyncTransaction&& other) noexcept
+        : connection_(std::move(other.connection_)), state_(other.state_) {
+        other.state_ = State::Empty;
+    }
+
+    AsyncTransaction& operator=(AsyncTransaction&& other) noexcept {
+        if (this != &other) {
+            abandon_unfinished();
+            connection_ = std::move(other.connection_);
+            state_ = other.state_;
+            other.state_ = State::Empty;
+        }
+        return *this;
+    }
 
     ~AsyncTransaction() {
-        // If user forgets to commit, the connection is discarded so a dirty
-        // transaction cannot be returned to the pool. Explicit rollback is
-        // still preferred because destructors cannot co_await.
-        if (connection_ && !finished_) {
-            connection_.discard();
-        }
+        abandon_unfinished();
     }
+
+    explicit operator bool() const noexcept { return active(); }
+    bool active() const noexcept { return connection_ && state_ == State::Active; }
+    State state() const noexcept { return state_; }
+    std::uint64_t connection_id() const noexcept { return connection_.connection_id(); }
 
     net::awaitable<QueryResult> query(
         std::string sql,
         QueryParams params = {},
         QueryOptions options = {},
         CancellationToken token = {}) {
-        co_return co_await connection_.query(std::move(sql), std::move(params), std::move(options), std::move(token));
+        ensure_active();
+        try {
+            co_return co_await connection_.query(std::move(sql), std::move(params), std::move(options), std::move(token));
+        } catch (const DbError& error) {
+            handle_operation_error(error);
+            throw;
+        } catch (...) {
+            connection_.discard();
+            state_ = State::Failed;
+            throw;
+        }
+    }
+
+    net::awaitable<QueryResult> query_one(
+        std::string sql,
+        QueryParams params = {},
+        QueryOptions options = {},
+        CancellationToken token = {}) {
+        options.single_row = true;
+        options.max_rows = 1;
+        co_return co_await query(std::move(sql), std::move(params), std::move(options), std::move(token));
+    }
+
+    net::awaitable<std::optional<Row>> query_optional(
+        std::string sql,
+        QueryParams params = {},
+        QueryOptions options = {},
+        CancellationToken token = {}) {
+        auto result = co_await query_one(std::move(sql), std::move(params), std::move(options), std::move(token));
+        co_return result.optional_one();
     }
 
     net::awaitable<QueryResult> execute(
@@ -52,22 +105,100 @@ public:
         QueryParams params = {},
         QueryOptions options = {},
         CancellationToken token = {}) {
-        co_return co_await connection_.execute(std::move(sql), std::move(params), std::move(options), std::move(token));
+        ensure_active();
+        try {
+            co_return co_await connection_.execute(std::move(sql), std::move(params), std::move(options), std::move(token));
+        } catch (const DbError& error) {
+            handle_operation_error(error);
+            throw;
+        } catch (...) {
+            connection_.discard();
+            state_ = State::Failed;
+            throw;
+        }
+    }
+
+    net::awaitable<QueryResult> execute_returning(
+        std::string sql,
+        QueryParams params = {},
+        QueryOptions options = {},
+        CancellationToken token = {}) {
+        co_return co_await execute(std::move(sql), std::move(params), std::move(options), std::move(token));
     }
 
     net::awaitable<void> commit(CancellationToken token = {}) {
-        co_await connection_.commit(std::move(token));
-        finished_ = true;
+        ensure_active();
+        try {
+            co_await connection_.commit(std::move(token));
+            state_ = State::Committed;
+            connection_.release();
+        } catch (const DbError& error) {
+            handle_operation_error(error);
+            throw;
+        } catch (...) {
+            connection_.discard();
+            state_ = State::Failed;
+            throw;
+        }
     }
 
     net::awaitable<void> rollback(CancellationToken token = {}) {
-        co_await connection_.rollback(std::move(token));
-        finished_ = true;
+        ensure_active();
+        try {
+            co_await connection_.rollback(std::move(token));
+            state_ = State::RolledBack;
+            connection_.release();
+        } catch (const DbError& error) {
+            handle_operation_error(error);
+            throw;
+        } catch (...) {
+            connection_.discard();
+            state_ = State::Failed;
+            throw;
+        }
+    }
+
+    void discard() noexcept {
+        if (connection_) {
+            connection_.discard();
+            connection_.release();
+        }
+        state_ = State::Failed;
     }
 
 private:
+    void ensure_active() const {
+        if (!connection_ || state_ != State::Active) {
+            throw DbError(DbErrorCode::QueryRejected, "async DB transaction is not active");
+        }
+    }
+
+    static bool is_connection_fatal(const DbError& error) noexcept {
+        return error.code() == DbErrorCode::Timeout ||
+               error.code() == DbErrorCode::Cancelled ||
+               error.code() == DbErrorCode::Connection ||
+               error.code() == DbErrorCode::ConnectionLost;
+    }
+
+    void handle_operation_error(const DbError& error) {
+        if (is_connection_fatal(error)) {
+            if (connection_) {
+                connection_.discard();
+                connection_.release();
+            }
+            state_ = State::Failed;
+        }
+    }
+
+    void abandon_unfinished() noexcept {
+        if (connection_ && state_ == State::Active) {
+            state_ = State::Abandoned;
+            connection_.rollback_abandoned();
+        }
+    }
+
     AsyncDbConnection connection_;
-    bool finished_{false};
+    State state_{State::Empty};
 };
 
 class AsyncDatabase {
@@ -136,6 +267,15 @@ public:
         }
     }
 
+    net::awaitable<std::optional<Row>> query_optional(
+        std::string sql,
+        QueryParams params = {},
+        QueryOptions options = {},
+        CancellationToken token = {}) {
+        auto result = co_await query_one(std::move(sql), std::move(params), std::move(options), std::move(token));
+        co_return result.optional_one();
+    }
+
     net::awaitable<QueryResult> execute(
         std::string sql,
         QueryParams params = {},
@@ -158,6 +298,14 @@ public:
         }
     }
 
+    net::awaitable<QueryResult> execute_returning(
+        std::string sql,
+        QueryParams params = {},
+        QueryOptions options = {},
+        CancellationToken token = {}) {
+        co_return co_await execute(std::move(sql), std::move(params), std::move(options), std::move(token));
+    }
+
     net::awaitable<AsyncTransaction> begin_transaction(CancellationToken token = {}) {
         auto conn = co_await acquire(token);
         co_await conn.begin(token);
@@ -169,6 +317,13 @@ public:
     }
 
     std::shared_ptr<AsyncConnectionPool> pool() const noexcept { return pool_; }
+    const AsyncPoolOptions& options() const noexcept { return pool_->options(); }
+    std::string driver_name() const { return pool_->options().driver_name; }
+    SqlPlaceholderStyle placeholder_style() const { return placeholder_style_for_driver(driver_name()); }
+    std::string placeholder(std::size_t one_based_index) const {
+        return sql_placeholder(placeholder_style(), one_based_index);
+    }
+    bool supports_returning() const { return sql_driver_supports_returning(driver_name()); }
     AsyncDbMetricsSnapshot metrics_snapshot() const { return pool_->metrics_snapshot(); }
 
 private:

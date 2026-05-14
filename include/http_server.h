@@ -156,6 +156,7 @@ public:
     qornix::async::HttpMetrics& metrics() { return *metrics_; }
     const qornix::async::HttpMetrics& metrics() const { return *metrics_; }
     std::shared_ptr<qornix::async::HttpMetrics> metrics_ptr() const { return metrics_; }
+    net::any_io_executor executor() const { return ioc_.get_executor(); }
     void add_metrics_route(const std::string& pattern = "/qornix/metrics");
 
     void run();

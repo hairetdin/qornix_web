@@ -1,0 +1,4 @@
+add_executable(async_mysql_server main.cpp)
+
+target_link_libraries(async_mysql_server PRIVATE qornix_web_core)
+target_compile_features(async_mysql_server PRIVATE cxx_std_20)

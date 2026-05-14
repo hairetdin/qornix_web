@@ -77,6 +77,9 @@ std::shared_ptr<AsyncDatabaseInterface> AsyncDatabaseInterface::createMock(
     DatabaseConfig config{};
     config.port = 0;
     config.driver = "mock_async";
+    if (options.driver_name.empty()) {
+        options.driver_name = config.driver;
+    }
     auto iface = std::make_shared<AsyncDatabaseInterface>(
         executor,
         qornix::db::make_mock_async_driver_factory(latency),
@@ -102,6 +105,7 @@ qornix::db::AsyncPoolOptions AsyncDatabaseInterface::poolOptionsFromConfig(const
     options.max_lifetime = getMsConfigValue(config, {"db.pool.max_lifetime_ms", "database.pool.max_lifetime_ms"}, options.max_lifetime);
     options.health_check_interval = getMsConfigValue(config, {"db.pool.health_check_interval_ms", "database.pool.health_check_interval_ms"}, options.health_check_interval);
     options.shutdown_timeout = getMsConfigValue(config, {"db.pool.shutdown_timeout_ms", "database.pool.shutdown_timeout_ms"}, options.shutdown_timeout);
+    options.prepared_cache_size = getSizeConfigValue(config, {"db.pool.prepared_cache_size", "database.pool.prepared_cache_size"}, options.prepared_cache_size);
     options.validate_idle_on_acquire = getBoolConfigValue(config, {"db.pool.validate_idle_on_acquire", "database.pool.validate_idle_on_acquire"}, options.validate_idle_on_acquire);
     return options;
 }
@@ -137,12 +141,30 @@ boost::asio::awaitable<qornix::db::QueryResult> AsyncDatabaseInterface::queryOne
     co_return result;
 }
 
+boost::asio::awaitable<std::optional<qornix::db::Row>> AsyncDatabaseInterface::queryOptional(
+    std::string sql,
+    qornix::db::QueryParams params,
+    qornix::db::QueryOptions options,
+    qornix::db::CancellationToken token) {
+    auto result = co_await database_->query_optional(std::move(sql), std::move(params), std::move(options), std::move(token));
+    co_return result;
+}
+
 boost::asio::awaitable<qornix::db::QueryResult> AsyncDatabaseInterface::execute(
     std::string sql,
     qornix::db::QueryParams params,
     qornix::db::QueryOptions options,
     qornix::db::CancellationToken token) {
     auto result = co_await database_->execute(std::move(sql), std::move(params), std::move(options), std::move(token));
+    co_return result;
+}
+
+boost::asio::awaitable<qornix::db::QueryResult> AsyncDatabaseInterface::executeReturning(
+    std::string sql,
+    qornix::db::QueryParams params,
+    qornix::db::QueryOptions options,
+    qornix::db::CancellationToken token) {
+    auto result = co_await database_->execute_returning(std::move(sql), std::move(params), std::move(options), std::move(token));
     co_return result;
 }
 
@@ -157,4 +179,24 @@ boost::asio::awaitable<void> AsyncDatabaseInterface::close() {
 
 qornix::db::AsyncDbMetricsSnapshot AsyncDatabaseInterface::metricsSnapshot() const {
     return database_->metrics_snapshot();
+}
+
+const qornix::db::AsyncPoolOptions& AsyncDatabaseInterface::poolOptions() const noexcept {
+    return database_->options();
+}
+
+std::string AsyncDatabaseInterface::driverName() const {
+    return database_->driver_name();
+}
+
+qornix::db::SqlPlaceholderStyle AsyncDatabaseInterface::placeholderStyle() const {
+    return database_->placeholder_style();
+}
+
+std::string AsyncDatabaseInterface::placeholder(std::size_t one_based_index) const {
+    return database_->placeholder(one_based_index);
+}
+
+bool AsyncDatabaseInterface::supportsReturning() const {
+    return database_->supports_returning();
 }

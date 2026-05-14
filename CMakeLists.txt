@@ -137,6 +137,15 @@ endif()
 
 if(QORNIX_BUILD_EXAMPLES)
     add_subdirectory(example/async_routes_server)
+    if(QORNIX_ENABLE_ASYNC_DB)
+        add_subdirectory(example/async_orm_server)
+    endif()
+    if(QORNIX_ENABLE_ASYNC_POSTGRES)
+        add_subdirectory(example/async_postgres_server)
+    endif()
+    if(QORNIX_ENABLE_ASYNC_MYSQL)
+        add_subdirectory(example/async_mysql_server)
+    endif()
     add_subdirectory(example/dynamic_entity_server)
     add_subdirectory(example/dynamic_web_query_builder_server)
     add_subdirectory(example/schema_driven_backend)
@@ -172,6 +181,15 @@ if(QORNIX_BUILD_TESTS)
     )
     target_link_libraries(baseline_benchmark_server PRIVATE qornix_web_core)
 
+    if(QORNIX_ENABLE_ORM AND QORNIX_ENABLE_ASYNC_DB)
+        add_executable(async_db_benchmark_server tests/async_db_benchmark_server.cpp)
+        target_include_directories(async_db_benchmark_server PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/qornix_orm/database
+        )
+        target_link_libraries(async_db_benchmark_server PRIVATE qornix_web_core)
+    endif()
+
     if(TARGET qornix_dynamic_api)
         add_executable(dynamic_openapi_service_test tests/dynamic_openapi_service_test.cpp)
         target_include_directories(dynamic_openapi_service_test PRIVATE
@@ -179,5 +197,16 @@ if(QORNIX_BUILD_TESTS)
         )
         target_link_libraries(dynamic_openapi_service_test PRIVATE qornix_dynamic_api)
         add_test(NAME dynamic_openapi_service_test COMMAND dynamic_openapi_service_test)
+
+        if(QORNIX_ENABLE_ASYNC_DB)
+            add_executable(dynamic_async_query_service_test tests/dynamic_async_query_service_test.cpp)
+            target_include_directories(dynamic_async_query_service_test PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/qornix_dynamic_api
+                ${CMAKE_CURRENT_SOURCE_DIR}/qornix_orm/database
+            )
+            target_link_libraries(dynamic_async_query_service_test PRIVATE qornix_dynamic_api)
+            add_test(NAME dynamic_async_query_service_test COMMAND dynamic_async_query_service_test)
+            set_tests_properties(dynamic_async_query_service_test PROPERTIES LABELS "dynamic-api;async-db;mock")
+        endif()
     endif()
 endif()

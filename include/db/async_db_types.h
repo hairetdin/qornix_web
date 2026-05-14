@@ -19,6 +19,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -104,6 +105,13 @@ struct QueryResult {
         return rows.front();
     }
 
+    std::optional<Row> optional_one() const {
+        if (rows.empty()) {
+            return std::nullopt;
+        }
+        return rows.front();
+    }
+
     boost::json::value to_json_value() const {
         boost::json::object root;
         root["affected_rows"] = affected_rows;
@@ -138,6 +146,38 @@ inline const char* to_string(DbTimeoutSource source) {
     return "none";
 }
 
+enum class SqlPlaceholderStyle {
+    DollarNumbered,
+    QuestionMark
+};
+
+inline SqlPlaceholderStyle placeholder_style_for_driver(std::string_view driver_name) {
+    if (driver_name.find("mysql") != std::string_view::npos ||
+        driver_name.find("MySQL") != std::string_view::npos) {
+        return SqlPlaceholderStyle::QuestionMark;
+    }
+    return SqlPlaceholderStyle::DollarNumbered;
+}
+
+inline std::string sql_placeholder(SqlPlaceholderStyle style, std::size_t one_based_index) {
+    if (style == SqlPlaceholderStyle::QuestionMark) {
+        return "?";
+    }
+    return "$" + std::to_string(one_based_index);
+}
+
+inline std::string sql_placeholder_for_driver(std::string_view driver_name, std::size_t one_based_index) {
+    return sql_placeholder(placeholder_style_for_driver(driver_name), one_based_index);
+}
+
+inline bool sql_driver_supports_returning(std::string_view driver_name) {
+    if (driver_name.find("mysql") != std::string_view::npos ||
+        driver_name.find("MySQL") != std::string_view::npos) {
+        return false;
+    }
+    return true;
+}
+
 struct QueryOptions {
     std::chrono::milliseconds timeout{std::chrono::milliseconds{2000}};
     DbTimeoutSource timeout_source{DbTimeoutSource::QueryOption};
@@ -159,6 +199,7 @@ struct AsyncPoolOptions {
     std::chrono::milliseconds max_lifetime{std::chrono::milliseconds{1800000}};
     std::chrono::milliseconds health_check_interval{std::chrono::milliseconds{10000}};
     std::chrono::milliseconds shutdown_timeout{std::chrono::milliseconds{5000}};
+    std::size_t prepared_cache_size{64};
     bool validate_idle_on_acquire{true};
 };
 
@@ -180,6 +221,9 @@ struct AsyncDbMetricsSnapshot {
     std::uint64_t query_option_timeouts{0};
     std::uint64_t query_pool_default_timeouts{0};
     std::uint64_t request_deadline_timeouts{0};
+    std::uint64_t prepared_cache_hits{0};
+    std::uint64_t prepared_cache_misses{0};
+    std::uint64_t prepared_cache_evictions{0};
     std::uint64_t query_latency_p50_us{0};
     std::uint64_t query_latency_p95_us{0};
     std::uint64_t query_latency_p99_us{0};
@@ -204,6 +248,9 @@ public:
     void record_query_option_timeout() { query_option_timeouts_.fetch_add(1, std::memory_order_relaxed); }
     void record_query_pool_default_timeout() { query_pool_default_timeouts_.fetch_add(1, std::memory_order_relaxed); }
     void record_request_deadline_timeout() { request_deadline_timeouts_.fetch_add(1, std::memory_order_relaxed); }
+    void record_prepared_cache_hit() { prepared_cache_hits_.fetch_add(1, std::memory_order_relaxed); }
+    void record_prepared_cache_miss() { prepared_cache_misses_.fetch_add(1, std::memory_order_relaxed); }
+    void record_prepared_cache_eviction(std::uint64_t count = 1) { prepared_cache_evictions_.fetch_add(count, std::memory_order_relaxed); }
 
     void record_query_latency(std::chrono::microseconds latency) {
         const auto value = static_cast<std::uint64_t>(std::max<std::int64_t>(0, latency.count()));
@@ -233,6 +280,9 @@ public:
         result.query_option_timeouts = query_option_timeouts_.load(std::memory_order_relaxed);
         result.query_pool_default_timeouts = query_pool_default_timeouts_.load(std::memory_order_relaxed);
         result.request_deadline_timeouts = request_deadline_timeouts_.load(std::memory_order_relaxed);
+        result.prepared_cache_hits = prepared_cache_hits_.load(std::memory_order_relaxed);
+        result.prepared_cache_misses = prepared_cache_misses_.load(std::memory_order_relaxed);
+        result.prepared_cache_evictions = prepared_cache_evictions_.load(std::memory_order_relaxed);
         auto latency_samples = copy_latency_samples();
         if (!latency_samples.empty()) {
             std::sort(latency_samples.begin(), latency_samples.end());
@@ -275,6 +325,9 @@ private:
     std::atomic<std::uint64_t> query_option_timeouts_{0};
     std::atomic<std::uint64_t> query_pool_default_timeouts_{0};
     std::atomic<std::uint64_t> request_deadline_timeouts_{0};
+    std::atomic<std::uint64_t> prepared_cache_hits_{0};
+    std::atomic<std::uint64_t> prepared_cache_misses_{0};
+    std::atomic<std::uint64_t> prepared_cache_evictions_{0};
     static constexpr std::size_t max_latency_samples_{1024};
     mutable std::mutex latency_mutex_;
     std::vector<std::uint64_t> query_latencies_us_;

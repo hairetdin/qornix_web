@@ -9,8 +9,21 @@
 
 #include <string>
 #include <vector>
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <optional>
 #include <boost/json.hpp>
 #include <iostream>
+
+#ifndef QORNIX_ENABLE_ASYNC_DB
+#define QORNIX_ENABLE_ASYNC_DB 0
+#endif
+
+#if QORNIX_ENABLE_ASYNC_DB
+#include <boost/asio.hpp>
+#include "db/async_db_types.h"
+#endif
 
 #include "database_interface.h"
 
@@ -83,9 +96,12 @@ class QueryBuilder {
 private:
     std::vector<std::string> sql_parameters_;  // parameters for sql request
     bool has_sql_parameters_ = false; // Flag presence parameters for sql request
+    std::function<std::string(std::size_t)> placeholder_formatter_;
+    bool returning_supported_ = true;
 
     // Helper Method for handling filters with operators comparison
     std::string processFilterCondition(const std::string& condition);
+    std::string placeholder(std::size_t one_based_index) const;
 
     ResponseData buildResponse(const std::vector<std::map<std::string, std::string>>& results);
 
@@ -108,6 +124,9 @@ public:
     void addSqlParameter(const std::string& value);
     const std::vector<std::string>& getSqlParameters() const;
     bool hasSqlParameters() const; // Check presence parameters
+    void setPlaceholderFormatter(std::function<std::string(std::size_t)> formatter);
+    void setSupportsReturning(bool enabled);
+    bool supportsReturning() const;
 
     // Initialize through configuration file
     static std::unique_ptr<QueryBuilder> init(const std::string& configPath = "config.yaml");
@@ -162,5 +181,55 @@ public:
 
     ResponseData exec();
 };
+
+
+#if QORNIX_ENABLE_ASYNC_DB
+class AsyncDatabaseInterface;
+
+class AsyncQueryBuilder {
+public:
+    AsyncQueryBuilder();
+    explicit AsyncQueryBuilder(std::shared_ptr<AsyncDatabaseInterface> database);
+
+    void setDatabaseInterface(std::shared_ptr<AsyncDatabaseInterface> database);
+
+    AsyncQueryBuilder& setMethod(const std::string& method);
+    AsyncQueryBuilder& setTable(const std::string& table);
+    AsyncQueryBuilder& setData(const boost::json::object& data);
+    AsyncQueryBuilder& addFilter(const std::string& condition);
+    AsyncQueryBuilder& addGroupBy(const std::string& field);
+    AsyncQueryBuilder& addOrderBy(const std::string& field);
+    AsyncQueryBuilder& addValue(const std::string& field);
+    AsyncQueryBuilder& addJoin(const std::string& join_clause);
+    AsyncQueryBuilder& addHaving(const std::string& condition);
+    AsyncQueryBuilder& setLimit(int limit);
+    AsyncQueryBuilder& queryOptions(qornix::db::QueryOptions options);
+    AsyncQueryBuilder& timeout(std::chrono::milliseconds timeout);
+    AsyncQueryBuilder& prepared(bool enabled = true);
+
+    void parseRequest(
+        const std::string& query_string,
+        const std::optional<std::string>& table = std::nullopt,
+        const std::optional<std::string>& method = std::nullopt
+    );
+
+    std::string generateSQL();
+    const std::vector<std::string>& getSqlParameters() const;
+    bool hasSqlParameters() const;
+
+    boost::asio::awaitable<qornix::db::QueryResult> execute(qornix::db::CancellationToken token = {});
+    boost::asio::awaitable<ResponseData> exec(qornix::db::CancellationToken token = {});
+    boost::asio::awaitable<std::string> getJsonResponse(qornix::db::CancellationToken token = {});
+
+private:
+    qornix::db::QueryParams buildAsyncParams() const;
+    ResponseData buildResponse(const qornix::db::QueryResult& result) const;
+    void syncDialectOptions();
+
+    QueryBuilder builder_;
+    std::shared_ptr<AsyncDatabaseInterface> database_;
+    qornix::db::QueryOptions query_options_{};
+};
+#endif
 
 #endif // QUERY_BUILDER_H

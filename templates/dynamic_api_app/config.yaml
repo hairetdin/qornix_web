@@ -28,3 +28,11 @@ dynamic_api:
     allow_raw_join: true
     allow_delete_without_filter: false
     allow_update_without_filter: false
+  async:
+    query_timeout_ms: 2000
+    route_timeout_ms: 30000
+    max_body_size: 1048576
+    max_concurrent_db_operations: 128
+    # SQLite uses the explicit sync_offloaded async adapter, whose prepared
+    # statement API is intentionally disabled. PostgreSQL/MySQL can set this true.
+    prepared_queries: false

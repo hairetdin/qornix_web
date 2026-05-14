@@ -8,6 +8,8 @@
 #pragma once
 
 #include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -17,6 +19,7 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
 #include "async_db_driver.h"
@@ -28,8 +31,60 @@ namespace qornix::db {
 namespace net = boost::asio;
 
 class AsyncConnectionPool;
+class AsyncTransaction;
 
 namespace detail {
+
+class PreparedStatementCache {
+public:
+    std::optional<std::string> find(const std::string& sql) {
+        const auto found = entries_.find(sql);
+        if (found == entries_.end()) {
+            return std::nullopt;
+        }
+        found->second.last_used = ++clock_;
+        return found->second.name;
+    }
+
+    std::string make_statement_name(std::uint64_t connection_id) {
+        return "qnx_stmt_" + std::to_string(connection_id) + "_" + std::to_string(next_sequence_++);
+    }
+
+    std::size_t insert(std::string sql, std::string name, std::size_t max_size) {
+        if (max_size == 0) {
+            return 0;
+        }
+
+        const auto tick = ++clock_;
+        entries_[std::move(sql)] = Entry{std::move(name), tick};
+
+        std::size_t evicted = 0;
+        while (entries_.size() > max_size) {
+            auto lru = entries_.begin();
+            for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+                if (it->second.last_used < lru->second.last_used) {
+                    lru = it;
+                }
+            }
+            entries_.erase(lru);
+            ++evicted;
+        }
+        return evicted;
+    }
+
+    void clear() noexcept { entries_.clear(); }
+    std::size_t size() const noexcept { return entries_.size(); }
+
+private:
+    struct Entry {
+        std::string name;
+        std::uint64_t last_used{0};
+    };
+
+    std::unordered_map<std::string, Entry> entries_;
+    std::uint64_t next_sequence_{1};
+    std::uint64_t clock_{0};
+};
 
 struct AsyncPooledConnection {
     std::uint64_t id{0};
@@ -37,6 +92,7 @@ struct AsyncPooledConnection {
     std::chrono::steady_clock::time_point created_at{};
     std::chrono::steady_clock::time_point last_used_at{};
     std::string driver_name;
+    PreparedStatementCache prepared_cache;
 };
 
 } // namespace detail
@@ -71,13 +127,29 @@ public:
         QueryOptions options = {},
         CancellationToken token = {});
 
+    net::awaitable<std::optional<Row>> query_optional(
+        std::string sql,
+        QueryParams params = {},
+        QueryOptions options = {},
+        CancellationToken token = {});
+
     net::awaitable<QueryResult> execute(
         std::string sql,
         QueryParams params = {},
         QueryOptions options = {},
         CancellationToken token = {});
 
+    net::awaitable<QueryResult> execute_returning(
+        std::string sql,
+        QueryParams params = {},
+        QueryOptions options = {},
+        CancellationToken token = {});
+
     net::awaitable<void> prepare(std::string name, std::string sql, CancellationToken token = {});
+    net::awaitable<std::string> prepare_cached(std::string sql, CancellationToken token = {});
+    std::string placeholder(std::size_t one_based_index) const {
+        return sql_placeholder_for_driver(driver_name(), one_based_index);
+    }
     net::awaitable<void> begin(CancellationToken token = {});
     net::awaitable<void> commit(CancellationToken token = {});
     net::awaitable<void> rollback(CancellationToken token = {});
@@ -85,7 +157,12 @@ public:
     void discard() noexcept { reusable_ = false; }
 
 private:
+    friend class AsyncTransaction;
+
+    void release() { reset(); }
+    void rollback_abandoned(CancellationToken token = {}) noexcept;
     void reset();
+    net::awaitable<std::string> ensure_prepared_statement(const std::string& sql, std::chrono::milliseconds timeout, CancellationToken token);
     void throw_if_token_stopped(const CancellationToken& token) const;
     void mark_non_reusable_after_error(const DbError& error) noexcept;
     void mark_non_reusable_if_closed() noexcept;
@@ -309,6 +386,21 @@ public:
     }
 
     const AsyncPoolOptions& options() const noexcept { return options_; }
+    net::any_io_executor executor() const { return executor_; }
+
+    void record_prepared_cache_hit() const {
+        if (metrics_) { metrics_->record_prepared_cache_hit(); }
+    }
+
+    void record_prepared_cache_miss() const {
+        if (metrics_) { metrics_->record_prepared_cache_miss(); }
+    }
+
+    void record_prepared_cache_eviction(std::size_t count) const {
+        if (metrics_ && count > 0) {
+            metrics_->record_prepared_cache_eviction(static_cast<std::uint64_t>(count));
+        }
+    }
 
 private:
     std::optional<detail::AsyncPooledConnection> try_take_idle(std::optional<std::uint64_t> waiter_id) {
@@ -467,6 +559,10 @@ private:
     bool closing_{false};
 };
 
+namespace detail {
+inline net::awaitable<void> rollback_abandoned_transaction(AsyncDbConnection connection, CancellationToken token);
+} // namespace detail
+
 inline AsyncDbConnection::AsyncDbConnection(std::shared_ptr<AsyncConnectionPool> pool,
                                             detail::AsyncPooledConnection connection)
     : pool_(std::move(pool)), connection_(std::move(connection)) {}
@@ -525,6 +621,40 @@ inline void AsyncDbConnection::mark_non_reusable_if_closed() noexcept {
     }
 }
 
+inline void AsyncDbConnection::rollback_abandoned(CancellationToken token) noexcept {
+    if (!pool_ || !connection_.driver) {
+        return;
+    }
+
+    try {
+        auto executor = pool_->executor();
+        if (!token.deadline && pool_->options().query_timeout.count() > 0) {
+            token.deadline = std::chrono::steady_clock::now() + pool_->options().query_timeout;
+        }
+
+        AsyncDbConnection connection = std::move(*this);
+        connection.discard();
+        net::co_spawn(
+            executor,
+            detail::rollback_abandoned_transaction(std::move(connection), std::move(token)),
+            net::detached);
+    } catch (...) {
+        reusable_ = false;
+        reset();
+    }
+}
+
+namespace detail {
+inline net::awaitable<void> rollback_abandoned_transaction(AsyncDbConnection connection, CancellationToken token) {
+    try {
+        co_await connection.rollback(std::move(token));
+    } catch (...) {
+        connection.discard();
+    }
+    co_return;
+}
+} // namespace detail
+
 inline net::awaitable<QueryResult> AsyncDbConnection::query(
     std::string sql,
     QueryParams params,
@@ -535,6 +665,9 @@ inline net::awaitable<QueryResult> AsyncDbConnection::query(
     }
     throw_if_token_stopped(token);
     try {
+        if (options.prepared && options.statement_name.empty()) {
+            options.statement_name = co_await ensure_prepared_statement(sql, options.timeout, token);
+        }
         co_return co_await connection_.driver->query(std::move(sql), std::move(params), std::move(options), std::move(token));
     } catch (const DbError& error) {
         mark_non_reusable_after_error(error);
@@ -555,6 +688,15 @@ inline net::awaitable<QueryResult> AsyncDbConnection::query_one(
     co_return co_await query(std::move(sql), std::move(params), std::move(options), std::move(token));
 }
 
+inline net::awaitable<std::optional<Row>> AsyncDbConnection::query_optional(
+    std::string sql,
+    QueryParams params,
+    QueryOptions options,
+    CancellationToken token) {
+    auto result = co_await query_one(std::move(sql), std::move(params), std::move(options), std::move(token));
+    co_return result.optional_one();
+}
+
 inline net::awaitable<QueryResult> AsyncDbConnection::execute(
     std::string sql,
     QueryParams params,
@@ -565,6 +707,9 @@ inline net::awaitable<QueryResult> AsyncDbConnection::execute(
     }
     throw_if_token_stopped(token);
     try {
+        if (options.prepared && options.statement_name.empty()) {
+            options.statement_name = co_await ensure_prepared_statement(sql, options.timeout, token);
+        }
         co_return co_await connection_.driver->execute(std::move(sql), std::move(params), std::move(options), std::move(token));
     } catch (const DbError& error) {
         mark_non_reusable_after_error(error);
@@ -573,6 +718,60 @@ inline net::awaitable<QueryResult> AsyncDbConnection::execute(
         mark_non_reusable_if_closed();
         throw;
     }
+}
+
+inline net::awaitable<QueryResult> AsyncDbConnection::execute_returning(
+    std::string sql,
+    QueryParams params,
+    QueryOptions options,
+    CancellationToken token) {
+    co_return co_await execute(std::move(sql), std::move(params), std::move(options), std::move(token));
+}
+
+inline net::awaitable<std::string> AsyncDbConnection::ensure_prepared_statement(const std::string& sql, std::chrono::milliseconds timeout, CancellationToken token) {
+    if (!connection_.driver) {
+        throw DbError(DbErrorCode::ConnectionLost, "async DB connection is not open");
+    }
+    if (timeout.count() > 0) {
+        const auto prepare_deadline = std::chrono::steady_clock::now() + timeout;
+        if (!token.deadline || prepare_deadline < *token.deadline) {
+            token.deadline = prepare_deadline;
+        }
+    }
+    throw_if_token_stopped(token);
+
+    if (auto cached = connection_.prepared_cache.find(sql)) {
+        if (pool_) {
+            pool_->record_prepared_cache_hit();
+        }
+        co_return *cached;
+    }
+
+    if (pool_) {
+        pool_->record_prepared_cache_miss();
+    }
+
+    const auto name = connection_.prepared_cache.make_statement_name(connection_.id);
+    try {
+        co_await connection_.driver->prepare(name, sql, std::move(token));
+    } catch (const DbError& error) {
+        mark_non_reusable_after_error(error);
+        throw;
+    } catch (...) {
+        mark_non_reusable_if_closed();
+        throw;
+    }
+
+    const auto max_cache_size = pool_ ? pool_->options().prepared_cache_size : std::size_t{64};
+    const auto evicted = connection_.prepared_cache.insert(sql, name, max_cache_size);
+    if (pool_) {
+        pool_->record_prepared_cache_eviction(evicted);
+    }
+    co_return name;
+}
+
+inline net::awaitable<std::string> AsyncDbConnection::prepare_cached(std::string sql, CancellationToken token) {
+    co_return co_await ensure_prepared_statement(sql, QueryOptions{}.timeout, std::move(token));
 }
 
 inline net::awaitable<void> AsyncDbConnection::prepare(std::string name, std::string sql, CancellationToken token) {

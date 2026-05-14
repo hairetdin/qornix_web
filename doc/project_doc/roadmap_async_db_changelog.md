@@ -2,6 +2,33 @@
 
 This changelog tracks implementation progress for `doc/project_doc/roadmap_async_db.md`.
 
+## 2026-05-14 — Benchmark report classification fix
+
+### Completed
+
+- Updated `scripts/db_benchmark.py` to distinguish raw non-2xx `errors` from scenario-level `unexpected` responses.
+- Added per-scenario 503/504, acquire-timeout and failed-connect deltas to the generated benchmark report.
+- Raised the benchmark runner's default acquire timeout to `1000ms` so the extended `*_normal_select_1000` scenario can queue behind a 32-connection pool instead of immediately measuring pool-acquire saturation.
+- Adjusted the slow-query benchmark endpoint so the short timeout applies to the SQL operation, while pool acquisition still uses the normal request/query budget.
+
+### Root cause
+
+The previous benchmark defaults mixed two behaviors: `postgres_normal_select_1000` used `concurrency=1000`, `pool_size=32` and `acquire_timeout=200ms`, which made normal traffic fail with `PoolTimeout`; timeout and overload scenarios also counted expected 503/504 responses as generic errors. The async DB implementation was exercising backpressure correctly, but the report hid acquire-timeout deltas and made expected stress responses look like unexpected failures.
+
+## 2026-05-14 — Dynamic API async wiring in examples/templates
+
+### Completed
+
+- Added `qornix_dynamic_api/dynamic_api_async_db.h` with helper wiring for `AsyncDatabaseInterface` and preloaded `DynamicSchemaAllowlist`.
+- Exposed `HttpServer::executor()` so application route setup can build async DB pools on the server `io_context`.
+- Updated `example/dynamic_web_query_builder_server` to register Dynamic API CRUD routes through `addSchemaDrivenDynamicApiAsyncRoutes(...)` when `QORNIX_ENABLE_ASYNC_DB=ON`.
+- Updated `templates/dynamic_api_app` to enable `QORNIX_ENABLE_ASYNC_DB`, parse async Dynamic API route settings and register async CRUD routes.
+- Documented that the default SQLite demo path uses the explicit `sqlite_sync_offloaded` adapter, while PostgreSQL/MySQL require the corresponding native async backend flags.
+
+### Root cause
+
+Phase 8 had added the library-level async CRUD path, but the visible generated/demo applications still called the sync `addSchemaDrivenDynamicApiRoutes(...)` entrypoint. That made the feature hard to validate from the Dynamic API examples even though the underlying async handler path existed.
+
 ## 2026-05-13 — Async DB foundation pass
 
 ### Completed
@@ -600,3 +627,342 @@ async_db_mock_test passed
 
 - Full CMake configure/build was still not run in this container because the same environment limitations from Phase 4 remain: root configure requires yaml-cpp and the standalone ORM configure could not find the `Boost::json` CMake component package.
 - No live PostgreSQL/MySQL benchmark run was performed in this pass.
+
+## 2026-05-13 — Phase 6A async transaction lifecycle hardening pass
+
+### Completed
+
+- Hardened the common `AsyncTransaction` facade:
+  - tracks explicit transaction state (`Active`, `Committed`, `RolledBack`, `Failed`, `Abandoned`);
+  - rejects use-after-commit/rollback with `DbErrorCode::QueryRejected`;
+  - releases the checked-out connection immediately after successful `commit()` or `rollback()`;
+  - discards the checked-out connection on timeout, cancellation, connection and connection-lost errors inside a transaction.
+- Added best-effort abandoned transaction cleanup:
+  - destroying an active transaction schedules async `ROLLBACK` on the pool executor;
+  - the abandoned connection is marked non-reusable before release, so uncertain transaction state is never returned to the pool;
+  - explicit `co_await tx.rollback()` remains the preferred deterministic path.
+- Added `AsyncDbConnection::rollback_abandoned(...)` and pool executor access needed for safe destructor-triggered rollback scheduling.
+- Extended `MockAsyncDriver` with optional shared transaction stats for deterministic tests:
+  - begin/commit/rollback counters;
+  - active transaction counter;
+  - query/prepare/connect/close counters.
+- Expanded `qornix_orm_async_db_mock_test` to cover:
+  - transaction commit success and use-after-commit rejection;
+  - explicit rollback success;
+  - abandoned transaction best-effort rollback and discard;
+  - cancellation inside a transaction causing discard/reconnect;
+  - timeout inside a transaction causing discard/reconnect.
+- Updated async DB user documentation and benchmark matrix with Phase 6A transaction lifecycle semantics.
+
+### Roadmap phase status update
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 6 — Transactions and prepared statements | Partially implemented | Common async transaction lifecycle is now hardened and tested. Prepared statement cache, placeholder abstraction helpers and higher-level `query_optional`/`execute_returning` helpers remain for Phase 6B. |
+| Phase 9 — Benchmarks | Partially improved | Benchmark matrix now calls out transaction commit/rollback/cancel scenarios; live benchmark numbers still need to be generated. |
+
+### Validation performed
+
+```bash
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_db_mock_test.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/tests/async_db_mock_test.cpp -o /tmp/async_db_mock_test.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/async_database_interface.cpp -o /tmp/async_database_interface.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/async_table_manager.cpp -o /tmp/async_table_manager.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/config.cpp -o /tmp/config.o
+g++ /tmp/async_db_mock_test.o /tmp/async_database_interface.o /tmp/async_table_manager.o /tmp/config.o -lpthread -o /tmp/async_db_mock_test_phase6a
+/tmp/async_db_mock_test_phase6a
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core $(pkg-config --cflags libpq) -fsyntax-only qornix_orm/tests/async_postgres_smoke_test.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_mysql_smoke_test.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core $(pkg-config --cflags libpq) -c qornix_orm/database/drivers/PostgreSQL/PostgresAsyncDriver.cpp -o /tmp/PostgresAsyncDriver_phase6a.o
+```
+
+Reported result:
+
+```text
+async_db_mock_test passed
+```
+
+### Validation limitations
+
+- Full CMake configure/build was still not run in this container because the same environment limitations from Phase 4/5 remain: root configure requires yaml-cpp and the standalone ORM configure could not find the `Boost::json` CMake component package.
+- A direct `g++ -fsyntax-only` check of the full MySQL async driver translation unit was not included in the validation list because Boost.MySQL template expansion exceeded the container time budget; the MySQL smoke-test source syntax check passed.
+- No live PostgreSQL/MySQL transaction smoke run was performed in this pass.
+
+## 2026-05-13 — Phase 6B prepared statement cache and helper pass
+
+### Completed
+
+- Added common per-connection prepared statement cache:
+  - generated statement names use the physical connection id and a per-connection sequence;
+  - cache metadata is stored inside `AsyncPooledConnection`, so reconnect/discard naturally invalidates cached prepared statements;
+  - `AsyncPoolOptions::prepared_cache_size` controls the client-side cache size;
+  - least-recently-used SQL entries are evicted when the cache exceeds the configured size.
+- Added automatic prepared execution:
+  - `QueryOptions::prepared = true` no longer requires callers to pre-populate `statement_name`;
+  - the common `AsyncDbConnection` wrapper prepares once per physical connection and reuses the generated statement name;
+  - explicit named `prepare(...)` + `QueryOptions::statement_name` remains supported.
+- Added helper APIs:
+  - `QueryResult::optional_one()`;
+  - `AsyncDbConnection::query_optional(...)`;
+  - `AsyncDbConnection::execute_returning(...)`;
+  - `AsyncDatabase::query_optional(...)`;
+  - `AsyncDatabase::execute_returning(...)`;
+  - `AsyncDatabaseInterface::queryOptional(...)`;
+  - `AsyncDatabaseInterface::executeReturning(...)`;
+  - matching transaction helper methods for `query_optional(...)` and `execute_returning(...)`.
+- Added SQL placeholder helpers:
+  - PostgreSQL-like drivers use `$1`, `$2`, ...;
+  - MySQL-like drivers use `?`.
+- Extended config and metrics:
+  - `db.pool.prepared_cache_size` / `database.pool.prepared_cache_size` are parsed by `AsyncDatabaseInterface::poolOptionsFromConfig(...)`;
+  - `AsyncDbMetricsSnapshot` now exposes `prepared_cache_hits`, `prepared_cache_misses` and `prepared_cache_evictions`.
+- Expanded `qornix_orm_async_db_mock_test` to cover:
+  - generated prepared statement names;
+  - cache hit reuse on the same physical connection;
+  - LRU eviction with `prepared_cache_size = 1`;
+  - reconnect/discard invalidation;
+  - `queryOptional(...)` and `executeReturning(...)` helpers;
+  - placeholder helper output;
+  - prepared cache config parsing and metrics.
+- Updated async DB user documentation and benchmark matrix with Phase 6B prepared-cache fields and examples.
+
+### Roadmap phase status update
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 6 — Transactions and prepared statements | Implemented common layer | Async transaction lifecycle, abandoned rollback/discard, automatic prepared statement cache, placeholder helpers and convenience helpers are implemented and covered by mock tests. Backend-specific server-side deallocate hooks are not implemented; cache eviction is client-side and physical connection close remains the server-side cleanup boundary. |
+| Phase 9 — Benchmarks | Partially improved | Benchmark matrix now includes prepared-cache hit/miss/eviction scenarios and fields. Live DB benchmark numbers still need to be generated. |
+
+### Validation performed
+
+```bash
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_db_mock_test.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/tests/async_db_mock_test.cpp -o /tmp/async_db_mock_test_6b.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/async_database_interface.cpp -o /tmp/async_database_interface_6b.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/async_table_manager.cpp -o /tmp/async_table_manager_6b.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/config.cpp -o /tmp/config_6b.o
+g++ /tmp/async_db_mock_test_6b.o /tmp/async_database_interface_6b.o /tmp/async_table_manager_6b.o /tmp/config_6b.o -lpthread -o /tmp/async_db_mock_test_6b
+timeout 20s /tmp/async_db_mock_test_6b
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_mysql_smoke_test.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core $(pkg-config --cflags libpq) -fsyntax-only qornix_orm/tests/async_postgres_smoke_test.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core $(pkg-config --cflags libpq) -c qornix_orm/database/drivers/PostgreSQL/PostgresAsyncDriver.cpp -o /tmp/PostgresAsyncDriver_6b.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/database/drivers/MySQL/MySqlAsyncDriver.cpp
+```
+
+Reported result:
+
+```text
+async_db_mock_test passed
+```
+
+### Validation limitations
+
+- Full CMake configure/build was still not run in this container because the same environment limitations from Phase 4/5/6A remain: root configure requires yaml-cpp and the standalone ORM configure could not find the `Boost::json` CMake component package.
+- No live PostgreSQL/MySQL benchmark run was performed in this pass.
+
+## 2026-05-13 — Phase 7A async ORM convenience integration pass
+
+### Completed
+
+- Extended the async ORM facade with driver/dialect inspection helpers:
+  - `AsyncDatabase::options()` / `driver_name()` / `placeholder()` / `supports_returning()`;
+  - `AsyncDatabaseInterface::poolOptions()` / `driverName()` / `placeholder()` / `supportsReturning()`.
+- Updated `AsyncDatabaseInterface::createMock()` to set `AsyncPoolOptions::driver_name = "mock_async"` when no driver name is supplied, so ORM placeholder behavior is deterministic in tests and examples.
+- Hardened `AsyncTableManager` CRUD SQL generation so it no longer hard-codes PostgreSQL `$1` placeholders:
+  - PostgreSQL-like drivers use `$1`, `$2`, ...;
+  - MySQL-like drivers use `?`;
+  - MySQL-style `insert`/`update` avoid `RETURNING *` and return affected-row metadata.
+- Added async ORM convenience aliases and controls:
+  - `filter(map)`;
+  - sync-style aliases `order_by`, `values`, `all`, `create`, `delete_`, `raw_sql`;
+  - `prepared()`, `timeout(...)` and `queryOptions(...)` propagation into table operations;
+  - `findOptionalById(...)` using the common `queryOptional(...)` helper.
+- Extended `MockAsyncDriverStats` with last-query SQL tracking for dialect-generation assertions.
+- Expanded `qornix_orm_async_db_mock_test` coverage for:
+  - table `findById` and `findOptionalById`;
+  - filtered/selected/ordered/limited `all()` with prepared query options;
+  - create alias;
+  - MySQL-style placeholder generation;
+  - MySQL-style non-returning insert/update/delete SQL.
+- Updated `doc/async_db.md` and `doc/benchmark_async_db.md` with Phase 7A ORM facade behavior and benchmark matrix entries.
+
+### Roadmap phase status update
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 7 — ORM async integration | Partially implemented | Async ORM CRUD convenience methods exist and now use driver-aware placeholders plus MySQL-safe mutation SQL. Remaining work is deeper query-builder/dynamic schema integration and real PostgreSQL/MySQL async ORM smoke coverage beyond the common mock layer. |
+| Phase 8 — Dynamic API async integration | Ready to start after Phase 7B | Dynamic API request-path migration should follow after the async ORM/query-builder compatibility layer is validated. |
+| Phase 9 — Benchmarks | Partially improved | Benchmark matrix now includes async ORM CRUD dialect scenarios; live DB benchmark numbers still need to be generated. |
+
+### Validation performed
+
+```bash
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/database/async_table_manager.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/database/async_database_interface.cpp
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_db_mock_test.cpp
+```
+
+The mock runtime test was also linked and executed with section-garbage-collection to avoid requiring unavailable `yaml-cpp` link libraries for unused config-file loading symbols in this container:
+
+```bash
+g++ -std=c++20 -O0 -ffunction-sections -fdata-sections -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/tests/async_db_mock_test.cpp -o /tmp/qornix_phase7a_objs/test.o
+g++ -std=c++20 -O0 -ffunction-sections -fdata-sections -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/async_database_interface.cpp -o /tmp/qornix_phase7a_objs/iface.o
+g++ -std=c++20 -O0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/async_table_manager.cpp -o /tmp/qornix_phase7a_objs/table.o
+g++ -std=c++20 -O0 -ffunction-sections -fdata-sections -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -c qornix_orm/database/config.cpp -o /tmp/qornix_phase7a_objs/config_gc.o
+g++ /tmp/qornix_phase7a_objs/test.o /tmp/qornix_phase7a_objs/iface.o /tmp/qornix_phase7a_objs/table.o /tmp/qornix_phase7a_objs/config_gc.o -Wl,--gc-sections -lpthread -o /tmp/async_db_mock_test_phase7a
+/tmp/async_db_mock_test_phase7a
+```
+
+Result:
+
+```text
+async_db_mock_test passed
+```
+
+### Remaining limitations
+
+- Full CMake configure/build was still not run in this container because the previous environment limitations remain: root configure requires yaml-cpp and the standalone ORM configure could not find the `Boost::json` CMake component package.
+- Phase 7B should still wire the richer query builder/schema-aware ORM paths to async parameter binding and add PostgreSQL/MySQL live async ORM smoke tests.
+
+## 2026-05-13 — Phase 7B async query-builder integration pass
+
+### Completed
+
+- Extended the existing `QueryBuilder` SQL generation path with configurable placeholder formatting while keeping the legacy sync default as PostgreSQL-style `$1`, `$2`, ... placeholders.
+- Added configurable `RETURNING` support to `QueryBuilder` generation so MySQL-style async paths can emit non-returning mutation SQL.
+- Added `AsyncQueryBuilder` behind `QORNIX_ENABLE_ASYNC_DB`:
+  - mirrors the existing dynamic `QueryBuilder` request shape;
+  - uses `AsyncDatabaseInterface` for execution instead of sync `DatabaseInterface`;
+  - converts extracted SQL parameters into `qornix::db::QueryParams`;
+  - supports `QueryOptions`, `prepared()` and `timeout(...)`;
+  - exposes awaitable `execute(...)`, `exec(...)` and `getJsonResponse(...)`.
+- Added DB error to HTTP status mapping for async query-builder responses:
+  - pool/connection unavailable -> 503;
+  - timeout/cancelled -> 504;
+  - constraint/conflict -> 409;
+  - syntax/query rejection -> 400;
+  - unknown errors -> 500.
+- Added `qornix_orm_async_query_builder_test` as a separate CTest target to avoid re-growing the large GCC-13-sensitive `async_db_mock_test.cpp` translation unit.
+- Covered mock dialect scenarios:
+  - PostgreSQL-style `GET` query builder output uses `$1` and preserves parameter order;
+  - MySQL-style `POST` emits `?` placeholders without `RETURNING`;
+  - MySQL-style `PATCH` keeps data parameters before filter parameters and returns affected-row metadata.
+- Updated async DB documentation and benchmark matrix with Phase 7B query-builder behavior.
+
+### Roadmap phase status update
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 7 — ORM async integration | Implemented common async ORM/query-builder path | Async table CRUD and async query-builder execution now use driver-aware placeholders and no sync database calls on the async path. Remaining deeper Dynamic API request-path migration is tracked under Phase 8. |
+| Phase 8 — Dynamic API async integration | Ready to start | The async query-builder path provides the missing building block for dynamic API request handling without direct sync DB calls on `io_context` threads. |
+| Phase 9 — Benchmarks | Partially improved | Benchmark matrix now includes async query-builder dialect/parameterization checks; live DB benchmark numbers still need to be generated. |
+
+### Validation performed
+
+```bash
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=1 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/database/query_builder.cpp
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=1 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_query_builder_test.cpp
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=1 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_orm/tests/async_db_mock_test.cpp
+```
+
+### Remaining limitations
+
+- Full CMake configure/build was still not run in this container because the standalone ORM configure could not find the `Boost::json` CMake component package.
+- Runtime validation of the new `qornix_orm_async_query_builder_test` should be performed locally where the full CMake dependency set is available.
+- Phase 8 still needs to wire Dynamic API handlers to `AsyncQueryBuilder`/`AsyncDatabaseInterface` and add route-level DB timeout/concurrency/error-mapping policy.
+
+## 2026-05-13 — Phase 8 dynamic API async CRUD integration pass
+
+### Completed
+
+- Added route-level Dynamic API async DB configuration knobs to `DynamicApiConfig`:
+  - `dynamicQueryTimeout`;
+  - `dynamicRouteTimeout`;
+  - `maxDynamicBodySize`;
+  - `maxConcurrentDbOperations`;
+  - `preparedDynamicQueries`.
+- Added `DynamicSchemaAllowlist::addTable(...)` so tests and applications can build a preloaded allowlist without requiring sync DB introspection during request execution.
+- Added an async Dynamic API query service path behind `QORNIX_ENABLE_ASYNC_DB`:
+  - `DynamicQueryService(config, AsyncDatabaseInterface, DynamicSchemaAllowlist)`;
+  - `executeAsync(...)` returning `boost::asio::awaitable<DynamicApiResponse>`;
+  - async execution uses `AsyncQueryBuilder` and `AsyncDatabaseInterface` instead of sync `DatabaseInterface`.
+- Added async CRUD route registration:
+  - `addSchemaDrivenDynamicApiAsyncRoutes(...)` registers schema/metadata/OpenAPI compatibility routes and async CRUD routes;
+  - CRUD routes use `HttpServer::any_async(...)` with route timeout, body-size and concurrency limits from `DynamicApiConfig`.
+- Preserved the Phase 7B DB error to HTTP status mapping on Dynamic API async CRUD responses.
+- Added `dynamic_async_query_service_test` covering:
+  - PostgreSQL-style async dynamic GET with `$1` placeholders and prepared query flag;
+  - MySQL-style async dynamic POST with `?` placeholders and no `RETURNING`;
+  - allowlist validation rejecting disallowed write fields before a DB query is issued.
+- Updated `doc/async_db.md`, `doc/benchmark_async_db.md` and `qornix_dynamic_api/README.md` with Phase 8 async Dynamic API usage and benchmark matrix entries.
+
+### Roadmap phase status update
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 7 — ORM async integration | Implemented common async ORM/query-builder path | Dynamic API now consumes the async query-builder path for CRUD execution. |
+| Phase 8 — Dynamic API async integration | Implemented common async CRUD path | CRUD request execution can now run through `AsyncDatabaseInterface` with preloaded allowlist, route-level limits and stable DB error mapping. Metadata/schema management routes remain on the existing sync services for now. |
+| Phase 9 — Benchmarks | Ready for dynamic API scenarios | Benchmark matrix now includes dynamic API async CRUD scenarios for PostgreSQL/MySQL. |
+
+### Validation performed
+
+```bash
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=1 -I. -Iinclude -Iqornix_dynamic_api -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_dynamic_api/dynamic_api_handlers.cpp
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=1 -I. -Iinclude -Iqornix_dynamic_api -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_dynamic_api/dynamic_query_service.cpp
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=1 -I. -Iinclude -Iqornix_dynamic_api -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only tests/dynamic_async_query_service_test.cpp
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=0 -I. -Iinclude -Iqornix_dynamic_api -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_dynamic_api/dynamic_query_service.cpp
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=0 -I. -Iinclude -Iqornix_dynamic_api -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only qornix_dynamic_api/dynamic_api_handlers.cpp
+```
+
+### Remaining limitations
+
+- Full CMake configure/build was still not run in this container because the standalone ORM configure could not find the `Boost::json` CMake component package.
+- Runtime validation of `dynamic_async_query_service_test` should be performed locally where the full CMake dependency set is available.
+- Phase 8 currently moves Dynamic API CRUD execution to the async DB path. Metadata and schema-management endpoints still use the existing sync services and should be considered a separate migration decision because they perform schema introspection and DDL planning.
+
+## 2026-05-13 — Phase 9/10 benchmark tooling and documentation pass
+
+### Completed
+
+- Added `async_db_benchmark_server` for live async DB benchmark runs:
+  - supports `mock`, `postgres` and `mysql` drivers;
+  - uses real async PostgreSQL/MySQL driver factories when the corresponding CMake flags are enabled;
+  - exposes `/db/select`, `/db/prepared`, `/db/transaction`, `/db/slow` and `/db/metrics`;
+  - reports `AsyncDbMetricsSnapshot` counters for benchmark delta capture.
+- Added `scripts/db_benchmark.py`:
+  - starts `async_db_benchmark_server`;
+  - drives normal, prepared, transaction, timeout and optional high-concurrency/overload HTTP scenarios;
+  - captures HTTP status counts, latency percentiles, process RSS/thread/fd/CPU metrics and DB metric deltas;
+  - writes the report to `doc/benchmark_async_db.md` by default.
+- Added runnable Phase 10 examples:
+  - `example/async_postgres_server`;
+  - `example/async_mysql_server`;
+  - `example/async_orm_server`.
+- Wired examples into `QORNIX_BUILD_EXAMPLES` with backend-specific guards.
+- Updated `README.md`, `doc/async_db.md` and `doc/benchmark_async_db.md` with benchmark commands and example locations.
+
+### Roadmap phase status update
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 9 — Benchmarks | Tooling implemented, live numbers pending | The benchmark server and runner are available. `doc/benchmark_async_db.md` still needs to be regenerated with live PostgreSQL/MySQL runs for release-grade benchmark numbers. |
+| Phase 10 — Documentation and migration guide | Implemented for current async DB surface | User docs, benchmark instructions and runnable examples exist. Deeper production deployment guidance can continue as ordinary docs maintenance. |
+
+### Validation performed
+
+```bash
+python3 -m py_compile scripts/db_benchmark.py
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=1 -DQORNIX_ENABLE_ASYNC_POSTGRES=0 -DQORNIX_ENABLE_ASYNC_MYSQL=0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only tests/async_db_benchmark_server.cpp
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=1 -DQORNIX_ENABLE_ASYNC_POSTGRES=0 -DQORNIX_ENABLE_ASYNC_MYSQL=0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only example/async_orm_server/main.cpp
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=1 -DQORNIX_ENABLE_ASYNC_POSTGRES=1 -DQORNIX_ENABLE_ASYNC_MYSQL=0 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core $(pkg-config --cflags libpq) -fsyntax-only example/async_postgres_server/main.cpp
+g++ -std=c++20 -O0 -DQORNIX_ENABLE_ASYNC_DB=1 -DQORNIX_ENABLE_ASYNC_POSTGRES=0 -DQORNIX_ENABLE_ASYNC_MYSQL=1 -I. -Iinclude -Iqornix_orm -Iqornix_orm/database -Iqornix_orm/core -fsyntax-only example/async_mysql_server/main.cpp
+cmake --build cmake-build-debug --target async_db_benchmark_server -j 4
+scripts/db_benchmark.py --server cmake-build-debug/async_db_benchmark_server --driver mock --duration 0.2 --normal-concurrency 4 --timeout-concurrency 2 --pool-size 2 --max-waiters 4 --output /tmp/qornix_async_db_mock_benchmark.md --quiet-server
+ctest --test-dir cmake-build-debug -R 'qornix_orm_async_db_mock_test|qornix_orm_async_query_builder_test|dynamic_async_query_service_test' --output-on-failure
+ctest --test-dir cmake-build-debug --output-on-failure
+```
+
+### Validation limitations
+
+- Live PostgreSQL/MySQL benchmark numbers were not generated in this pass.
+- The full `cmake-build-debug` CTest suite passed with `QORNIX_ENABLE_ASYNC_POSTGRES=OFF` and `QORNIX_ENABLE_ASYNC_MYSQL=OFF`; live driver benchmark validation still requires a separate build with the corresponding backend enabled and live DSNs.

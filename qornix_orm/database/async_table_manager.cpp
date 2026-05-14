@@ -16,10 +16,20 @@ AsyncTableManager::AsyncTableManager(std::shared_ptr<AsyncDatabaseInterface> dat
     if (!database_) {
         throw std::invalid_argument("AsyncTableManager requires AsyncDatabaseInterface");
     }
+    if (table_name_.empty()) {
+        throw std::invalid_argument("AsyncTableManager requires non-empty table name");
+    }
 }
 
 AsyncTableManager& AsyncTableManager::filter(const std::string& field, const std::string& value) {
     filters_[field] = value;
+    return *this;
+}
+
+AsyncTableManager& AsyncTableManager::filter(const std::map<std::string, std::string>& conditions) {
+    for (const auto& [field, value] : conditions) {
+        filters_[field] = value;
+    }
     return *this;
 }
 
@@ -38,22 +48,47 @@ AsyncTableManager& AsyncTableManager::select(std::vector<std::string> fields) {
     return *this;
 }
 
+AsyncTableManager& AsyncTableManager::prepared(bool enabled) {
+    query_options_.prepared = enabled;
+    return *this;
+}
+
+AsyncTableManager& AsyncTableManager::timeout(std::chrono::milliseconds value) {
+    query_options_.timeout = value;
+    return *this;
+}
+
+AsyncTableManager& AsyncTableManager::queryOptions(qornix::db::QueryOptions options) {
+    query_options_ = std::move(options);
+    return *this;
+}
+
 boost::asio::awaitable<qornix::db::QueryResult> AsyncTableManager::findAll(qornix::db::CancellationToken token) {
     qornix::db::QueryParams params;
     for (const auto& [_, value] : filters_) {
         params.push_back(qornix::db::QueryParam::text(value));
     }
     const std::string sql = buildSelectSql();
-    auto result = co_await database_->query(sql, std::move(params), {}, std::move(token));
+    auto result = co_await database_->query(sql, std::move(params), queryOptionsCopy(), std::move(token));
     co_return result;
 }
 
 boost::asio::awaitable<qornix::db::QueryResult> AsyncTableManager::findById(std::string id, qornix::db::CancellationToken token) {
-    const std::string sql = "SELECT * FROM " + table_name_ + " WHERE id = $1 LIMIT 1";
+    const std::string sql = "SELECT * FROM " + table_name_ + " WHERE id = " + placeholder(1) + " LIMIT 1";
     qornix::db::QueryParams params;
     params.push_back(qornix::db::QueryParam::text(std::move(id)));
-    auto result = co_await database_->queryOne(sql, std::move(params), {}, std::move(token));
+    auto result = co_await database_->queryOne(sql, std::move(params), queryOptionsCopy(), std::move(token));
     co_return result;
+}
+
+boost::asio::awaitable<std::optional<qornix::db::Row>> AsyncTableManager::findOptionalById(
+    std::string id,
+    qornix::db::CancellationToken token) {
+    const std::string sql = "SELECT * FROM " + table_name_ + " WHERE id = " + placeholder(1) + " LIMIT 1";
+    qornix::db::QueryParams params;
+    params.push_back(qornix::db::QueryParam::text(std::move(id)));
+    auto row = co_await database_->queryOptional(sql, std::move(params), queryOptionsCopy(), std::move(token));
+    co_return row;
 }
 
 boost::asio::awaitable<qornix::db::QueryResult> AsyncTableManager::insert(
@@ -72,11 +107,17 @@ boost::asio::awaitable<qornix::db::QueryResult> AsyncTableManager::insert(
             placeholders << ", ";
         }
         columns << field;
-        placeholders << "$" << index++;
+        placeholders << placeholder(index);
         params.push_back(qornix::db::QueryParam::text(value));
+        ++index;
     }
-    const std::string sql = "INSERT INTO " + table_name_ + " (" + columns.str() + ") VALUES (" + placeholders.str() + ") RETURNING *";
-    auto result = co_await database_->query(sql, std::move(params), {}, std::move(token));
+    std::string sql = "INSERT INTO " + table_name_ + " (" + columns.str() + ") VALUES (" + placeholders.str() + ")";
+    if (supportsReturning()) {
+        sql += " RETURNING *";
+        auto result = co_await database_->executeReturning(std::move(sql), std::move(params), queryOptionsCopy(), std::move(token));
+        co_return result;
+    }
+    auto result = co_await database_->execute(std::move(sql), std::move(params), queryOptionsCopy(), std::move(token));
     co_return result;
 }
 
@@ -94,20 +135,26 @@ boost::asio::awaitable<qornix::db::QueryResult> AsyncTableManager::update(
         if (index > 1) {
             assignments << ", ";
         }
-        assignments << field << " = $" << index++;
+        assignments << field << " = " << placeholder(index);
         params.push_back(qornix::db::QueryParam::text(value));
+        ++index;
     }
     params.push_back(qornix::db::QueryParam::text(std::move(id)));
-    const std::string sql = "UPDATE " + table_name_ + " SET " + assignments.str() + " WHERE id = $" + std::to_string(index) + " RETURNING *";
-    auto result = co_await database_->query(sql, std::move(params), {}, std::move(token));
+    std::string sql = "UPDATE " + table_name_ + " SET " + assignments.str() + " WHERE id = " + placeholder(index);
+    if (supportsReturning()) {
+        sql += " RETURNING *";
+        auto result = co_await database_->executeReturning(std::move(sql), std::move(params), queryOptionsCopy(), std::move(token));
+        co_return result;
+    }
+    auto result = co_await database_->execute(std::move(sql), std::move(params), queryOptionsCopy(), std::move(token));
     co_return result;
 }
 
 boost::asio::awaitable<qornix::db::QueryResult> AsyncTableManager::remove(std::string id, qornix::db::CancellationToken token) {
-    const std::string sql = "DELETE FROM " + table_name_ + " WHERE id = $1";
+    const std::string sql = "DELETE FROM " + table_name_ + " WHERE id = " + placeholder(1);
     qornix::db::QueryParams params;
     params.push_back(qornix::db::QueryParam::text(std::move(id)));
-    auto result = co_await database_->execute(sql, std::move(params), {}, std::move(token));
+    auto result = co_await database_->execute(sql, std::move(params), queryOptionsCopy(), std::move(token));
     co_return result;
 }
 
@@ -115,7 +162,7 @@ boost::asio::awaitable<qornix::db::QueryResult> AsyncTableManager::rawSql(
     std::string sql,
     qornix::db::QueryParams params,
     qornix::db::CancellationToken token) {
-    auto result = co_await database_->query(std::move(sql), std::move(params), {}, std::move(token));
+    auto result = co_await database_->query(std::move(sql), std::move(params), queryOptionsCopy(), std::move(token));
     co_return result;
 }
 
@@ -124,7 +171,7 @@ std::string AsyncTableManager::buildSelectSql() const {
     sql << "SELECT " << (selected_fields_.empty() ? "*" : joinFields(selected_fields_)) << " FROM " << table_name_;
     std::size_t index = 1;
     for (const auto& [field, _] : filters_) {
-        sql << (index == 1 ? " WHERE " : " AND ") << field << " = $" << index;
+        sql << (index == 1 ? " WHERE " : " AND ") << field << " = " << placeholder(index);
         ++index;
     }
     if (!order_clause_.empty()) {
@@ -134,6 +181,18 @@ std::string AsyncTableManager::buildSelectSql() const {
         sql << " LIMIT " << limit_;
     }
     return sql.str();
+}
+
+std::string AsyncTableManager::placeholder(std::size_t one_based_index) const {
+    return database_->placeholder(one_based_index);
+}
+
+bool AsyncTableManager::supportsReturning() const {
+    return database_->supportsReturning();
+}
+
+qornix::db::QueryOptions AsyncTableManager::queryOptionsCopy() const {
+    return query_options_;
 }
 
 std::string AsyncTableManager::joinFields(const std::vector<std::string>& fields) {

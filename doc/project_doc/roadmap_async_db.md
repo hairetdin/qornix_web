@@ -10,9 +10,9 @@
 
 ---
 
-## Текущее состояние
+## Исходное состояние до этой работы
 
-Сейчас в проекте есть:
+На старте этой roadmap-работы в проекте было:
 
 - C++20 coroutine-based HTTP route API.
 - `RequestContext`, timeout/cancellation/backpressure.
@@ -25,7 +25,7 @@
   - `TableManager`;
   - sync drivers for SQLite/PostgreSQL/MySQL where enabled by build options.
 
-Ограничение текущего состояния:
+Ограничение исходного состояния:
 
 - `AsyncDbConnection::fetch_user(...)` не выполняет реальный SQL запрос.
 - Existing `IDatabase` methods are synchronous.
@@ -85,6 +85,26 @@ app.get_async("/users/{id}",
 - Есть benchmark report для normal и overload DB сценариев.
 - Dynamic API / ORM integration имеет понятный путь миграции с sync на async.
 - Пользовательская документация не обещает async PostgreSQL/MySQL до прохождения integration tests.
+
+## Implementation status — 2026-05-13
+
+Текущий статус по `doc/project_doc/roadmap_async_db_changelog.md`:
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 0 — Audit and design freeze | Done | Public async API represented by code and docs. |
+| Phase 1 — Common async DB contracts | Done | Common types, driver interface, pool, facades, mock and sync/offloaded adapter exist. |
+| Phase 2 — PostgreSQL async driver | Validated by live smoke | libpq non-blocking connect/query/prepare/transaction path is implemented. Live benchmark numbers are still separate Phase 9 evidence. |
+| Phase 3 — MySQL async driver | Validated by live smoke | Boost.MySQL/Asio connect/query/prepare/transaction path is implemented. Strict out-of-band mid-operation cancel remains backend hardening work. |
+| Phase 4 — Pool hardening | Implemented | Bounded pool, FIFO waiters, idle/lifetime discard, shutdown and lifecycle metrics are implemented. Health checks are lazy on acquire/release rather than proactive background checks. |
+| Phase 5 — Query timeout and cancellation semantics | Implemented common semantics | Effective timeout resolution, request-deadline handling, discard-on-uncertain-state and timeout-source metrics exist. |
+| Phase 6 — Transactions and prepared statements | Implemented common layer | Async transaction lifecycle, abandoned rollback/discard, automatic prepared cache, placeholder helpers and helper APIs are implemented. |
+| Phase 7 — ORM async integration | Implemented common path | Async table CRUD and async query-builder paths use driver-aware placeholders and avoid sync DB calls on the async path. |
+| Phase 8 — Dynamic API async integration | Implemented async CRUD path | Dynamic API CRUD can run through `AsyncDatabaseInterface`; metadata/schema-management services remain on the existing sync path by design. |
+| Phase 9 — Benchmarks | Tooling implemented, live numbers pending | `async_db_benchmark_server` and `scripts/db_benchmark.py` exist. `doc/benchmark_async_db.md` must be regenerated with live PostgreSQL/MySQL runs before release-grade benchmark claims. |
+| Phase 10 — Documentation and migration guide | Implemented for current surface | `doc/async_db.md`, benchmark docs, changelog and runnable examples are present. |
+
+Итог: реализация async DB roadmap доведена до состояния, где общая async DB платформа, PostgreSQL/MySQL drivers, ORM/query-builder path, Dynamic API async CRUD path, benchmark tooling and examples are present. Единственное оставшееся acceptance evidence для полного DoD — записанные live benchmark numbers в `doc/benchmark_async_db.md` для PostgreSQL/MySQL normal/overload/timeout сценариев.
 
 ---
 
@@ -738,6 +758,17 @@ Success criteria:
 - RSS stable across repeated benchmark runs;
 - DB query wait does not reduce fast `/health` throughput catastrophically.
 
+Benchmark command pattern:
+
+```bash
+scripts/db_benchmark.py \
+  --server build/async-db-perf/async_db_benchmark_server \
+  --driver postgres \
+  --extended
+```
+
+Repeat with `--driver mysql` and the appropriate live DB environment variables. The generated report must be stored in `doc/benchmark_async_db.md`.
+
 ---
 
 ## Notes for maintainers
@@ -747,10 +778,19 @@ Success criteria:
 - For PostgreSQL, prefer explicit state machine around `libpq` non-blocking calls.
 - For MySQL, prefer Asio-native client integration if dependency policy allows it.
 - For SQLite and legacy sync drivers, keep the offload path available but document it as sync/offloaded.
-- Do not merge a driver as real async until benchmark proves DB wait does not consume HTTP worker threads.
+- Do not publish production-performance claims for a driver until benchmark proves DB wait does not consume HTTP worker threads.
 
 ---
 
-## Implementation note — 2026-05-13
+## Completion note — 2026-05-13
 
-The first implementation pass completed the common async DB foundation and created `doc/project_doc/roadmap_async_db_changelog.md`. The common API, pool, mock driver, explicit sync/offloaded driver and ORM facade are now implemented. Real PostgreSQL/MySQL non-blocking drivers are still tracked as open Phase 2/3 work and must not be marked complete until integration tests and `doc/benchmark_async_db.md` results are available.
+The implementation work tracked by this roadmap now has code/docs coverage through Phase 10:
+
+- common async DB API, pool, metrics, mock and sync/offloaded adapter;
+- real non-blocking PostgreSQL driver with live smoke validation;
+- real Boost.MySQL/Asio driver with live smoke validation;
+- pool hardening, timeout/cancellation semantics, async transactions and prepared-cache helpers;
+- async ORM/query-builder path and Dynamic API async CRUD path;
+- benchmark server/runner and runnable examples.
+
+Do not treat this roadmap as having release-grade performance evidence until `scripts/db_benchmark.py` has been run against live PostgreSQL/MySQL servers and the resulting `doc/benchmark_async_db.md` report is committed.

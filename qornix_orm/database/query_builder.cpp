@@ -5,6 +5,9 @@
  * Licensed under GNU GPL v3.0 (see LICENSE file) or commercial license.
  */
 #include "query_builder.h"
+#if QORNIX_ENABLE_ASYNC_DB
+#include "async_database_interface.h"
+#endif
 #include <boost/json.hpp>
 #include <stdexcept>
 #include <sstream>
@@ -424,6 +427,25 @@ bool QueryBuilder::hasSqlParameters() const {
     return has_sql_parameters_;
 }
 
+void QueryBuilder::setPlaceholderFormatter(std::function<std::string(std::size_t)> formatter) {
+    placeholder_formatter_ = std::move(formatter);
+}
+
+void QueryBuilder::setSupportsReturning(bool enabled) {
+    returning_supported_ = enabled;
+}
+
+bool QueryBuilder::supportsReturning() const {
+    return returning_supported_;
+}
+
+std::string QueryBuilder::placeholder(std::size_t one_based_index) const {
+    if (placeholder_formatter_) {
+        return placeholder_formatter_(one_based_index);
+    }
+    return "$" + std::to_string(one_based_index);
+}
+
 // validation
 bool QueryBuilder::isValidIdentifier(const std::string &name) {
     if (name.empty()) return false;
@@ -738,7 +760,7 @@ std::string QueryBuilder::processFilterCondition(const std::string &condition) {
         if (value_part.size() >= 2 && value_part.front() == '\'' && value_part.back() == '\'') {
             std::string value = value_part.substr(1, value_part.size() - 2);
             addSqlParameter(value);
-            return column + found_operator + "$" + std::to_string(sql_parameters_.size());
+            return column + found_operator + placeholder(sql_parameters_.size());
         }
 
         // For unquoted values keep original format (compatibility with current tests/contract).
@@ -868,11 +890,15 @@ std::string QueryBuilder::generateSQL() {
 
             for (size_t i = 0; i < keys.size(); ++i) {
                 if (i > 0) sql << ", ";
-                sql << "$" << (i + 1);
+                sql << placeholder(i + 1);
                 addSqlParameter(jsonValueToSqlParameter(request_data.data.at(keys[i])));
             }
 
-            sql << ") RETURNING id"; // Return ID created record
+            if (supportsReturning()) {
+                sql << ") RETURNING id"; // Return ID created record
+            } else {
+                sql << ")";
+            }
             break;
         }
 
@@ -891,7 +917,7 @@ std::string QueryBuilder::generateSQL() {
 
             for (size_t i = 0; i < keys.size(); ++i) {
                 if (i > 0) sql << ", ";
-                sql << keys[i] << " = $" << (i + 1);
+                sql << keys[i] << " = " << placeholder(i + 1);
                 addSqlParameter(jsonValueToSqlParameter(request_data.data.at(keys[i])));
             }
 
@@ -1077,3 +1103,250 @@ ResponseData QueryBuilder::exec() {
         return response;
     }
 }
+
+
+#if QORNIX_ENABLE_ASYNC_DB
+namespace {
+
+qornix::db::QueryParam asyncQueryParamFromString(const std::string& value) {
+    if (value == "NULL") {
+        return qornix::db::QueryParam::null();
+    }
+    return qornix::db::QueryParam::text(value);
+}
+
+boost::beast::http::status dbErrorToStatus(const qornix::db::DbError& error) {
+    using qornix::db::DbErrorCode;
+    switch (error.code()) {
+        case DbErrorCode::PoolRejected:
+        case DbErrorCode::Connection:
+        case DbErrorCode::ConnectionLost:
+        case DbErrorCode::Unavailable:
+            return boost::beast::http::status::service_unavailable;
+        case DbErrorCode::PoolTimeout:
+        case DbErrorCode::Timeout:
+        case DbErrorCode::Cancelled:
+            return boost::beast::http::status::gateway_timeout;
+        case DbErrorCode::ConstraintViolation:
+        case DbErrorCode::DuplicateKey:
+        case DbErrorCode::ForeignKeyViolation:
+        case DbErrorCode::Conflict:
+            return boost::beast::http::status::conflict;
+        case DbErrorCode::Syntax:
+        case DbErrorCode::QueryRejected:
+            return boost::beast::http::status::bad_request;
+        default:
+            return boost::beast::http::status::internal_server_error;
+    }
+}
+
+boost::json::object rowToJsonObject(const qornix::db::Row& row) {
+    boost::json::object object;
+    for (const auto& [key, value] : row.columns) {
+        object[key] = value;
+    }
+    return object;
+}
+
+} // namespace
+
+AsyncQueryBuilder::AsyncQueryBuilder() = default;
+
+AsyncQueryBuilder::AsyncQueryBuilder(std::shared_ptr<AsyncDatabaseInterface> database)
+    : database_(std::move(database)) {
+    syncDialectOptions();
+}
+
+void AsyncQueryBuilder::setDatabaseInterface(std::shared_ptr<AsyncDatabaseInterface> database) {
+    database_ = std::move(database);
+    syncDialectOptions();
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::setMethod(const std::string& method) {
+    builder_.setMethod(method);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::setTable(const std::string& table) {
+    builder_.setTable(table);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::setData(const boost::json::object& data) {
+    builder_.setData(data);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::addFilter(const std::string& condition) {
+    builder_.addFilter(condition);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::addGroupBy(const std::string& field) {
+    builder_.addGroupBy(field);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::addOrderBy(const std::string& field) {
+    builder_.addOrderBy(field);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::addValue(const std::string& field) {
+    builder_.addValue(field);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::addJoin(const std::string& join_clause) {
+    builder_.addJoin(join_clause);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::addHaving(const std::string& condition) {
+    builder_.addHaving(condition);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::setLimit(int limit) {
+    builder_.setLimit(limit);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::queryOptions(qornix::db::QueryOptions options) {
+    query_options_ = std::move(options);
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::timeout(std::chrono::milliseconds timeout) {
+    query_options_.timeout = timeout;
+    return *this;
+}
+
+AsyncQueryBuilder& AsyncQueryBuilder::prepared(bool enabled) {
+    query_options_.prepared = enabled;
+    return *this;
+}
+
+void AsyncQueryBuilder::parseRequest(
+    const std::string& query_string,
+    const std::optional<std::string>& table,
+    const std::optional<std::string>& method) {
+    builder_.parseRequest(query_string, table, method);
+}
+
+std::string AsyncQueryBuilder::generateSQL() {
+    syncDialectOptions();
+    return builder_.generateSQL();
+}
+
+const std::vector<std::string>& AsyncQueryBuilder::getSqlParameters() const {
+    return builder_.getSqlParameters();
+}
+
+bool AsyncQueryBuilder::hasSqlParameters() const {
+    return builder_.hasSqlParameters();
+}
+
+boost::asio::awaitable<qornix::db::QueryResult> AsyncQueryBuilder::execute(qornix::db::CancellationToken token) {
+    if (!database_) {
+        throw std::runtime_error("AsyncQueryBuilder database interface is not configured");
+    }
+    syncDialectOptions();
+    std::string sql = builder_.generateSQL();
+    auto params = buildAsyncParams();
+
+    switch (builder_.request_data.method) {
+        case HttpMethod::GET: {
+            auto result = co_await database_->query(std::move(sql), std::move(params), query_options_, std::move(token));
+            co_return result;
+        }
+        case HttpMethod::POST:
+        case HttpMethod::PATCH:
+        case HttpMethod::PUT:
+        case HttpMethod::DELETE: {
+            if (database_->supportsReturning() && builder_.request_data.method == HttpMethod::POST) {
+                auto result = co_await database_->executeReturning(std::move(sql), std::move(params), query_options_, std::move(token));
+                co_return result;
+            }
+            auto result = co_await database_->execute(std::move(sql), std::move(params), query_options_, std::move(token));
+            co_return result;
+        }
+    }
+
+    throw std::runtime_error("Unsupported async query builder method");
+}
+
+boost::asio::awaitable<ResponseData> AsyncQueryBuilder::exec(qornix::db::CancellationToken token) {
+    try {
+        auto result = co_await execute(std::move(token));
+        co_return buildResponse(result);
+    } catch (const qornix::db::DbError& error) {
+        ResponseData response;
+        response.status = dbErrorToStatus(error);
+        response.message = error.what();
+        response.count = 0;
+        co_return response;
+    } catch (const std::exception& error) {
+        ResponseData response;
+        response.status = boost::beast::http::status::internal_server_error;
+        response.message = error.what();
+        response.count = 0;
+        co_return response;
+    }
+}
+
+boost::asio::awaitable<std::string> AsyncQueryBuilder::getJsonResponse(qornix::db::CancellationToken token) {
+    auto response = co_await exec(std::move(token));
+    co_return response.toJson();
+}
+
+qornix::db::QueryParams AsyncQueryBuilder::buildAsyncParams() const {
+    qornix::db::QueryParams params;
+    for (const auto& value : builder_.getSqlParameters()) {
+        params.push_back(asyncQueryParamFromString(value));
+    }
+    return params;
+}
+
+ResponseData AsyncQueryBuilder::buildResponse(const qornix::db::QueryResult& result) const {
+    ResponseData response;
+
+    if (builder_.request_data.method == HttpMethod::POST) {
+        response.status = boost::beast::http::status::created;
+        response.message = "Record created successfully";
+        response.count = result.rows.empty() ? static_cast<int>(result.affected_rows) : static_cast<int>(result.rows.size());
+    } else if (builder_.request_data.method == HttpMethod::PUT ||
+               builder_.request_data.method == HttpMethod::PATCH ||
+               builder_.request_data.method == HttpMethod::DELETE) {
+        response.status = boost::beast::http::status::ok;
+        response.message = "Operation completed successfully";
+        response.count = static_cast<int>(result.affected_rows);
+    } else if (result.rows.empty()) {
+        response.status = boost::beast::http::status::not_found;
+        response.message = "No data found for the given criteria";
+        response.count = 0;
+    } else {
+        response.status = boost::beast::http::status::ok;
+        response.message = "Query executed successfully";
+        response.count = static_cast<int>(result.rows.size());
+    }
+
+    for (const auto& row : result.rows) {
+        response.data.push_back(rowToJsonObject(row));
+    }
+    return response;
+}
+
+void AsyncQueryBuilder::syncDialectOptions() {
+    if (!database_) {
+        builder_.setPlaceholderFormatter({});
+        builder_.setSupportsReturning(true);
+        return;
+    }
+    auto database = database_;
+    builder_.setPlaceholderFormatter([database](std::size_t index) {
+        return database->placeholder(index);
+    });
+    builder_.setSupportsReturning(database_->supportsReturning());
+}
+#endif

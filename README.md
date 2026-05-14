@@ -960,7 +960,7 @@ The dedicated async DB foundation lives in `include/db/*` and `qornix_orm/databa
 - `SyncOffloadedAsyncDriver` for explicitly marked legacy blocking drivers;
 - `AsyncDatabaseInterface` and `AsyncTableManager` for ORM-facing coroutine code.
 
-See `doc/async_db.md` for usage examples and `doc/project_doc/roadmap_async_db_changelog.md` for implementation status. PostgreSQL/MySQL should only be advertised as real async once their non-blocking driver integrations and DB benchmarks are completed.
+See `doc/async_db.md` for usage examples and `doc/project_doc/roadmap_async_db_changelog.md` for implementation status. Real async PostgreSQL and MySQL driver paths are available behind `QORNIX_ENABLE_ASYNC_POSTGRES=ON` and `QORNIX_ENABLE_ASYNC_MYSQL=ON`; live benchmark runs are produced by `scripts/db_benchmark.py` and stored in `doc/benchmark_async_db.md`.
 
 Graceful shutdown stops accepting new connections, waits for active requests until a deadline, then stops the `io_context`:
 
@@ -1007,3 +1007,22 @@ scripts/baseline_benchmark.py \
 The report is saved to `doc/benchmark.md`. Use `--output path/to/report.md` to write it elsewhere. The report separates successful responses, managed HTTP overload responses and client-side errors. Metrics columns marked as `delta` are per-scenario increments, not cumulative process totals.
 
 The current reference run in `doc/benchmark.md` demonstrates 10k idle keep-alive connections opened successfully, 10k active HTTP load without client errors, async timer routes without blocking worker threads, a clean normal DB-pool scenario at 128 concurrency, and controlled overload/timeout accounting for stress scenarios.
+
+Async DB benchmark runs use the dedicated async DB benchmark server:
+
+```bash
+cmake -S . -B build/async-db-perf \
+  -DQORNIX_BUILD_TESTS=ON \
+  -DQORNIX_ENABLE_ASYNC_DB=ON \
+  -DQORNIX_ENABLE_ASYNC_POSTGRES=ON
+cmake --build build/async-db-perf --target async_db_benchmark_server --parallel
+
+export QORNIX_ASYNC_POSTGRES_URL='postgresql://user:password@127.0.0.1:5432/dbname'
+scripts/db_benchmark.py \
+  --server build/async-db-perf/async_db_benchmark_server \
+  --driver postgres \
+  --extended
+```
+
+Use `--driver mysql` with `QORNIX_ENABLE_ASYNC_MYSQL=ON` and MySQL connection environment variables. The report is saved to `doc/benchmark_async_db.md`.
+The benchmark runner defaults to a `1000ms` DB acquire timeout so the extended `*_normal_select_1000` scenario measures queued async DB work instead of immediately turning into pool backpressure; use `--acquire-timeout-ms 200` when you explicitly want a more aggressive saturation profile.
