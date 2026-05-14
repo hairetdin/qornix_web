@@ -1,6 +1,6 @@
 # Schema Risk Policy
 
-`SchemaRiskClassifier` is the Sprint 30 layer between semantic diff and future schema planning.
+`SchemaRiskClassifier` sits between semantic diff and schema planning.
 
 It does not execute SQL and does not modify XML or the database. Its only responsibility is to explain how risky each `SchemaDiffOperation` is and what policy decision should be made before a future planner/applier handles it.
 
@@ -18,7 +18,7 @@ schema_app.xsd
   -> SchemaApplier
 ```
 
-Sprint 30 implements only this part:
+The risk classifier implements only this part:
 
 ```text
 SchemaDocumentDiff
@@ -119,7 +119,7 @@ foreign_key_changed
 
 Operation is intentionally not executable until future driver capabilities and planner support exist.
 
-Examples in Sprint 30:
+Examples:
 
 ```text
 sequence_added
@@ -127,7 +127,7 @@ sequence_only_in_current
 sequence_changed
 ```
 
-Sprint 31 will introduce `DriverCapabilities`, which can refine unsupported/manual-review decisions by database driver.
+`DriverCapabilities` can refine unsupported/manual-review decisions by database driver.
 
 ## Policy decisions
 
@@ -229,11 +229,11 @@ column_added
 
 can be safe if the column is nullable, but can require review if it is `NOT NULL` without a default value.
 
-Sprint 30 classifies this as `warning`. Sprint 32 `SchemaPlanner` should refine it by looking at the full `SchemaDocument` and driver capabilities.
+The current policy classifies this as `warning`. `SchemaPlanner` can refine it by looking at the full `SchemaDocument` and driver capabilities.
 
-## Relation to future sprints
+## Relation to planning and apply layers
 
-- Sprint 31: `DriverCapabilities` can refine risk by database engine.
-- Sprint 32: `SchemaPlanner` will convert risk-assessed diff operations into ordered plan operations.
-- Sprint 33: `SchemaApplier` will execute only confirmed plan operations.
+- `DriverCapabilities` can refine risk by database engine.
+- `SchemaPlanner` converts risk-assessed diff operations into ordered plan operations.
+- `SchemaApplier` executes only confirmed plan operations.
 

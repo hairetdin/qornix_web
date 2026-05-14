@@ -9,7 +9,7 @@ option(HAVE_JWT_CPP "Enable JWT support" OFF)
 
 find_package(OpenSSL REQUIRED)
 
-find_package(Boost 1.75 REQUIRED COMPONENTS json url)
+find_package(Boost 1.83 REQUIRED COMPONENTS json url)
 if(NOT TARGET Boost::json)
     message(FATAL_ERROR "Boost::json target not found. Please install libboost-json1.83-dev.")
 endif()

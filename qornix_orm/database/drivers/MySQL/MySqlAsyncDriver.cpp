@@ -361,6 +361,34 @@ struct MySqlAsyncDriver::Impl {
         co_return convert_results(results, options);
     }
 
+    net::awaitable<void> close_temporary_statement(
+        const mysql::statement& statement,
+        std::optional<std::chrono::steady_clock::time_point> deadline,
+        const CancellationToken& token) {
+        check_token(token);
+        throw_if_deadline_expired(deadline, "MySQL close temporary prepared statement timed out");
+        mysql::diagnostics diag;
+        auto [ec] = co_await conn->async_close_statement(statement, diag, net::as_tuple(net::use_awaitable));
+        if (ec) {
+            fail_connection();
+            throw make_mysql_error(ec, diag);
+        }
+        check_token(token);
+        throw_if_deadline_expired(deadline, "MySQL close temporary prepared statement timed out");
+        co_return;
+    }
+
+    net::awaitable<QueryResult> run_temporary_statement(
+        mysql::statement statement,
+        QueryParams params,
+        QueryOptions options,
+        std::optional<std::chrono::steady_clock::time_point> deadline,
+        const CancellationToken& token) {
+        auto result = co_await run_statement(statement, std::move(params), std::move(options), deadline, token);
+        co_await close_temporary_statement(statement, deadline, token);
+        co_return result;
+    }
+
     net::awaitable<QueryResult> run_text(
         std::string sql,
         QueryOptions options,
@@ -406,7 +434,7 @@ struct MySqlAsyncDriver::Impl {
 
             if (!params.empty()) {
                 auto statement = co_await prepare_statement_impl(sql, deadline, token);
-                auto result = co_await run_statement(statement, std::move(params), std::move(options), deadline, token);
+                auto result = co_await run_temporary_statement(statement, std::move(params), std::move(options), deadline, token);
                 co_return result;
             }
 

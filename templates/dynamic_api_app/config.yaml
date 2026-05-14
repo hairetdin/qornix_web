@@ -36,3 +36,12 @@ dynamic_api:
     # SQLite uses the explicit sync_offloaded async adapter, whose prepared
     # statement API is intentionally disabled. PostgreSQL/MySQL can set this true.
     prepared_queries: false
+
+# postgres_async_example:
+#   Build with -DQORNIX_ENABLE_ASYNC_POSTGRES=ON and replace the database
+#   block above with driver: postgres plus host/port/database/user/password.
+#   Use pool/query timeouts from dynamic_api.async and database.pool.
+# mysql_async_example:
+#   Build with -DQORNIX_ENABLE_ASYNC_MYSQL=ON and replace the database
+#   block above with driver: mysql plus host/port/database/user/password.
+#   MySQL uses ? placeholders and does not use RETURNING.

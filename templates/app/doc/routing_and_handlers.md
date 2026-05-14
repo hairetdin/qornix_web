@@ -76,3 +76,16 @@ buildTextResponse(res, http::status::ok, text);
 ## Next step
 
 Create a new handler, register a route and rebuild. This is the fastest way to understand the framework flow.
+
+## Async route handlers
+
+Use `get_async`, `post_async`, `put_async`, `patch_async`, `delete_async`, `head_async`, `options_async` or `any_async` for coroutine handlers:
+
+```cpp
+server.get_async("/async/ping", makeAsyncPingHandler());
+server.get_async("/async/sleep/{ms}", makeAsyncSleepHandler());
+```
+
+The generated template implements these in `handlers/async_handlers.h`. `/async/sleep/{ms}` uses `boost::asio::steady_timer` so the delay does not block other connections.
+
+Use async routes for database calls, network calls, timers and slow downstream work. Use sync handlers only for immediate CPU-local responses.

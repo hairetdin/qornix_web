@@ -12,7 +12,7 @@ This template is intended to showcase the full schema-driven backend flow out of
 6. Run API recipes.
 7. Read generated OpenAPI docs and text specifications for schema XML and query payloads.
 
-When `QORNIX_ENABLE_ASYNC_DB=ON`, the generated app registers Dynamic API CRUD routes through the async DB path. The default SQLite demo uses the explicit `sqlite_sync_offloaded` adapter; PostgreSQL/MySQL builds can use real async drivers by enabling `QORNIX_ENABLE_ASYNC_POSTGRES=ON` or `QORNIX_ENABLE_ASYNC_MYSQL=ON` and setting the database config accordingly.
+When `QORNIX_ENABLE_ASYNC_DB=ON`, the generated app registers Dynamic API CRUD routes through the async DB path. See `doc/async_db_configuration.md` for SQLite/PostgreSQL/MySQL configuration examples. The default SQLite demo uses the explicit `sqlite_sync_offloaded` adapter; PostgreSQL/MySQL builds can use real async drivers by enabling `QORNIX_ENABLE_ASYNC_POSTGRES=ON` or `QORNIX_ENABLE_ASYNC_MYSQL=ON` and setting the database config accordingly.
 
 ## Build and run
 
@@ -201,6 +201,7 @@ If you change the build distribution or enable more database drivers, inspect `l
 
 ```text
 GET /                    application landing page and first-run wizard
+GET /health              JSON process/router health endpoint for smoke tests and deploy probes
 GET /schema-manager      Schema Manager UI for validate/diff/plan/apply
 GET /query-builder       visual structured query builder
 GET /table               table browser with filters, fields and sorting
@@ -210,6 +211,7 @@ GET /docs                lightweight OpenAPI viewer
 GET /docs/schema         human-readable Schema Manager and XML schema guide
 GET /docs/query-syntax   human-readable Dynamic API query contract
 GET /openapi.json        raw OpenAPI document
+GET /api/dynamic/async-db/health  async DB health probe when QORNIX_ENABLE_ASYNC_DB=ON
 ```
 
 ## Recommended first run

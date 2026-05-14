@@ -17,6 +17,12 @@ app.get_async("/users/{id}",
 );
 ```
 
+## Async gate status note
+
+`doc/project_doc/roadmap_async_gate.md` is the current merge/release gate for the async branch. The HTTP roadmap below is historical sprint planning; async DB work, documentation synchronization, dependency updates and template readiness are tracked by the gate and by `doc/project_doc/roadmap_async_gate_changelog.md`.
+
+Implemented async DB work is documented in `doc/async_db.md` and `doc/project_doc/roadmap_async_db_changelog.md`. Do not read older Sprint 6-12 future wording as a statement that timeout/backpressure/DB async work was not done later in the branch.
+
 ## Базовые принципы
 
 1. Сначала перейти на C++20.

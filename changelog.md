@@ -1,3 +1,11 @@
+# Async gate documentation/template synchronization
+
+- Added `doc/project_doc/roadmap_async_gate.md` and `doc/project_doc/roadmap_async_gate_changelog.md` as the release gate source of truth for the async branch.
+- Synchronized active Boost requirements to Boost 1.83 in root, ORM, Auth and RAG CMake files.
+- Expanded `qornix_orm` documentation for standalone usage, async DB API, configuration and tests.
+- Added async-ready template documentation and a default generated-app async HTTP route example.
+- Added project-level async documentation audit and dependency matrix.
+
 # Changelog
 
 ## Async DB benchmark tooling and examples
@@ -67,7 +75,7 @@
 - PostgreSQL/MySQL real non-blocking drivers remain tracked in project documentation and must pass integration benchmarks before being presented as fully async backends.
 
 
-## 2026-05-13 - Async HTTP runtime improvements
+## Async HTTP runtime improvements
 
 - Added coroutine-friendly HTTP controls: route timeout, read/write timeout, cancellation tracking and late-response suppression.
 - Added overload protection: global active request limit, per-route concurrency limit and request body size limits.
@@ -98,3 +106,13 @@ Highlights from the reference run:
 - Normal DB-pool scenario at 128 concurrency: `6430.50` RPS, p50 `17.13 ms`, p95 `33.23 ms`, `0` errors.
 - 10k idle keep-alive: `10000/10000` connections opened, `0` failures, `65` threads, about `75 MB` RSS.
 - Overload and timeout scenarios are represented as controlled failures with rejected/timeout deltas in the report.
+
+## Async gate documentation/template follow-up
+
+- Added the async gate roadmap and changelog under `doc/project_doc/`.
+- Synchronized async documentation for HTTP routes, async DB, Dynamic API, templates and qornix_orm standalone usage.
+- Updated the async branch dependency baseline to C++20, CMake 3.20+ and Boost 1.83+.
+- Added generated template async route handlers for `/async/ping` and `/async/sleep/{ms}`.
+- Added Dynamic API template `/health` route for generated-app smoke tests.
+- Added Dynamic API template async DB health route `/api/dynamic/async-db/health` for builds with `QORNIX_ENABLE_ASYNC_DB=ON`.
+- Added a qornix_orm standalone consumer sample and gate validation reports.

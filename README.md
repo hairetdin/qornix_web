@@ -520,11 +520,12 @@ ORM is disabled by default in the application template to keep the initial build
 
 ## Requirements
 
+
 Minimum:
 
 - C++20 compiler: GCC 10+, Clang 10+ or compatible;
-- CMake 3.10+;
-- Boost 1.75+ with `url`, `json`, `log` components;
+- CMake 3.20+;
+- Boost 1.83+ with `url`, `json`, `log` components;
 - yaml-cpp.
 
 For modules:
@@ -960,7 +961,7 @@ The dedicated async DB foundation lives in `include/db/*` and `qornix_orm/databa
 - `SyncOffloadedAsyncDriver` for explicitly marked legacy blocking drivers;
 - `AsyncDatabaseInterface` and `AsyncTableManager` for ORM-facing coroutine code.
 
-See `doc/async_db.md` for usage examples and `doc/project_doc/roadmap_async_db_changelog.md` for implementation status. Real async PostgreSQL and MySQL driver paths are available behind `QORNIX_ENABLE_ASYNC_POSTGRES=ON` and `QORNIX_ENABLE_ASYNC_MYSQL=ON`; live benchmark runs are produced by `scripts/db_benchmark.py` and stored in `doc/benchmark_async_db.md`.
+See `doc/async_db.md` for usage examples and `doc/project_doc/roadmap_async_db_changelog.md` for implementation status. For standalone `qornix_orm` async DB usage, also read `qornix_orm/Readme.md`, `qornix_orm/doc/standalone_usage.md`, `qornix_orm/doc/async_db_api.md`, `qornix_orm/doc/configuration.md` and `qornix_orm/doc/testing.md`. Real async PostgreSQL and MySQL driver paths are available behind `QORNIX_ENABLE_ASYNC_POSTGRES=ON` and `QORNIX_ENABLE_ASYNC_MYSQL=ON`; live benchmark runs are produced by `scripts/db_benchmark.py` and stored in `doc/benchmark_async_db.md`.
 
 Graceful shutdown stops accepting new connections, waits for active requests until a deadline, then stops the `io_context`:
 

@@ -16,5 +16,8 @@ protected:
 inline void setupRoutes(HttpServer& server) {
   server.add_route("/hello", std::make_shared&lt;HelloHandler&gt;());
 }</pre></article></section>
+<section class="qx-grid qx-grid-2"><article class="qx-card"><h2>Async route examples</h2><p>The generated app includes coroutine routes for non-blocking work:</p><pre class="qx-code">GET /async/ping
+GET /async/sleep/{ms}</pre></article><article class="qx-card"><h2>Register async handlers</h2><pre class="qx-code">server.get_async("/async/ping", makeAsyncPingHandler());
+server.get_async("/async/sleep/{ms}", makeAsyncSleepHandler());</pre><p>Implementation lives in <code>handlers/async_handlers.h</code>.</p></article></section>
 <section class="qx-grid qx-grid-3"><article class="qx-card"><h2>Path parameters</h2><p>Routes may use placeholders such as <code>/users/{id}</code>. The resolved values are passed to the handler as <code>path_params</code>.</p></article><article class="qx-card"><h2>Static files</h2><p>The template registers <code>/static/{filename}</code>. Put CSS, JS and small assets into <code>static/</code>.</p></article><article class="qx-card"><h2>HTML pages</h2><p>Use <code>AppPageHandler</code> for simple server-rendered HTML pages stored under <code>templates/</code>.</p></article></section>
 <footer class="qx-footer"><span>Routing guide</span><a href="/docs/raw/routing_and_handlers.md">Open bundled markdown</a></footer></div></body></html>

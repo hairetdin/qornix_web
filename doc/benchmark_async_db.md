@@ -59,3 +59,9 @@ All scenarios matched their expected HTTP status sets.
 ```bash
 scripts/db_benchmark.py --server build/async-db-perf/async_db_benchmark_server --driver postgres --extended
 ```
+
+## Using this report
+
+This report is a PostgreSQL async DB benchmark snapshot. For current performance evaluation, regenerate the benchmark in your own environment with the same backend, pool size, timeout values and concurrency profile that you plan to operate.
+
+For MySQL high-concurrency runs, controlled `503` pool-timeout responses can be expected when HTTP concurrency greatly exceeds the configured DB pool and acquire timeout. Use the benchmark runner's status breakdown and `unexpected` column to distinguish expected saturation from driver errors.

@@ -2,28 +2,38 @@
 
 Qornix now has a common coroutine-based DB layer for code that must not block HTTP `io_context` worker threads while waiting for database work.
 
-## Status
+## Feature overview
 
-Implemented in this iteration:
+The async DB layer provides:
 
 - common awaitable DB types in `include/db/*`;
 - `IAsyncDatabaseDriver` contract;
 - bounded `AsyncConnectionPool` with `max_connections`, `max_waiters`, acquire timeout, FIFO waiters, idle/max-lifetime checks and graceful shutdown;
-- Phase 5 query timeout/deadline resolution and cancellation token primitives;
-- Phase 6A hardened `AsyncTransaction` lifecycle with explicit commit/rollback, active-state checks and abandoned-transaction rollback/discard;
-- Phase 6B prepared statement cache with generated per-connection names, LRU eviction, placeholder helpers and `query_optional`/`execute_returning` convenience helpers;
+- query timeout/deadline resolution and cancellation-token primitives;
+- hardened `AsyncTransaction` lifecycle with explicit commit/rollback, active-state checks and abandoned-transaction rollback/discard;
+- prepared statement cache with generated per-connection names, LRU eviction, placeholder helpers and `query_optional`/`execute_returning` convenience helpers;
 - `AsyncDatabase`, `AsyncDbConnection` and `AsyncTransaction` facades;
 - mock async driver for unit tests and examples;
 - explicit sync/offloaded adapter for legacy blocking drivers;
-- ORM-facing `AsyncDatabaseInterface` and Phase 7A `AsyncTableManager` CRUD helpers with driver-aware placeholders;
-- Phase 7B `AsyncQueryBuilder` path for dynamic/query-builder-style requests with dialect-aware placeholders and async execution;
-- Phase 8 Dynamic API async CRUD registration path with route-level DB limits and stable DB error mapping;
-- Phase 9 benchmark tooling through `async_db_benchmark_server` and `scripts/db_benchmark.py`;
-- Phase 10 runnable examples under `example/async_postgres_server`, `example/async_mysql_server` and `example/async_orm_server`;
+- ORM-facing `AsyncDatabaseInterface` and `AsyncTableManager` CRUD helpers with driver-aware placeholders;
+- `AsyncQueryBuilder` path for dynamic/query-builder-style requests with dialect-aware placeholders and async execution;
+- Dynamic API async CRUD registration path with route-level DB limits and stable DB error mapping;
+- benchmark tooling through `async_db_benchmark_server` and `scripts/db_benchmark.py`;
+- runnable examples under `example/async_postgres_server`, `example/async_mysql_server` and `example/async_orm_server`;
 - PostgreSQL async driver built on libpq non-blocking socket polling when `QORNIX_ENABLE_ASYNC_POSTGRES=ON`;
 - MySQL async driver built on Boost.MySQL/Boost.Asio TCP when `QORNIX_ENABLE_ASYNC_MYSQL=ON`.
 
-PostgreSQL is implemented as a real non-blocking driver path when enabled and has passed the integration smoke test with a live DSN. MySQL has an Asio-compatible driver path and live smoke validation in the roadmap changelog. The benchmark runner required for Phase 9 is available; `doc/benchmark_async_db.md` should be regenerated with live PostgreSQL/MySQL numbers before a release note claims production performance characteristics. No PostgreSQL/MySQL path is silently wrapped in worker threads and advertised as real async.
+PostgreSQL and MySQL use real non-blocking async driver paths when their backend flags are enabled. Legacy blocking drivers are exposed through an explicit sync/offloaded adapter and are not described as native non-blocking drivers.
+
+## Standalone ORM/API documentation
+
+This project-level document describes the common async DB layer. For `qornix_orm` as a standalone library, use:
+
+- `qornix_orm/Readme.md`;
+- `qornix_orm/doc/standalone_usage.md`;
+- `qornix_orm/doc/async_db_api.md`;
+- `qornix_orm/doc/configuration.md`;
+- `qornix_orm/doc/testing.md`.
 
 ## Basic usage
 
@@ -217,7 +227,7 @@ If a DB operation times out or is cancelled after it has been handed to a driver
 - close/shutdown mode that rejects new acquires, closes idle connections and waits for active connections up to `shutdown_timeout`;
 - metrics for created, closed, discarded and failed connection attempts, timeout/cancel source counters, prepared-cache hit/miss/eviction counters, plus query latency p50/p95/p99 over the in-process sample window.
 
-YAML/INI configuration can use the Phase 4 pool layout:
+YAML/INI configuration can use the following pool layout:
 
 ```yaml
 db:
@@ -417,9 +427,7 @@ If MySQL environment variables are not set, the smoke test exits successfully wi
 
 - Real async PostgreSQL/MySQL drivers must use non-blocking DB socket I/O.
 - `SyncOffloadedAsyncDriver` is intentionally named as offloaded. It is useful for SQLite or legacy blocking drivers, but it is not a real async DB driver.
-- User documentation should separate implementation/smoke-test status from benchmarked production performance claims.
-
-## Benchmarks and examples
+- ## Benchmarks and examples
 
 Build the async DB benchmark server with the backend you want to validate:
 
@@ -443,7 +451,7 @@ scripts/db_benchmark.py \
 
 For MySQL, configure with `QORNIX_ENABLE_ASYNC_MYSQL=ON`, export `QORNIX_ASYNC_MYSQL_URL` or explicit MySQL fields, and pass `--driver mysql`. The benchmark report is written to `doc/benchmark_async_db.md`.
 
-The runner reports both raw non-2xx `errors` and scenario-level `unexpected` responses. Timeout and overload scenarios intentionally produce 503/504 responses, while normal scenarios should keep `unexpected = 0`. The default benchmark acquire timeout is `1000ms` so the extended `*_normal_select_1000` case can wait behind a 32-connection pool instead of being measured as immediate pool saturation.
+The runner reports both raw non-2xx `errors` and scenario-level `unexpected` responses. Timeout and overload scenarios intentionally produce 503/504 responses, while normal scenarios should keep `unexpected = 0`. The default benchmark acquire timeout is `1000ms`. At high HTTP concurrency a small DB pool may legitimately return controlled `503` pool-timeout responses; tune `pool-size`, `max-waiters` and acquire timeout for the target workload.
 
 Runnable examples:
 
@@ -451,13 +459,9 @@ Runnable examples:
 - `example/async_mysql_server`: real async MySQL route using `AsyncDatabase`;
 - `example/async_orm_server`: self-contained ORM facade example using the mock async driver.
 
-## Project documentation
-
-Implementation status is tracked in `doc/project_doc/roadmap_async_db_changelog.md`.
-
 ## Dynamic API async CRUD path
 
-Phase 8 adds an explicit async registration path for schema-driven Dynamic API CRUD routes. The sync Dynamic API registration remains available and unchanged; the async registration accepts a preloaded `DynamicSchemaAllowlist` so request execution does not have to open a sync `DatabaseInterface` on the HTTP worker path.
+The Dynamic API exposes an explicit async registration path for schema-driven Dynamic API CRUD routes. The sync Dynamic API registration remains available and unchanged; the async registration accepts a preloaded `DynamicSchemaAllowlist` so request execution does not have to open a sync `DatabaseInterface` on the HTTP worker path.
 
 ```cpp
 qornix_dynamic_api::DynamicApiConfig config;
@@ -494,4 +498,4 @@ The async CRUD handler uses `AsyncQueryBuilder` and `AsyncDatabaseInterface`; it
 - `maxConcurrentDbOperations` maps to the HTTP route concurrency limiter for dynamic CRUD routes;
 - `preparedDynamicQueries` enables the common per-connection prepared-statement cache.
 
-DB errors keep the Phase 7B HTTP mapping: unavailable/pool/connection errors become `503`, timeout/cancel becomes `504`, constraint/conflict becomes `409`, query syntax/rejection becomes `400`, and unknown failures become `500`.
+DB errors use the following HTTP mapping: unavailable/pool/connection errors become `503`, timeout/cancel becomes `504`, constraint/conflict becomes `409`, query syntax/rejection becomes `400`, and unknown failures become `500`.

@@ -12,7 +12,12 @@
 #include <qornix_dynamic_api/dynamic_api_async_db.h>
 #endif
 
+#include <boost/json.hpp>
+
 #include <chrono>
+#include <cstdint>
+#include <exception>
+#include <string>
 #include <utility>
 
 inline void setupRoutes(HttpServer& server) {
@@ -45,6 +50,12 @@ inline void setupRoutes(HttpServer& server) {
 #endif
 
     server.add_route("/", makeDynamicHomeHandler());
+    server.add_route("/health", [](const Request& req, Response& res, const urls::url_view&, const Params&) {
+        res = make_json_response(
+            http::status::ok,
+            req.version(),
+            R"({"application":"@PROJECT_NAME@","status":"ok","template":"dynamic_api","path":"/health"})");
+    });
     server.add_route("/schema-manager", makeSchemaManagerPageHandler());
     server.add_route("/query-builder", makeQueryBuilderPageHandler());
     server.add_route("/table", makeTableBrowserPageHandler());
@@ -72,6 +83,33 @@ inline void setupRoutes(HttpServer& server) {
         server.executor(),
         config.databaseConfig,
         asyncOptions);
+
+    server.get_async("/api/dynamic/async-db/health",
+        [asyncDatabase, timeout = config.dynamicQueryTimeout](Request req, Url, Params) -> net::awaitable<Response> {
+            try {
+                qornix::db::QueryOptions options;
+                options.timeout = timeout;
+                options.single_row = true;
+                options.max_rows = 1;
+
+                auto result = co_await asyncDatabase->query("SELECT 1", {}, options);
+
+                boost::json::object payload;
+                payload["status"] = "ok";
+                payload["template"] = "dynamic_api";
+                payload["async_db"] = "ok";
+                payload["rows"] = static_cast<std::uint64_t>(result.rows.size());
+                co_return response::json(boost::json::serialize(payload), req.version());
+            } catch (const std::exception& error) {
+                boost::json::object payload;
+                payload["status"] = "error";
+                payload["template"] = "dynamic_api";
+                payload["async_db"] = "error";
+                payload["message"] = error.what();
+                co_return response::json(http::status::service_unavailable, boost::json::serialize(payload), req.version());
+            }
+        });
+
     auto allowlist = qornix_dynamic_api::loadDynamicAsyncAllowlist(config);
     qornix_dynamic_api::addSchemaDrivenDynamicApiAsyncRoutes(
         server,

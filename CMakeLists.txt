@@ -54,7 +54,7 @@ else()
     endif()
 endif()
 
-find_package(Boost 1.75 REQUIRED COMPONENTS url json log)
+find_package(Boost 1.83 REQUIRED COMPONENTS url json log)
 
 # Optional authentication module.
 if(ENABLE_AUTH)

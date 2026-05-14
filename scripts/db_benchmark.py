@@ -13,10 +13,16 @@ import asyncio
 import json
 import os
 import signal
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - non-POSIX platforms
+    resource = None
 import socket
 import subprocess
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -85,6 +91,8 @@ class ScenarioResult:
     cpu_percent: float | None
     db_deltas: dict[str, int]
     db_snapshot: dict[str, int]
+    status_counts: dict[int, int]
+    unexpected_samples: list[str]
     expected_statuses: tuple[int, ...]
     expected: str
 
@@ -109,12 +117,12 @@ def read_proc_metrics(pid: int) -> tuple[int | None, int | None, int | None]:
                 rss_kb = int(line.split()[1])
             elif line.startswith("Threads:"):
                 threads = int(line.split()[1])
-    except (FileNotFoundError, PermissionError, ValueError):
+    except (FileNotFoundError, PermissionError, ValueError, OSError):
         pass
 
     try:
         fds = len(list(fd_path.iterdir()))
-    except (FileNotFoundError, PermissionError):
+    except (FileNotFoundError, PermissionError, OSError):
         fds = None
 
     return rss_kb, threads, fds
@@ -124,8 +132,57 @@ def read_proc_cpu_ticks(pid: int) -> int | None:
     try:
         parts = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()
         return int(parts[13]) + int(parts[14])
-    except (FileNotFoundError, PermissionError, ValueError, IndexError):
+    except (FileNotFoundError, PermissionError, ValueError, IndexError, OSError):
         return None
+
+
+def max_requested_concurrency(args: argparse.Namespace) -> int:
+    values = [args.normal_concurrency, args.timeout_concurrency]
+    if args.extended:
+        values.extend([args.high_concurrency, args.overload_concurrency])
+    return max(values)
+
+
+def required_nofile_limit(args: argparse.Namespace) -> int:
+    # The benchmark process opens one client socket per concurrent worker.
+    # The benchmark server runs as a child process and inherits the same
+    # RLIMIT_NOFILE, so size the limit for the largest scenario plus pool,
+    # listening sockets and a conservative margin for /proc sampling.
+    return max(1024, max_requested_concurrency(args) + args.pool_size + args.server_threads + 512)
+
+
+def ensure_nofile_limit(args: argparse.Namespace) -> None:
+    required = required_nofile_limit(args)
+    args.nofile_required = required
+    args.nofile_soft = None
+    args.nofile_hard = None
+    args.nofile_warning = ""
+
+    if args.no_raise_nofile:
+        args.nofile_warning = "RLIMIT_NOFILE auto-raise disabled by --no-raise-nofile."
+        return
+    if resource is None:
+        args.nofile_warning = "RLIMIT_NOFILE is unavailable on this platform."
+        return
+
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        args.nofile_soft = int(soft)
+        args.nofile_hard = int(hard) if hard != resource.RLIM_INFINITY else hard
+        if soft < required:
+            target = required if hard == resource.RLIM_INFINITY else min(required, hard)
+            if target > soft:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+                soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+                args.nofile_soft = int(soft)
+                args.nofile_hard = int(hard) if hard != resource.RLIM_INFINITY else hard
+        if soft < required:
+            args.nofile_warning = (
+                f"RLIMIT_NOFILE soft limit is {soft}, but the largest scenario requests about "
+                f"{required} fds. Raise ulimit -n or lower --overload-concurrency."
+            )
+    except (OSError, ValueError) as exc:
+        args.nofile_warning = f"Could not adjust RLIMIT_NOFILE: {exc}."
 
 
 def calculate_cpu_percent(start_ticks: int | None, end_ticks: int | None, elapsed_s: float) -> float | None:
@@ -160,7 +217,17 @@ async def sample_proc_metrics(pid: int,
             pass
 
 
-async def read_response(reader: asyncio.StreamReader) -> int:
+def response_body_preview(body: bytes, limit: int) -> str:
+    if not body:
+        return ""
+    preview = body[:max(0, limit)].decode("utf-8", errors="replace")
+    preview = preview.replace("\r", "\\r").replace("\n", "\\n")
+    if len(body) > limit:
+        preview += f"... <truncated {len(body) - limit} bytes>"
+    return preview
+
+
+async def read_response(reader: asyncio.StreamReader, body_preview_bytes: int) -> tuple[int, str]:
     status_line = await reader.readline()
     if not status_line:
         raise ConnectionError("empty status line")
@@ -179,9 +246,10 @@ async def read_response(reader: asyncio.StreamReader) -> int:
         if name.lower() == "content-length":
             content_length = int(value.strip())
 
+    body = b""
     if content_length:
-        await reader.readexactly(content_length)
-    return status
+        body = await reader.readexactly(content_length)
+    return status, response_body_preview(body, body_preview_bytes)
 
 
 async def worker(host: str,
@@ -190,7 +258,11 @@ async def worker(host: str,
                  deadline: float,
                  latencies: list[float],
                  statuses: list[int],
-                 client_errors: list[int]) -> None:
+                 client_errors: list[str],
+                 expected_statuses: set[int],
+                 unexpected_samples: list[str],
+                 unexpected_sample_limit: int,
+                 body_preview_bytes: int) -> None:
     request = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}:{port}\r\n"
@@ -200,8 +272,10 @@ async def worker(host: str,
 
     try:
         reader, writer = await asyncio.open_connection(host, port)
-    except OSError:
-        client_errors.append(1)
+    except OSError as exc:
+        client_errors.append(f"connect error: {type(exc).__name__}: {exc}")
+        if len(unexpected_samples) < unexpected_sample_limit:
+            unexpected_samples.append(f"client_error connect {type(exc).__name__}: {exc}")
         return
 
     try:
@@ -209,11 +283,17 @@ async def worker(host: str,
             started = time.perf_counter()
             writer.write(request)
             await writer.drain()
-            status = await read_response(reader)
+            status, body_preview = await read_response(reader, body_preview_bytes)
             latencies.append((time.perf_counter() - started) * 1000.0)
             statuses.append(status)
-    except (OSError, asyncio.IncompleteReadError, ConnectionError, ValueError):
-        client_errors.append(1)
+            if status not in expected_statuses and len(unexpected_samples) < unexpected_sample_limit:
+                unexpected_samples.append(
+                    f"status={status} path={path} body={body_preview if body_preview else '<empty>'}"
+                )
+    except (OSError, asyncio.IncompleteReadError, ConnectionError, ValueError) as exc:
+        client_errors.append(f"request error: {type(exc).__name__}: {exc}")
+        if len(unexpected_samples) < unexpected_sample_limit:
+            unexpected_samples.append(f"client_error request {type(exc).__name__}: {exc}")
     finally:
         writer.close()
         try:
@@ -263,10 +343,11 @@ def metric_delta(before: dict[str, int], after: dict[str, int], key: str) -> int
     return max(0, int(after.get(key, 0)) - int(before.get(key, 0)))
 
 
-async def run_scenario(host: str, port: int, pid: int, scenario: Scenario) -> ScenarioResult:
+async def run_scenario(host: str, port: int, pid: int, scenario: Scenario, args: argparse.Namespace) -> ScenarioResult:
     latencies: list[float] = []
     statuses: list[int] = []
-    client_errors: list[int] = []
+    client_errors: list[str] = []
+    unexpected_samples: list[str] = []
     metric_samples: list[tuple[int | None, int | None, int | None]] = []
     stop_sampling = asyncio.Event()
     deadline = time.perf_counter() + scenario.duration_s
@@ -277,7 +358,9 @@ async def run_scenario(host: str, port: int, pid: int, scenario: Scenario) -> Sc
 
     try:
         await asyncio.gather(*[
-            worker(host, port, scenario.path, deadline, latencies, statuses, client_errors)
+            worker(host, port, scenario.path, deadline, latencies, statuses, client_errors,
+                   set(scenario.expected_statuses), unexpected_samples,
+                   args.unexpected_sample_limit, args.body_preview_bytes)
             for _ in range(scenario.concurrency)
         ])
     finally:
@@ -298,6 +381,7 @@ async def run_scenario(host: str, port: int, pid: int, scenario: Scenario) -> Sc
     expected_statuses = set(scenario.expected_statuses)
     unexpected_errors = sum(1 for status in statuses if status not in expected_statuses) + len(client_errors)
     db_deltas = {key: metric_delta(before_db, after_db, key) for key in DB_METRIC_KEYS}
+    status_counts = dict(sorted(Counter(statuses).items()))
 
     return ScenarioResult(
         name=scenario.name,
@@ -323,6 +407,8 @@ async def run_scenario(host: str, port: int, pid: int, scenario: Scenario) -> Sc
         cpu_percent=calculate_cpu_percent(start_cpu_ticks, end_cpu_ticks, elapsed),
         db_deltas=db_deltas,
         db_snapshot=after_db,
+        status_counts=status_counts,
+        unexpected_samples=unexpected_samples,
         expected_statuses=scenario.expected_statuses,
         expected=scenario.expected,
     )
@@ -396,6 +482,10 @@ def render_markdown(results: Iterable[ScenarioResult], args: argparse.Namespace)
         f"- max waiters: `{args.max_waiters}`",
         f"- query timeout: `{args.query_timeout_ms}ms`",
         f"- acquire timeout: `{args.acquire_timeout_ms}ms`",
+        f"- unexpected sample limit: `{args.unexpected_sample_limit}`",
+        f"- body preview bytes: `{args.body_preview_bytes}`",
+        f"- requested nofile limit: `{fmt(getattr(args, 'nofile_required', None))}`",
+        f"- active nofile soft/hard: `{fmt(getattr(args, 'nofile_soft', None))}` / `{fmt(getattr(args, 'nofile_hard', None))}`",
         "",
         "Counters marked `delta` are per-scenario increments from `/db/metrics`.",
         "`errors` counts every non-2xx response; `unexpected` counts responses outside the scenario's expected status set.",
@@ -403,6 +493,9 @@ def render_markdown(results: Iterable[ScenarioResult], args: argparse.Namespace)
         "| scenario | endpoint | concurrency | responses | errors | unexpected | 2xx | 4xx | 5xx | 503 | 504 | client errors | RPS | p50 ms | p95 ms | p99 ms | RSS KB | CPU % | threads | fd | DB ok delta | DB err delta | acquire timeout delta | query timeout delta | cancel delta | reject delta | discard delta | failed connect delta | prepared hit delta | prepared miss delta | expected statuses | expected |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
+
+    if getattr(args, "nofile_warning", ""):
+        lines.extend(["", f"> Warning: {args.nofile_warning}"])
 
     last_snapshot: dict[str, int] = {}
     for result in results:
@@ -429,13 +522,38 @@ def render_markdown(results: Iterable[ScenarioResult], args: argparse.Namespace)
         "",
     ])
     if unexpected:
-        lines.append("| scenario | unexpected | expected statuses |")
-        lines.append("| --- | ---: | --- |")
+        lines.append("| scenario | unexpected | expected statuses | observed statuses |")
+        lines.append("| --- | ---: | --- | --- |")
         for result in unexpected:
             expected_statuses = "/".join(str(status) for status in result.expected_statuses)
-            lines.append(f"| {result.name} | {result.unexpected_errors} | {expected_statuses} |")
+            observed_statuses = ", ".join(f"{status}={count}" for status, count in result.status_counts.items())
+            lines.append(f"| {result.name} | {result.unexpected_errors} | {expected_statuses} | {observed_statuses} |")
     else:
         lines.append("All scenarios matched their expected HTTP status sets.")
+
+    lines.extend([
+        "",
+        "## Status breakdown",
+        "",
+        "| scenario | observed statuses |",
+        "| --- | --- |",
+    ])
+    for result in results:
+        observed_statuses = ", ".join(f"{status}={count}" for status, count in result.status_counts.items()) or "none"
+        lines.append(f"| {result.name} | {observed_statuses} |")
+
+    sampled = [result for result in results if result.unexpected_samples]
+    if sampled:
+        lines.extend([
+            "",
+            "## Unexpected response samples",
+            "",
+            "These samples are capped by `--unexpected-sample-limit` and response bodies are capped by `--body-preview-bytes`.",
+        ])
+        for result in sampled:
+            lines.extend(["", f"### {result.name}", "", "```text"])
+            lines.extend(result.unexpected_samples)
+            lines.append("```")
 
     lines.extend([
         "",
@@ -476,22 +594,41 @@ def build_scenarios(args: argparse.Namespace) -> list[Scenario]:
                  "504 responses counted as query timeouts"),
     ]
     if args.extended:
+        allow_high_saturation = args.allow_high_concurrency_saturation or (args.driver == "mysql" and not args.strict_high_concurrency)
+        high_expected_statuses = (200, 503) if allow_high_saturation else (200,)
+        high_expected = (
+            "200 plus controlled 503 pool timeouts allowed under documented high-concurrency saturation"
+            if allow_high_saturation
+            else "0 errors, bounded threads"
+        )
         scenarios.insert(1, Scenario(f"{prefix}_normal_select_{args.high_concurrency}", "/db/select",
-                                     args.high_concurrency, args.duration, (200,), "0 errors, bounded threads"))
+                                     args.high_concurrency, args.duration, high_expected_statuses, high_expected))
         scenarios.append(Scenario(f"{prefix}_pool_overload_{args.overload_concurrency}", "/db/select",
                                   args.overload_concurrency, args.duration,
                                   (200, 503, 504),
                                   "controlled 503/504 responses, no unbounded waiters"))
+    if args.scenario_filter:
+        filters = [item.lower() for item in args.scenario_filter]
+        scenarios = [
+            scenario for scenario in scenarios
+            if any(item in scenario.name.lower() or item in scenario.path.lower() for item in filters)
+        ]
     return scenarios
 
 
 async def async_main(args: argparse.Namespace) -> int:
+    ensure_nofile_limit(args)
+    if getattr(args, "nofile_warning", ""):
+        print(f"warning: {args.nofile_warning}", file=sys.stderr)
     process = start_server(args)
     try:
         wait_until_ready(args.host, args.port, timeout_s=10.0)
+        scenarios = build_scenarios(args)
+        if not scenarios:
+            raise RuntimeError("no benchmark scenarios selected")
         results = []
-        for scenario in build_scenarios(args):
-            results.append(await run_scenario(args.host, args.port, process.pid, scenario))
+        for scenario in scenarios:
+            results.append(await run_scenario(args.host, args.port, process.pid, scenario, args))
         markdown = render_markdown(results, args)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(markdown, encoding="utf-8")
@@ -523,7 +660,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--slow-seconds", type=float, default=0.25)
     parser.add_argument("--mock-latency-ms", type=int, default=2)
     parser.add_argument("--extended", action="store_true", help="include 1000-concurrency and overload scenarios")
+    parser.add_argument("--allow-high-concurrency-saturation", action="store_true", help="allow 503 pool timeout responses in the high-concurrency normal-select scenario")
+    parser.add_argument("--strict-high-concurrency", action="store_true", help="require the high-concurrency normal-select scenario to return only 200 responses; by default MySQL allows bounded 503 pool saturation")
     parser.add_argument("--quiet-server", action="store_true", help="capture benchmark server output")
+    parser.add_argument("--scenario-filter", action="append", help="run only scenarios whose name or path contains this substring; may be repeated")
+    parser.add_argument("--unexpected-sample-limit", type=int, default=12, help="maximum unexpected response samples to keep per scenario")
+    parser.add_argument("--body-preview-bytes", type=int, default=500, help="maximum response body bytes to include in unexpected response samples")
+    parser.add_argument("--no-raise-nofile", action="store_true", help="do not try to raise RLIMIT_NOFILE before running high-concurrency scenarios")
     parser.add_argument("--output", type=Path, default=Path("doc/benchmark_async_db.md"))
     args = parser.parse_args()
 

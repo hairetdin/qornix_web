@@ -14,7 +14,7 @@
 /**
  * Risk level assigned to a semantic schema diff operation.
  *
- * Sprint 30 does not plan or execute SQL. It only explains how risky each
+ * SchemaRiskPolicy does not plan or execute SQL. It only explains how risky each
  * diff operation is and what policy decision should be made before a future
  * SchemaPlanner/SchemaApplier can process it.
  */

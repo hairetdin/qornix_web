@@ -223,10 +223,10 @@ Test #21: qornix_orm_async_postgres_smoke_test ... Passed
 
 | Phase | Status | Notes |
 | --- | --- | --- |
-| Phase 3 — MySQL async driver | Implemented, pending live DB validation | Code path and optional smoke test are added. A live MySQL/MariaDB DSN is required to validate runtime behavior. |
+| Phase 3 — MySQL async driver | Implemented and live-validated by async gate | Code path, optional smoke test and post-gate live benchmark validation are recorded in `doc/project_doc/async_gate_mysql_benchmark_final_validation_2026_05_14.md`. |
 | Phase 5 — Query timeout and cancellation semantics | Partially done | MySQL path checks request deadlines/cancellation and discards expired/cancelled connections; strict mid-operation cancellation remains a hardening follow-up. |
 | Phase 6 — Transactions and prepared statements | Partially done | MySQL prepared statements and transaction helpers are implemented; GCC 13 smoke test skips prepared/transaction runtime sections to avoid coroutine ICE patterns, matching the PostgreSQL workaround. |
-| Phase 9 — Benchmarks | Partially done | MySQL benchmark matrix is documented; live benchmark results still need to be generated. |
+| Phase 9 — Benchmarks | Done for gate policy | MySQL live benchmark results were generated after the temporary prepared statement close fix; high-concurrency 1000 uses documented `200/503` saturation semantics. |
 
 ### Validation performed
 
@@ -311,7 +311,7 @@ Test #22: qornix_orm_async_mysql_smoke_test ... Passed
 
 | Phase | Status | Notes |
 | --- | --- | --- |
-| Phase 3 — MySQL async driver | Implemented, pending explicit live DB validation | The target now configures, builds and runs under CTest. The smoke binary still skips successfully when `QORNIX_ASYNC_MYSQL_URL` or `QORNIX_ASYNC_MYSQL_USER` is not configured, so Phase 3 should only be marked fully validated after a run against a live MySQL/MariaDB DSN is confirmed. |
+| Phase 3 — MySQL async driver | Implemented and explicitly live-validated by async gate | The target configures, builds and passed live smoke. Final gate benchmark validation is recorded in `doc/project_doc/async_gate_mysql_benchmark_final_validation_2026_05_14.md`. |
 | Phase 4 — Pool hardening | Ready to start | Phase 4 can proceed in parallel with the remaining live MySQL validation because the common pool exists and MySQL compile/CTest wiring is now stable. |
 
 ## 2026-05-13 — Full CTest suite validation after Phase 3 wiring
@@ -966,3 +966,30 @@ ctest --test-dir cmake-build-debug --output-on-failure
 
 - Live PostgreSQL/MySQL benchmark numbers were not generated in this pass.
 - The full `cmake-build-debug` CTest suite passed with `QORNIX_ENABLE_ASYNC_POSTGRES=OFF` and `QORNIX_ENABLE_ASYNC_MYSQL=OFF`; live driver benchmark validation still requires a separate build with the corresponding backend enabled and live DSNs.
+
+## Async gate documentation/template synchronization
+
+- Added `doc/project_doc/roadmap_async_gate.md` as the merge/release gate for the async branch.
+- Added `doc/project_doc/roadmap_async_gate_changelog.md` for gate execution tracking.
+- Expanded `qornix_orm` standalone and async DB documentation.
+- Updated generated default app docs and routes with async HTTP examples.
+- Added Dynamic API template async DB configuration docs.
+- Standardized active Boost requirements on Boost 1.83.
+
+## 2026-05-14 — Async gate MySQL live benchmark closure
+
+Async gate follow-up closed the MySQL live validation gap:
+
+```text
+[x] qornix_orm_async_mysql_smoke_test passed against live MySQL/MariaDB DSN
+[x] temporary non-cached prepared statements are closed after execution
+[x] full MySQL benchmark matched expected status sets under documented 200/503 high-concurrency saturation policy
+[x] final benchmark metrics reported active_connections=0 and queued_waiters=0
+```
+
+Evidence:
+
+- `doc/project_doc/async_gate_mysql_benchmark_final_validation_2026_05_14.md`
+- `doc/benchmark_async_db_mysql_gate.md`
+
+Note: strict 200-only validation at `mysql_normal_select_1000` remains available via `scripts/db_benchmark.py --strict-high-concurrency`, but it is not the default gate policy for MySQL with pool-size 32 and acquire-timeout 1000ms.

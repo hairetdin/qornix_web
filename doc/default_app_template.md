@@ -197,3 +197,16 @@ server.add_route("/hello", std::make_shared<HelloHandler>());
 ```
 
 See the generated page `/docs/routing` for a beginner-friendly guide.
+
+## Async route readiness
+
+The default generated app is async-ready. In addition to sync handler examples, `templates/app/routes.h` registers:
+
+```text
+GET /async/ping
+GET /async/sleep/{ms}
+```
+
+These routes demonstrate `HttpServer::get_async`, value-owned `Request`/`Url`/`Params` coroutine arguments and response helpers. They are intentionally lightweight so the default template still builds without database dependencies.
+
+For DB-backed async CRUD, generate the Dynamic API template and read `templates/dynamic_api_app/doc/async_db_configuration.md`.

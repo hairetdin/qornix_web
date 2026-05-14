@@ -250,6 +250,67 @@ void assert_async_does_not_block_other_requests() {
 }
 
 
+void assert_client_disconnect_during_pending_async_handler() {
+    const auto port = allocate_loopback_port();
+
+    net::io_context ioc;
+    HttpServer server(ioc, tcp::endpoint{net::ip::make_address("127.0.0.1"), port});
+
+    server.add_route("/health", [](const auto&, auto& res, const auto&, const auto&) {
+        set_text_response(res, http::status::ok, "healthy");
+    });
+
+    server.get_async("/async/disconnect", [](Request req, Url, Params) -> net::awaitable<Response> {
+        auto executor = co_await net::this_coro::executor;
+        net::steady_timer timer(executor);
+        timer.expires_after(std::chrono::milliseconds{150});
+        co_await timer.async_wait(net::use_awaitable);
+        co_return response::text("late-ok", req.version());
+    });
+
+    server.run();
+    std::thread io_thread([&ioc]() {
+        ioc.run();
+    });
+
+    try {
+        wait_for_server(port);
+
+        net::io_context client_ioc;
+        beast::tcp_stream stream(client_ioc);
+        tcp::resolver resolver(client_ioc);
+        stream.connect(resolver.resolve("127.0.0.1", std::to_string(port)));
+
+        http::request<http::empty_body> req{http::verb::get, "/async/disconnect", 11};
+        req.set(http::field::host, "127.0.0.1");
+        req.keep_alive(false);
+        http::write(stream, req);
+
+        beast::error_code ec;
+        stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+        ec.clear();
+        stream.socket().close(ec);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds{250});
+
+        auto health_res = request_once(port, "/health");
+        assert(health_res.result() == http::status::ok);
+        assert(health_res.body() == "healthy");
+    } catch (...) {
+        ioc.stop();
+        if (io_thread.joinable()) {
+            io_thread.join();
+        }
+        throw;
+    }
+
+    ioc.stop();
+    if (io_thread.joinable()) {
+        io_thread.join();
+    }
+}
+
+
 void assert_timeout_limits_middleware_and_pools() {
     const auto port = allocate_loopback_port();
 
@@ -541,6 +602,7 @@ int main() {
     join_io_threads();
 
     assert_async_does_not_block_other_requests();
+    assert_client_disconnect_during_pending_async_handler();
     assert_timeout_limits_middleware_and_pools();
 
     std::cout << "http_server_smoke_test passed" << std::endl;

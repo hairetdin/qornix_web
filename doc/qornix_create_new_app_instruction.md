@@ -292,3 +292,14 @@ You can override the path to `qornix_web` during configuration:
 ```bash
 cmake .. -DQORNIX_WEB_ROOT=/path/to/qornix_web
 ```
+
+## Async template guidance
+
+The default template now includes async HTTP route examples by default. After generation, check:
+
+```text
+/async/ping
+/async/sleep/10
+```
+
+The Dynamic API template enables `QORNIX_ENABLE_ASYNC_DB=ON` and contains async DB configuration notes. SQLite uses the explicit sync-offloaded adapter for local demos; PostgreSQL/MySQL require the corresponding async backend CMake flags and live configuration.

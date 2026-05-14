@@ -85,7 +85,7 @@ target_link_libraries(qornix_rag PRIVATE ${XAPIAN_LIBRARIES})
 target_include_directories(qornix_rag PRIVATE ${XAPIAN_INCLUDE_DIRS})
 
 # Boost libraries
-find_package(Boost 1.75 REQUIRED COMPONENTS filesystem url json)
+find_package(Boost 1.83 REQUIRED COMPONENTS filesystem url json)
 target_link_libraries(qornix_rag PRIVATE
     Boost::filesystem
     Boost::url

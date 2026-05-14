@@ -15,7 +15,7 @@
 /**
  * Options for executing a SchemaPlan.
  *
- * Sprint 33 intentionally requires a SchemaPlan. Applying raw XML directly is
+ * SchemaApplier intentionally requires a SchemaPlan. Applying raw XML directly is
  * not the recommended API. XML must flow through validation, normalization,
  * diff and planning first.
  */

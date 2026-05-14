@@ -14,6 +14,7 @@ It is a clean C++ web application scaffold with:
 - JSON health endpoint at `/health`
 - documentation pages at `/docs`
 - route and handler examples
+- async HTTP route examples at `/async/ping` and `/async/sleep/{ms}`
 - static asset serving from `/static/{filename}`
 - portable deploy bundle under `build/deploy/@PROJECT_NAME@`
 
@@ -45,6 +46,8 @@ Then open:
 http://127.0.0.1:8008/
 http://127.0.0.1:8008/health
 http://127.0.0.1:8008/docs
+http://127.0.0.1:8008/async/ping
+http://127.0.0.1:8008/async/sleep/10
 ```
 
 ## Development run
@@ -186,3 +189,15 @@ Override it if the framework moves:
 ```bash
 cmake -DQORNIX_WEB_ROOT=/path/to/qornix_web ..
 ```
+
+
+## Async routes
+
+The default template includes coroutine route examples registered from `routes.h` and implemented in `handlers/async_handlers.h`:
+
+```cpp
+server.get_async("/async/ping", makeAsyncPingHandler());
+server.get_async("/async/sleep/{ms}", makeAsyncSleepHandler());
+```
+
+Use async handlers for timers, database calls, network calls and any operation that would otherwise block an `io_context` worker thread. Keep sync handlers for cheap CPU-only or static responses.

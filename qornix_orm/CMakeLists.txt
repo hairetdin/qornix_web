@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Find required packages
-find_package(Boost 1.75 REQUIRED COMPONENTS json)
+find_package(Boost 1.83 REQUIRED COMPONENTS json)
 if(NOT TARGET Boost::json)
     message(FATAL_ERROR "Boost::json target not found. Please install libboost-json1.83-dev.")
 endif()

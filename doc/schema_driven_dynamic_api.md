@@ -130,3 +130,14 @@ docker run -d --name my_app \
 ```
 
 To transfer without a registry, use `docker save my_app:runtime -o my_app-runtime.tar`, then copy the tar file plus external config and `data/` to the target machine.
+
+## Async DB path status
+
+When `QORNIX_ENABLE_ASYNC_DB=ON`, the Dynamic API CRUD request path can be registered through the async DB layer. Route-level DB timeouts, body limits and concurrency limits are configured under `dynamic_api.async` in generated template config.
+
+Current boundary:
+
+- async: CRUD request execution and async query service path;
+- sync-compatible: schema manager, metadata, OpenAPI and schema management services.
+
+Do not describe the Dynamic API as fully async end-to-end until metadata/schema management paths are migrated and validated as async too.

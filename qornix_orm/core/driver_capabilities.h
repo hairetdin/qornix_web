@@ -15,7 +15,7 @@
 /**
  * Database driver type used by schema planning.
  *
- * Sprint 31 only describes what each driver can do. It does not generate SQL,
+ * DriverCapabilities only describes what each driver can do. It does not generate SQL,
  * does not plan operations and does not apply changes to a database.
  */
 enum class SchemaDatabaseDriver {
