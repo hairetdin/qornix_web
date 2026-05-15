@@ -49,6 +49,14 @@ cmake ..
 cmake --build .
 ```
 
+If you want the same backend API with a Vue/Vite frontend scaffold, use:
+
+```bash
+./create_new_project.sh ../my_vue --with-dynamic-api-vue
+```
+
+In the Vue template, backend/admin pages are available under `/backend/*`, while the Vue app is served from `/`.
+
 The generated Dynamic API application produces a portable deploy bundle:
 
 ```text

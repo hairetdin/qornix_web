@@ -1,8 +1,8 @@
 # Creating a new application based on Qornix Web
 
-This guide describes the two main scenarios for generating standalone applications based on Qornix Web.
+This guide describes the main scenarios for generating standalone applications based on Qornix Web.
 
-## 1. Two application templates
+## 1. Application templates
 
 ### Default application
 
@@ -54,6 +54,30 @@ Use this variant when you need Schema Manager, Dynamic API, Query Builder, Table
 Generated Dynamic API application preview:
 
 ![Qornix dynamic API generated app](assets/qornix_dynamyc_api_app_snap.png)
+
+### Schema-driven Dynamic API + Vue application
+
+Generate it with:
+
+```bash
+./create_new_project.sh ../my_vue --with-dynamic-api-vue
+```
+
+Equivalent explicit template form:
+
+```bash
+./create_new_project.sh ../my_vue --template dynamic-api-vue
+```
+
+It uses the template:
+
+```text
+templates/dynamic_api_vue_app
+```
+
+Use this variant when you want a ready Dynamic API backend and a Vue/Vite frontend scaffold in the same generated project. The backend keeps the existing Dynamic API behavior, serves Vue at `/`, moves backend/admin pages under `/backend/*`, exposes `/backend-admin` as a frontend developer hub and builds the frontend into the deploy bundle during `cmake --build .`.
+
+This is the recommended starting point when a backend developer wants to hand a working API environment to a frontend developer.
 
 ## 2. Recommended workspace structure
 
@@ -131,7 +155,7 @@ my_app/
 The script:
 
 1. validates the project name;
-2. chooses the template: `templates/app` or `templates/dynamic_api_app`;
+2. chooses the template: `templates/app`, `templates/dynamic_api_app` or `templates/dynamic_api_vue_app`;
 3. copies the template to the new directory;
 4. substitutes `@PROJECT_NAME@`, `@PROJECT_NAME_UPPER@` and `@QORNIX_WEB_ROOT@`;
 5. creates the `logs` directory;
@@ -139,7 +163,20 @@ The script:
 7. includes `runtime-Dockerfile`;
 8. prints build commands, run commands, the deploy bundle path and Docker image commands.
 
-## 6. Portable deploy bundle
+## 6. Generator options
+
+| Option | Template | Description |
+|--------|----------|-------------|
+| no option | `templates/app` | Default C++ web application. |
+| `--with-dynamic-api` | `templates/dynamic_api_app` | Dynamic API backend/admin application. |
+| `--with-dynamic-api-vue` | `templates/dynamic_api_vue_app` | Dynamic API backend plus Vue/Vite frontend. |
+| `--template app` or `--template default` | `templates/app` | Explicit default template. |
+| `--template dynamic-api` | `templates/dynamic_api_app` | Explicit Dynamic API template. |
+| `--template dynamic-api-vue` | `templates/dynamic_api_vue_app` | Explicit Dynamic API + Vue template. |
+
+The Vue template requires `npm` during CMake build. The generated frontend can also be developed with the normal Vite workflow from the `frontend/` directory.
+
+## 7. Portable deploy bundle
 
 The default template creates the deploy bundle automatically after building the executable:
 
@@ -167,7 +204,7 @@ If the binary is not launched from the bundle root, pass the root explicitly:
 QORNIX_APP_ROOT=/opt/my_app /opt/my_app/my_app
 ```
 
-## 7. Runtime Docker image
+## 8. Runtime Docker image
 
 Generated applications include `runtime-Dockerfile`. It does not build the C++ app; it copies the already assembled deploy bundle into an Ubuntu 24.04 runtime image.
 
@@ -240,7 +277,7 @@ docker run -d --name my_app -p 8008:8008 \
   my_app:runtime
 ```
 
-## 8. Runtime dependencies
+## 9. Runtime dependencies
 
 The deploy bundle contains the binary, config, templates, static assets and documentation. It does not include system shared libraries.
 
@@ -254,7 +291,7 @@ A target machine must provide compatible versions of the runtime libraries used 
 
 The runtime Docker image installs the expected Ubuntu 24.04 runtime packages. If you enable additional modules or database drivers, inspect dependencies with `ldd build/deploy/my_app/my_app` and update `runtime-Dockerfile`.
 
-## 9. Adding an endpoint
+## 10. Adding an endpoint
 
 Create a handler, for example `handlers/hello_handler.h`, inherit it from `HandlerBase`, then register it in `routes.h`:
 
@@ -269,7 +306,7 @@ handlers/health_handler.h
 routes.h
 ```
 
-## 10. Enabling ORM and JWT
+## 11. Enabling ORM and JWT
 
 ORM is disabled by default in the default template:
 
@@ -285,7 +322,7 @@ cmake .. -DMY_APP_ENABLE_JWT=ON
 
 Auth is enabled by default through the `MY_APP_ENABLE_AUTH` option.
 
-## 11. If the framework was moved
+## 12. If the framework was moved
 
 You can override the path to `qornix_web` during configuration:
 

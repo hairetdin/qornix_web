@@ -8,6 +8,14 @@
 
 # Changelog
 
+## Dynamic API Vue application template
+
+- Added the new `templates/dynamic_api_vue_app` scaffold for generated applications that combine the existing Dynamic API backend with a Vue/Vite frontend.
+- Added generator options `--with-dynamic-api-vue` and `--template dynamic-api-vue`, including aliases for `dynamic_api_vue` and `dynamic_api_vue_app`.
+- The generated Vue template serves the SPA at `/`, keeps backend tools under `/backend/*`, and includes a `/backend-admin` developer dashboard.
+- Integrated frontend production build into the normal CMake build and deploy bundle flow.
+- Updated generated starter pages and documentation to highlight backend extensibility with custom C++ routes, Qornix Web references, and Vue/Vite development links.
+
 ## Async DB benchmark tooling and examples
 
 - Added `async_db_benchmark_server` and `scripts/db_benchmark.py` for live async PostgreSQL/MySQL benchmark runs.

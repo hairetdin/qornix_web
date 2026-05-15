@@ -14,9 +14,12 @@ Start with the showcase or generate an app:
 
 ```bash
 ./create_new_project.sh ../my_app --with-dynamic-api
+./create_new_project.sh ../my_vue_app --with-dynamic-api-vue
 ```
 
-See `doc/schema_driven_dynamic_api.md` and `example/schema_driven_backend`.
+Use `--with-dynamic-api` for the backend/admin showcase or `--with-dynamic-api-vue` when you want the same Dynamic API backend plus a Vue/Vite frontend scaffold served from `/`.
+
+See `doc/schema_driven_dynamic_api.md`, `doc/dynamic_api_vue_app_template.md` and `example/schema_driven_backend`.
 
 ## Framework
 
@@ -78,6 +81,14 @@ Schema-driven Dynamic API application created with:
 
 ![Qornix dynamic API generated app](doc/assets/qornix_dynamyc_api_app_snap.png)
 
+Schema-driven Dynamic API + Vue application created with:
+
+```bash
+./create_new_project.sh ../my_vue_app --with-dynamic-api-vue
+```
+
+This template keeps the Dynamic API backend, moves backend/admin pages under `/backend/*`, serves Vue at `/`, provides `/backend-admin` as a developer dashboard and builds the frontend into the deploy bundle.
+
 ## Architecture components
 
 | Part | Purpose |
@@ -85,7 +96,9 @@ Schema-driven Dynamic API application created with:
 | `qornix_web_core` | Main CMake library of the framework |
 | `qornix::web_core` | Alias target used by applications |
 | `qornix_web` | Demo executable shipped with the framework |
-| `templates/app` | New-application template |
+| `templates/app` | Default new-application template |
+| `templates/dynamic_api_app` | Schema-driven Dynamic API backend/admin template |
+| `templates/dynamic_api_vue_app` | Schema-driven Dynamic API + Vue/Vite frontend template |
 | `create_new_project.sh` | Standalone application generator |
 | `doc/qornix_create_new_app_instruction.md` | Detailed application creation guide |
 | `doc/roadmap_step_by_step_example.md` | Step-by-step application example based on the framework |
@@ -258,13 +271,23 @@ docker load -i my_app-runtime.tar
 
 ## What `create_new_project.sh` does
 
-The script creates an application from the `templates/app` template.
+The script creates an application from one of the bundled templates.
+
+Available generation modes:
+
+| Command | Template | Purpose |
+|---------|----------|---------|
+| `./create_new_project.sh ../my_app` | `templates/app` | Default C++ web application. |
+| `./create_new_project.sh ../my_api --with-dynamic-api` | `templates/dynamic_api_app` | Schema-driven Dynamic API backend/admin application. |
+| `./create_new_project.sh ../my_vue --with-dynamic-api-vue` | `templates/dynamic_api_vue_app` | Dynamic API backend plus Vue/Vite frontend scaffold. |
+| `./create_new_project.sh ../my_api --template dynamic-api` | `templates/dynamic_api_app` | Explicit alias for the Dynamic API template. |
+| `./create_new_project.sh ../my_vue --template dynamic-api-vue` | `templates/dynamic_api_vue_app` | Explicit alias for the Vue template. |
 
 It performs the following actions:
 
 1. accepts a project name or path;
 2. validates the project name;
-3. copies the application template;
+3. copies the selected application template;
 4. substitutes the project name in `CMakeLists.txt` and the generated README;
 5. writes the relative path to the `qornix_web` directory;
 6. creates the `logs` directory;
@@ -278,7 +301,12 @@ Examples:
 ./create_new_project.sh my_app
 ./create_new_project.sh ../my_app
 ./create_new_project.sh /absolute/path/to/my_app
+./create_new_project.sh ../my_api --with-dynamic-api
+./create_new_project.sh ../my_vue --with-dynamic-api-vue
+./create_new_project.sh ../my_vue --template dynamic-api-vue
 ```
+
+The Vue template requires `npm` during CMake build because it compiles the frontend production bundle with Vite.
 
 The recommended option is to create the application next to the framework:
 

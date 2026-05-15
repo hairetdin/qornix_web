@@ -24,6 +24,12 @@ For Schema Manager, Dynamic API, Query Builder and Table Browser, generate a dyn
 ./create_new_project.sh ../my_api --with-dynamic-api
 ```
 
+For the same Dynamic API backend plus a Vue/Vite frontend scaffold, generate:
+
+```bash
+./create_new_project.sh ../my_vue --with-dynamic-api-vue
+```
+
 ## Build
 
 ```bash

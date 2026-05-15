@@ -8,6 +8,8 @@ This document describes how to build and deploy an application generated with:
 
 It focuses on the `templates/dynamic_api_app` template. A plain application generated without `--with-dynamic-api` also has a deploy bundle and `runtime-Dockerfile`, but it does not include Dynamic API schema, database and Schema Manager runtime files.
 
+For the Dynamic API backend plus Vue/Vite frontend template, generate with `--with-dynamic-api-vue` and see `dynamic_api_vue_app_template.md`. That template uses the same backend Dynamic API idea, moves backend pages under `/backend/*` and additionally builds `frontend/dist` into the deploy bundle.
+
 ## 1. Development build
 
 Create the generated application next to the framework checkout:
