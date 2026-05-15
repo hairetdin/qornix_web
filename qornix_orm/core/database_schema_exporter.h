@@ -49,7 +49,7 @@ struct DatabaseSchemaExportResult {
 /**
  * Converts a technical DatabaseSnapshot into a canonical SchemaDocument.
  *
- * Sprint 28 intentionally keeps the comparison boundary semantic:
+ * The exporter intentionally keeps the comparison boundary semantic:
  *
  *   user XML -> SchemaDocument desired
  *   database -> DatabaseSnapshot -> SchemaDocument current

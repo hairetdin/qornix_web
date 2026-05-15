@@ -1,8 +1,9 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20)
 project(dynamic_web_query_builder_server)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Boost REQUIRED COMPONENTS url json log)
 find_package(PkgConfig REQUIRED)
@@ -26,7 +27,6 @@ add_executable(dynamic_web_query_builder_server
 target_compile_definitions(dynamic_web_query_builder_server PRIVATE
     DYNAMIC_WEB_QUERY_BUILDER_SERVER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
     QORNIX_ENABLE_SQLITE=1
-    QORNIX_ORM_SCHEMA_APP_XSD_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../qornix_orm/schema/schema_app.xsd"
 )
 
 target_include_directories(dynamic_web_query_builder_server PRIVATE
@@ -55,7 +55,6 @@ add_executable(dynamic_web_query_builder_schema_roundtrip_test
 target_compile_definitions(dynamic_web_query_builder_schema_roundtrip_test PRIVATE
     DYNAMIC_WEB_QUERY_BUILDER_SERVER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
     QORNIX_ENABLE_SQLITE=1
-    QORNIX_ORM_SCHEMA_APP_XSD_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../qornix_orm/schema/schema_app.xsd"
 )
 
 target_include_directories(dynamic_web_query_builder_schema_roundtrip_test PRIVATE

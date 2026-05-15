@@ -12,6 +12,13 @@
 #include "example_paths.h"
 #include "dynamic_api_handlers.h"
 
+#include <chrono>
+#include <utility>
+
+#if QORNIX_ENABLE_ASYNC_DB
+#include "dynamic_api_async_db.h"
+#endif
+
 void setupDynamicRoutes(HttpServer& server) {
     std::cout << "DEBUG: Adding dynamic routes..." << std::endl;
 
@@ -60,9 +67,41 @@ void setupDynamicRoutes(HttpServer& server) {
     dynamicConfig.allowUpdateWithoutFilter = false;
     dynamicConfig.allowDeleteWithoutFilter = false;
     dynamicConfig.requirePermissions = false;
+    dynamicConfig.dynamicQueryTimeout = std::chrono::milliseconds{2000};
+    dynamicConfig.dynamicRouteTimeout = std::chrono::milliseconds{30000};
+    dynamicConfig.maxDynamicBodySize = 1024 * 1024;
+    dynamicConfig.maxConcurrentDbOperations = 128;
+#if QORNIX_ENABLE_ASYNC_DB
+    dynamicConfig.preparedDynamicQueries =
+        qornix_dynamic_api::dynamicAsyncDbSupportsPreparedQueries(dynamicConfig.databaseConfig);
+#else
+    dynamicConfig.preparedDynamicQueries = false;
+#endif
 
     // Schema-driven Dynamic API module: CRUD/query, metadata, schema manager API, OpenAPI and history.
+#if QORNIX_ENABLE_ASYNC_DB
+    qornix_dynamic_api::DynamicAsyncDatabaseOptions asyncOptions;
+    asyncOptions.pool.pool_name = "dynamic-web-query-builder";
+    asyncOptions.pool.max_connections = 8;
+    asyncOptions.pool.max_waiters = 256;
+    asyncOptions.pool.acquire_timeout = std::chrono::milliseconds{500};
+    asyncOptions.pool.query_timeout = dynamicConfig.dynamicQueryTimeout;
+    asyncOptions.offloadedWorkerThreads = 1;
+
+    auto asyncDatabase = qornix_dynamic_api::makeDynamicAsyncDatabaseInterface(
+        server.executor(),
+        dynamicConfig.databaseConfig,
+        asyncOptions);
+    auto allowlist = qornix_dynamic_api::loadDynamicAsyncAllowlist(dynamicConfig);
+    qornix_dynamic_api::addSchemaDrivenDynamicApiAsyncRoutes(
+        server,
+        dynamicConfig,
+        std::move(asyncDatabase),
+        std::move(allowlist));
+    std::cout << "DEBUG: Dynamic API CRUD routes registered on async DB path" << std::endl;
+#else
     qornix_dynamic_api::addSchemaDrivenDynamicApiRoutes(server, dynamicConfig);
+#endif
 
     std::cout << "DEBUG: Dynamic routes added successfully" << std::endl;
 }

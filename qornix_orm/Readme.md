@@ -1,5 +1,181 @@
 # Qornix ORM
 
+`qornix_orm` is a standalone C++20 library inside the Qornix Web repository. It can be linked independently from the web demo application and provides schema workflow, sync DB helpers, async DB facade, QueryBuilder support and Dynamic API integration points.
+
+## Documentation map
+
+| Topic | Document |
+| --- | --- |
+| Standalone CMake usage | [`doc/standalone_usage.md`](doc/standalone_usage.md) |
+| Async DB API | [`doc/async_db_api.md`](doc/async_db_api.md) |
+| Configuration | [`doc/configuration.md`](doc/configuration.md) |
+| Testing and DB integration | [`doc/testing.md`](doc/testing.md) |
+| Standalone consumer smoke sample | [`examples/standalone_consumer`](examples/standalone_consumer) |
+| Schema document model | [`doc/schema_document.md`](doc/schema_document.md) |
+| Schema normalization | [`doc/schema_normalization.md`](doc/schema_normalization.md) |
+| Schema diff | [`doc/schema_diff.md`](doc/schema_diff.md) |
+| Schema plan/apply | [`doc/schema_plan_apply.md`](doc/schema_plan_apply.md) |
+
+## Architecture overview
+
+```text
+qornix_orm
+├── core/                 schema, entity and model workflow
+├── database/             sync DB interfaces, QueryBuilder and async ORM facade
+├── database/drivers/     SQLite/PostgreSQL/MySQL sync and async driver implementations
+├── schema/               XSD and example schemas
+├── tests/                unit, integration and async smoke tests
+└── doc/                  standalone and schema documentation
+```
+
+The async DB stack is split into two layers:
+
+1. `include/db/*` contains the common coroutine driver contract, pool, metrics, timeout and cancellation primitives.
+2. `qornix_orm/database/*` exposes ORM-oriented facades such as `AsyncDatabaseInterface` and `AsyncTableManager`.
+
+## Dependency baseline
+
+| Dependency | Requirement |
+| --- | --- |
+| C++ | C++20 |
+| CMake | 3.20+ |
+| Boost | 1.83+ |
+| SQLite | optional local/test driver |
+| libpq | PostgreSQL sync/async driver builds |
+| mysqlclient | sync MySQL driver builds |
+| Boost.MySQL + OpenSSL | async MySQL driver builds |
+| pugixml/libxml2 | XML schema workflow |
+
+## Build options
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `QORNIX_ENABLE_SQLITE` | `ON` | Build SQLite driver. |
+| `QORNIX_ENABLE_POSTGRES` | `OFF` | Build sync PostgreSQL driver. |
+| `QORNIX_ENABLE_MYSQL` | `OFF` | Build sync MySQL driver. |
+| `QORNIX_ENABLE_ASYNC_DB` | `ON` | Build async DB facade and common driver contracts. |
+| `QORNIX_ENABLE_ASYNC_POSTGRES` | `OFF` | Build real async PostgreSQL driver. |
+| `QORNIX_ENABLE_ASYNC_MYSQL` | `OFF` | Build real async MySQL driver. |
+| `QORNIX_BUILD_ORM_TESTS` | `ON` | Build ORM tests. |
+| `QORNIX_BUILD_ORM_APP` | `OFF` | Build ORM demo executable. |
+
+## Standalone CMake usage
+
+```cmake
+add_subdirectory(/path/to/qornix_web/qornix_orm qornix_orm_build)
+target_link_libraries(my_app PRIVATE qornix::orm)
+```
+
+For a complete external project example, see [`doc/standalone_usage.md`](doc/standalone_usage.md).
+
+### Standalone consumer smoke sample
+
+The repository includes a small external-consumer sample at
+[`examples/standalone_consumer`](examples/standalone_consumer). It configures an
+independent CMake project, imports `qornix_orm` with `add_subdirectory(...)`,
+links against `qornix::orm` and runs an async mock-driver smoke path.
+
+```bash
+cmake -S qornix_orm/examples/standalone_consumer \
+  -B build/qornix_orm_standalone
+cmake --build build/qornix_orm_standalone --parallel
+./build/qornix_orm_standalone/qornix_orm_standalone_consumer
+```
+
+## Async DB quick example
+
+```cpp
+boost::asio::io_context ioc;
+
+qornix::db::AsyncPoolOptions options;
+options.max_connections = 32;
+options.max_waiters = 1024;
+options.acquire_timeout = std::chrono::milliseconds{200};
+options.query_timeout = std::chrono::milliseconds{2000};
+
+auto db = AsyncDatabaseInterface::createMock(ioc.get_executor(), options);
+
+boost::asio::co_spawn(ioc, [db]() -> boost::asio::awaitable<void> {
+    auto users = co_await db->table("users")
+        .filter("status", "active")
+        .select({"id", "email"})
+        .prepared()
+        .findAll();
+}, boost::asio::detached);
+
+ioc.run();
+```
+
+## Database configuration examples
+
+SQLite local development:
+
+```yaml
+database:
+  driver: sqlite
+  path: ./app.sqlite3
+```
+
+PostgreSQL async:
+
+```yaml
+database:
+  driver: postgres
+  host: 127.0.0.1
+  port: 5432
+  database: qornix
+  user: qornix
+  password: ${QORNIX_POSTGRES_PASSWORD}
+  pool:
+    max_connections: 32
+    max_waiters: 1024
+    acquire_timeout_ms: 200
+    query_timeout_ms: 2000
+```
+
+MySQL async:
+
+```yaml
+database:
+  driver: mysql
+  host: 127.0.0.1
+  port: 3306
+  database: qornix
+  user: qornix
+  password: ${QORNIX_MYSQL_PASSWORD}
+  pool:
+    max_connections: 32
+    max_waiters: 1024
+    acquire_timeout_ms: 200
+    query_timeout_ms: 2000
+```
+
+See [`doc/configuration.md`](doc/configuration.md) for the full configuration guide.
+
+## Testing quick commands
+
+```bash
+cmake -S . -B build/orm-tests   -DQORNIX_BUILD_ORM_TESTS=ON   -DQORNIX_ENABLE_ASYNC_DB=ON   -DQORNIX_ENABLE_SQLITE=ON
+cmake --build build/orm-tests --parallel
+ctest --test-dir build/orm-tests --output-on-failure
+```
+
+PostgreSQL/MySQL integration tests require real DSNs and explicit backend flags. See [`doc/testing.md`](doc/testing.md).
+
+## Known async limitations
+
+- SQLite async usage is an explicit sync/offloaded path, not a native non-blocking SQLite driver.
+- PostgreSQL and MySQL performance depends on backend configuration, pool size and server limits; run the integration tests and benchmarks with your own DSNs before relying on production numbers.
+- Dynamic API async work covers CRUD request execution; schema manager, metadata and OpenAPI services still use existing sync-compatible services.
+- Cancellation is cooperative for adapters that wrap blocking operations.
+
+---
+
+# Legacy detailed reference
+
+The sections below preserve the existing schema and ORM reference material.
+
+
 Qornix ORM is a C++ library for managing database schemas, entities and API controllers with ORM-like features and automatic schema generation.
 
 ## Contents
@@ -83,9 +259,9 @@ qornix_orm/
 
 ### Requirements
 
-- C++17 or newer.
-- CMake 4.0 or newer.
-- Boost libraries.
+- C++20 or newer.
+- CMake 3.20 or newer.
+- Boost 1.83+ libraries.
 - Database client libraries depending on enabled drivers:
   - SQLite;
   - PostgreSQL `libpq`;
@@ -331,7 +507,7 @@ DatabaseSchemaExporter exporter;
 SchemaDocument current = exporter.exportSchema(snapshot);
 ```
 
-Sprint 27 implements full SQLite introspection through `sqlite_master` and `PRAGMA`, and adds a safe fallback for PostgreSQL/MySQL through existing `getTableNames()` / `getColumnNames()`. Full typed introspection for PostgreSQL/MySQL should be developed separately.
+SQLite introspection uses `sqlite_master` and `PRAGMA`; PostgreSQL/MySQL currently use a safe fallback through existing `getTableNames()` / `getColumnNames()`. Full typed introspection for PostgreSQL/MySQL should be developed separately.
 
 Details: [database_snapshot.md](doc/database_snapshot.md).
 
@@ -395,7 +571,7 @@ core/schema_diff_engine.cpp
 normalize(desired) <-> normalize(current)
 ```
 
-Sprint 29 supports detection of:
+The semantic diff layer supports detection of:
 
 - entities added only in the desired schema;
 - entities existing only in the current database;
@@ -404,7 +580,7 @@ Sprint 29 supports detection of:
 - relationship changes;
 - constraint changes.
 
-Objects that exist only in the database are returned as `*_only_in_current`. This does not mean automatic deletion. Risk classification, planning and apply are performed by the next roadmap layers.
+Objects that exist only in the database are returned as `*_only_in_current`. This does not mean automatic deletion. Risk classification, planning and apply are performed by the schema planning/apply layers.
 
 Details: [schema_diff.md](doc/schema_diff.md).
 
@@ -846,5 +1022,5 @@ The tests verify:
 
 - **Databases**: SQLite is enabled by default; PostgreSQL and MySQL are available as optional drivers.
 - **OS**: Linux, Windows, macOS.
-- **C++ standard**: C++17.
+- **C++ standard**: C++20.
 - **Architectures**: x86, x64.

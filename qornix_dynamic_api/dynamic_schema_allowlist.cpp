@@ -7,6 +7,7 @@
 #include "dynamic_schema_allowlist.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace qornix_dynamic_api {
 
@@ -72,6 +73,13 @@ DynamicSchemaAllowlist DynamicSchemaAllowlist::fromDatabase(DatabaseInterface& d
         allowlist.tables_[tableName] = table;
     }
     return allowlist;
+}
+
+void DynamicSchemaAllowlist::addTable(DynamicTablePolicy policy) {
+    if (policy.name.empty()) {
+        return;
+    }
+    tables_[policy.name] = std::move(policy);
 }
 
 bool DynamicSchemaAllowlist::hasTable(const std::string& tableName) const {

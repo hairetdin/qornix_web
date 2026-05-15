@@ -16,7 +16,7 @@
 /**
  * A single planned schema operation.
  *
- * Sprint 32 turns semantic diff operations into an ordered, inspectable plan.
+ * SchemaPlanner turns semantic diff operations into an ordered, inspectable plan.
  * The plan is still read-only: it contains SQL preview and metadata, but it
  * does not execute anything by itself.
  */
@@ -83,8 +83,8 @@ struct SchemaPlan {
  *
  * Input:
  *   - SchemaDocumentDiff from SchemaDiffEngine
- *   - DriverCapabilities from Sprint 31
- *   - SchemaPolicy from Sprint 30
+ *   - DriverCapabilities
+ *   - SchemaPolicy
  *
  * Output:
  *   - ordered operations

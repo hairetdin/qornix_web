@@ -15,7 +15,7 @@
 /**
  * Semantic diff kind between desired and current schema documents.
  *
- * Sprint 29 intentionally compares normalized SchemaDocument instances.
+ * SchemaDiffEngine intentionally compares normalized SchemaDocument instances.
  * It does not compare raw user XML to raw database introspection output.
  */
 enum class SchemaDiffOperationKind {
@@ -96,8 +96,8 @@ struct SchemaDiffOptions {
  *   current SchemaDocument: current DB state exported from DatabaseSnapshot
  *
  * The engine is read-only: it does not modify XML, SchemaDocument instances or
- * the database. Sprint 30 will classify risk. Sprint 32 will turn diff into a
- * plan. Sprint 33 will apply confirmed plans.
+ * the database. Risk policy classifies risk. SchemaPlanner turns diff into a
+ * plan. SchemaApplier applies confirmed plans.
  */
 class SchemaDiffEngine {
 public:

@@ -245,6 +245,8 @@ public:
     }
 
     void index_document(const std::string &doc_id, const std::string &content) {
+        (void)doc_id;
+
         auto terms = tokenize(content);
         auto identifiers = extract_code_identifiers(content);
 

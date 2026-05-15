@@ -1,6 +1,6 @@
 # Database schema export
 
-`DatabaseSchemaExporter` is the Sprint 28 bridge between technical database introspection and the semantic schema model used by the schema-driven pipeline.
+`DatabaseSchemaExporter` bridges technical database introspection and the semantic schema model used by the schema-driven pipeline.
 
 It converts:
 
@@ -193,7 +193,7 @@ CLOB                 -> TEXT
 
 Unsupported types are exported as `TEXT` and produce warnings.
 
-This is intentional for Sprint 28: exported XML must stay compatible with the XSD contract. More precise driver-specific type handling belongs to the later `DriverCapabilities` and diff/planner work.
+This is intentional: exported XML must stay compatible with the XSD contract. More precise driver-specific type handling belongs to `DriverCapabilities` and diff/planner work.
 
 ## Validation
 
@@ -207,7 +207,7 @@ When `libxml2` support is enabled, `database_schema_exporter_test` validates the
 
 ## Current limitations
 
-Sprint 28 provides the first export layer. It does not yet implement semantic diff.
+The exporter provides the database-to-schema export layer. It does not implement semantic diff.
 
 Known limitations:
 
@@ -219,7 +219,7 @@ Known limitations:
 
 ## Next step
 
-Sprint 29 will use this output as the current semantic model:
+The semantic diff layer can use this output as the current semantic model:
 
 ```text
 SchemaDocument desired

@@ -1,8 +1,9 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20)
 project(qornix_rag)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(qornix_rag
     main.cpp
@@ -84,7 +85,7 @@ target_link_libraries(qornix_rag PRIVATE ${XAPIAN_LIBRARIES})
 target_include_directories(qornix_rag PRIVATE ${XAPIAN_INCLUDE_DIRS})
 
 # Boost libraries
-find_package(Boost 1.75 REQUIRED COMPONENTS filesystem url json)
+find_package(Boost 1.83 REQUIRED COMPONENTS filesystem url json)
 target_link_libraries(qornix_rag PRIVATE
     Boost::filesystem
     Boost::url

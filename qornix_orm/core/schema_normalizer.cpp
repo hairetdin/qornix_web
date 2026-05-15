@@ -128,7 +128,7 @@ std::string normalizeType(const std::string& value) {
     auto normalized = toUpper(collapseSpaces(trim(value)));
 
     // Collapse common SQL/app aliases to a canonical type name. Keep this list
-    // intentionally small in Sprint 26; driver-specific precision rules belong
+    // intentionally small; driver-specific precision rules belong
     // to DriverCapabilities and later diff/planner work.
     static const std::map<std::string, std::string> aliases = {
         {"INT", "INTEGER"},

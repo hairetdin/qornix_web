@@ -7,9 +7,93 @@
 #include "dynamic_api_handlers.h"
 
 #include <algorithm>
+#include <chrono>
 #include <climits>
+#include <utility>
 
 namespace qornix_dynamic_api {
+
+
+namespace {
+
+std::string dynamicPermissionForMethod(const std::string& method) {
+    if (method == "POST" || method == "PUT" || method == "PATCH") {
+        return DynamicPermissionPolicy::permissionForDynamicWrite();
+    }
+    if (method == "DELETE") {
+        return DynamicPermissionPolicy::permissionForDynamicDelete();
+    }
+    return DynamicPermissionPolicy::permissionForDynamicRead();
+}
+
+Response responseFromDynamicApiResponse(const DynamicApiResponse& response, unsigned version) {
+    if (response.body.is_string()) {
+        return make_json_response(response.status, version, std::string(response.body.as_string().c_str()));
+    }
+    return make_json_response(response.status, version, response.toJsonString());
+}
+
+RouteOptions dynamicCrudRouteOptions(const DynamicApiConfig& config) {
+    RouteOptions options;
+    options.timeout = config.dynamicRouteTimeout;
+    options.max_request_body_size = config.maxDynamicBodySize;
+    if (config.maxConcurrentDbOperations > 0) {
+        options.max_concurrent_requests = config.maxConcurrentDbOperations;
+    }
+    return options;
+}
+
+#if QORNIX_ENABLE_ASYNC_DB
+qornix::db::CancellationToken dynamicCancellationToken(const DynamicApiConfig& config) {
+    qornix::db::CancellationToken token;
+    if (config.dynamicQueryTimeout.count() > 0) {
+        token.deadline = std::chrono::steady_clock::now() + config.dynamicQueryTimeout;
+    }
+    return token;
+}
+
+boost::asio::awaitable<Response> executeAsyncDynamicCrud(
+    DynamicApiConfig config,
+    std::shared_ptr<AsyncDatabaseInterface> asyncDatabase,
+    DynamicSchemaAllowlist allowlist,
+    Request req,
+    Url url,
+    Params params) {
+    const unsigned version = req.version();
+    const std::string method(req.method_string());
+
+    if (config.maxDynamicBodySize > 0 && req.body().size() > config.maxDynamicBodySize) {
+        co_return responseFromDynamicApiResponse(
+            DynamicApiResponse::error(
+                http::status::payload_too_large,
+                "request_body_too_large",
+                "Dynamic API request body exceeds configured maxDynamicBodySize"),
+            version);
+    }
+
+    DynamicPermissionPolicy permissionPolicy(config);
+    const auto decision = permissionPolicy.check(dynamicPermissionForMethod(method), req);
+    if (!decision.allowed) {
+        co_return responseFromDynamicApiResponse(
+            DynamicApiResponse::error(http::status::forbidden, "permission_denied", decision.message),
+            version);
+    }
+
+    DynamicQueryRequest request;
+    request.method = method;
+    request.table = params.count("table") ? params.at("table") : "";
+    request.id = params.count("id") ? params.at("id") : "";
+    request.rawBody = req.body();
+    request.rawQuery = std::string(url.query());
+
+    auto token = dynamicCancellationToken(config);
+    DynamicQueryService service(config, std::move(asyncDatabase), std::move(allowlist));
+    auto response = co_await service.executeAsync(request, std::move(token));
+    co_return responseFromDynamicApiResponse(response, version);
+}
+#endif
+
+} // namespace
 
 DynamicApiHandlerBase::DynamicApiHandlerBase(DynamicApiConfig config)
     : config_(std::move(config)), permissionPolicy_(config_) {}
@@ -236,5 +320,49 @@ void addSchemaDrivenDynamicApiRoutes(HttpServer& server, const DynamicApiConfig&
     server.add_route(config.apiPrefix + "/{table}", crud);
     server.add_route(config.apiPrefix + "/{table}/{id}", crud);
 }
+
+
+#if QORNIX_ENABLE_ASYNC_DB
+void addSchemaDrivenDynamicApiAsyncRoutes(
+    HttpServer& server,
+    const DynamicApiConfig& config,
+    std::shared_ptr<AsyncDatabaseInterface> asyncDatabase,
+    DynamicSchemaAllowlist allowlist) {
+    auto metadata = std::make_shared<DynamicMetadataHandler>(config);
+    auto schemaExport = std::make_shared<DynamicSchemaExportHandler>(config);
+    auto schemaValidate = std::make_shared<DynamicSchemaValidateHandler>(config);
+    auto schemaDiff = std::make_shared<DynamicSchemaDiffHandler>(config);
+    auto schemaPlan = std::make_shared<DynamicSchemaPlanHandler>(config);
+    auto schemaApply = std::make_shared<DynamicSchemaApplyHandler>(config);
+    auto schemaHistory = std::make_shared<DynamicSchemaHistoryHandler>(config);
+    auto openapi = std::make_shared<DynamicOpenApiHandler>(config);
+
+    server.add_route("/openapi.json", openapi);
+    server.add_route(config.apiPrefix + "/openapi.json", openapi);
+
+    server.add_route(config.schemaPrefix + "/export", schemaExport);
+    server.add_route(config.schemaPrefix + "/validate", schemaValidate);
+    server.add_route(config.schemaPrefix + "/diff", schemaDiff);
+    server.add_route(config.schemaPrefix + "/plan", schemaPlan);
+    server.add_route(config.schemaPrefix + "/apply", schemaApply);
+    server.add_route(config.schemaPrefix + "/history", schemaHistory);
+    server.add_route(config.apiPrefix + "/schema.xml", schemaExport);
+
+    server.add_route(config.apiPrefix + "/meta/{entity}", metadata);
+    server.add_route(config.apiPrefix + "/meta/{table}/{entity}", metadata);
+
+    auto asyncCrud = [config, asyncDatabase = std::move(asyncDatabase), allowlist = std::move(allowlist)](
+                         Request req,
+                         Url url,
+                         Params params) -> boost::asio::awaitable<Response> {
+        return executeAsyncDynamicCrud(config, asyncDatabase, allowlist, std::move(req), std::move(url), std::move(params));
+    };
+
+    const auto routeOptions = dynamicCrudRouteOptions(config);
+    server.any_async(config.apiPrefix, asyncCrud, routeOptions);
+    server.any_async(config.apiPrefix + "/{table}", asyncCrud, routeOptions);
+    server.any_async(config.apiPrefix + "/{table}/{id}", asyncCrud, routeOptions);
+}
+#endif
 
 } // namespace qornix_dynamic_api

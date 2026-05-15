@@ -41,6 +41,8 @@ public:
     static DynamicSchemaAllowlist fromSchemaDocument(const SchemaDocument& document);
     static DynamicSchemaAllowlist fromDatabase(DatabaseInterface& database);
 
+    void addTable(DynamicTablePolicy policy);
+
     bool hasTable(const std::string& tableName) const;
     bool hasField(const std::string& tableName, const std::string& fieldName) const;
     bool canReadTable(const std::string& tableName) const;

@@ -79,10 +79,10 @@ qornix_orm/schema/fixtures/
 | `DatabaseMapping` | Supported | Generated from entities when explicit mapping is missing | Supported | N/A | Maps application fields to database columns/types. |
 | `TypeMapping` | Supported | N/A | Supported when configured | N/A | Maps application types to database-specific types. |
 
-## Known gaps discovered in Sprint 23
+## Known gaps
 
-1. XSD validation is not wired into `SchemaLoader::loadSchemaFromFile(...)` yet. This belongs to Sprint 24.
-2. The current compare/apply API works with `SchemaComparisonResult`, not with normalized `SchemaDocument` objects. This belongs to later v0.0.4 sprints.
+1. XSD validation is not wired into `SchemaLoader::loadSchemaFromFile(...)` yet.
+2. The current compare/apply API works with `SchemaComparisonResult`, not with normalized `SchemaDocument` objects.
 3. `DatabaseSnapshot` should remain a technical introspection layer. The semantic diff should compare normalized `SchemaDocument desired` and `SchemaDocument current`.
 4. Generated schemas may represent a foreign-key column both as a physical `Field` and as `ForeignKeyField` relation metadata with the same `@name`. This is valid and must not fail XSD validation.
 5. Stored procedure and database function parameters need deeper parser/export coverage.
@@ -104,9 +104,9 @@ qornix_orm/schema/fixtures/
 | Constraint identity | `Constraint/@constraintName` must be unique inside an entity |
 | Empty schema | `DataStructure` may contain zero entities |
 
-## Next sprint dependency
+## Runtime validation follow-up
 
-Sprint 24 should add the runtime validation layer:
+The runtime validation layer should include:
 
 ```cpp
 class XmlSchemaValidator;

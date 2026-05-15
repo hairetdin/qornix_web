@@ -17,6 +17,8 @@
 #include <sstream>
 #include <filesystem>
 
+#include "http_response.h"
+
 namespace http = boost::beast::http;
 namespace urls = boost::urls;
 
@@ -39,10 +41,9 @@ public:
         } else if (method == "HEAD") { handleHead(req, res, url_params, path_params); } else if (method == "OPTIONS") {
             handleOptions(req, res, url_params, path_params);
         } else {
-            res.result(http::status::method_not_allowed);
-            res.set(http::field::content_type, "text/plain");
-            res.body() = "Метод " + method + " не поддерживается";
-            res.prepare_payload();
+            res = make_text_response(http::status::method_not_allowed,
+                                     req.version(),
+                                     "Метод " + method + " не поддерживается");
         }
     }
 
@@ -60,10 +61,7 @@ public:
             return;
             }
 
-        res.result(status);
-        res.set(http::field::content_type, content_type);
-        res.body() = body_content;
-        res.prepare_payload();
+        res = make_response(status, res.version(), body_content, content_type);
     }
 
     // Helper method for determining Content-Type by file extension
@@ -94,87 +92,66 @@ public:
 
 protected:
     virtual void handleGet(
-        const http::request<http::string_body> &req,
+        const http::request<http::string_body> &,
         http::response<http::string_body> &res,
-        const urls::url_view &url_view,
-        const std::map<std::string, std::string> &path_params
+        const urls::url_view &,
+        const std::map<std::string, std::string> &
     ) {
-        res.result(http::status::not_implemented);
-        res.set(http::field::content_type, "text/plain");
-        res.body() = "GET не реализован";
-        res.prepare_payload();
+        res = make_text_response(http::status::not_implemented, res.version(), "GET не реализован");
     }
 
     virtual void handlePost(
-        const http::request<http::string_body> &req,
+        const http::request<http::string_body> &,
         http::response<http::string_body> &res,
-        const urls::url_view &url_view,
-        const std::map<std::string, std::string> &path_params
+        const urls::url_view &,
+        const std::map<std::string, std::string> &
     ) {
-        res.result(http::status::not_implemented);
-        res.set(http::field::content_type, "text/plain");
-        res.body() = "POST не реализован";
-        res.prepare_payload();
+        res = make_text_response(http::status::not_implemented, res.version(), "POST не реализован");
     }
 
     virtual void handlePut(
-        const http::request<http::string_body> &req,
+        const http::request<http::string_body> &,
         http::response<http::string_body> &res,
-        const urls::url_view &url_view,
-        const std::map<std::string, std::string> &path_params
+        const urls::url_view &,
+        const std::map<std::string, std::string> &
     ) {
-        res.result(http::status::not_implemented);
-        res.set(http::field::content_type, "text/plain");
-        res.body() = "PUT не реализован";
-        res.prepare_payload();
+        res = make_text_response(http::status::not_implemented, res.version(), "PUT не реализован");
     }
 
     virtual void handleDelete(
-        const http::request<http::string_body> &req,
+        const http::request<http::string_body> &,
         http::response<http::string_body> &res,
-        const urls::url_view &url_view,
-        const std::map<std::string, std::string> &path_params
+        const urls::url_view &,
+        const std::map<std::string, std::string> &
     ) {
-        res.result(http::status::not_implemented);
-        res.set(http::field::content_type, "text/plain");
-        res.body() = "DELETE не реализован";
-        res.prepare_payload();
+        res = make_text_response(http::status::not_implemented, res.version(), "DELETE не реализован");
     }
 
     virtual void handlePatch(
-        const http::request<http::string_body> &req,
+        const http::request<http::string_body> &,
         http::response<http::string_body> &res,
-        const urls::url_view &url_params,
-        const std::map<std::string, std::string> &path_params
+        const urls::url_view &,
+        const std::map<std::string, std::string> &
     ) {
-        res.result(http::status::not_implemented);
-        res.set(http::field::content_type, "text/plain");
-        res.body() = "PATCH не реализован";
-        res.prepare_payload();
+        res = make_text_response(http::status::not_implemented, res.version(), "PATCH не реализован");
     }
 
     virtual void handleHead(
-        const http::request<http::string_body> &req,
+        const http::request<http::string_body> &,
         http::response<http::string_body> &res,
-        const urls::url_view &url_params,
-        const std::map<std::string, std::string> &path_params
+        const urls::url_view &,
+        const std::map<std::string, std::string> &
     ) {
-        res.result(http::status::not_implemented);
-        res.set(http::field::content_type, "text/plain");
-        res.body() = "HEAD не реализован";
-        res.prepare_payload();
+        res = make_text_response(http::status::not_implemented, res.version(), "HEAD не реализован");
     }
 
     virtual void handleOptions(
-        const http::request<http::string_body> &req,
+        const http::request<http::string_body> &,
         http::response<http::string_body> &res,
-        const urls::url_view &url_params,
-        const std::map<std::string, std::string> &path_params
+        const urls::url_view &,
+        const std::map<std::string, std::string> &
     ) {
-        res.result(http::status::not_implemented);
-        res.set(http::field::content_type, "text/plain");
-        res.body() = "OPTIONS не реализован";
-        res.prepare_payload();
+        res = make_text_response(http::status::not_implemented, res.version(), "OPTIONS не реализован");
     }
 
     static void buildErrorResponse(http::response<http::string_body> &res,
@@ -184,10 +161,7 @@ protected:
         error_response["error"] = message;
         error_response["status"] = std::to_string(static_cast<int>(status));
 
-        res.result(status);
-        res.set(http::field::content_type, "application/json; charset=utf-8");
-        res.body() = boost::json::serialize(error_response);
-        res.prepare_payload();
+        res = make_json_response(status, res.version(), boost::json::serialize(error_response));
     }
 
     // Helper methods for building responses
@@ -224,7 +198,7 @@ public:
 
     // Override only handleGet to handle GET requests
     void handleGet(
-        const http::request<http::string_body> &req,
+        const http::request<http::string_body> &,
         http::response<http::string_body> &res,
         const urls::url_view &url,
         const std::map<std::string, std::string> &params

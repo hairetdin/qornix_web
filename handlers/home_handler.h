@@ -45,7 +45,7 @@ protected:
                 "server": "Qornix Web Server",
                 "version": "0.0.1",
                 "framework": "Qornix",
-                "language": "C++17",
+                "language": "C++20",
                 "features": ["DI Container", "Middleware", "Dynamic Extensions"]
             })", "application/json; charset=utf-8");
         } else {

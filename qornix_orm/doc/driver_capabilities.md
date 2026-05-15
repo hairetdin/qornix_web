@@ -18,7 +18,7 @@ schema_app.xsd
   -> apply
 ```
 
-Sprint 31 does **not** generate SQL and does **not** modify a database. It only answers the question:
+`DriverCapabilities` does **not** generate SQL and does **not** modify a database. It only answers the question:
 
 ```text
 Can this driver support the operation required by this diff item?

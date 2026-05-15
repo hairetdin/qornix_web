@@ -1,0 +1,4 @@
+add_executable(async_postgres_server main.cpp)
+
+target_link_libraries(async_postgres_server PRIVATE qornix_web_core)
+target_compile_features(async_postgres_server PRIVATE cxx_std_20)

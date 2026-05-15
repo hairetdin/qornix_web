@@ -6,7 +6,7 @@
 qornix_orm/schema/schema_app.xsd
 ```
 
-Sprint 25 introduces `SchemaDocument` as the next step after runtime XSD validation.
+`SchemaDocument` is the semantic schema model used after runtime XSD validation.
 It separates raw XML from the internal model that future normalization, semantic diff, plan and apply code will use.
 
 ## Why SchemaDocument exists
@@ -20,18 +20,18 @@ The intended pipeline is:
 user XML
   -> validate against schema_app.xsd
   -> parse to SchemaDocument
-  -> normalize in Sprint 26
+  -> normalize
   -> desired SchemaDocument
 
 database
-  -> introspect in Sprint 27
+  -> introspect
   -> DatabaseSnapshot
-  -> export to SchemaDocument in Sprint 28
-  -> normalize in Sprint 26
+  -> export to SchemaDocument
+  -> normalize
   -> current SchemaDocument
 
 desired SchemaDocument
-  -> semantic diff in Sprint 29
+  -> semantic diff
   -> current SchemaDocument
 ```
 
@@ -107,7 +107,7 @@ SchemaSnapshot snapshot = document.toSnapshot();
 
 ## Current scope
 
-Sprint 25 covers:
+`SchemaDocument` covers:
 
 - XSD-valid XML -> `SchemaDocument`;
 - source metadata;
@@ -116,7 +116,7 @@ Sprint 25 covers:
 - round-trip validation tests;
 - conversion to `SchemaSnapshot` for compatibility with existing ORM code.
 
-Sprint 25 does not implement semantic normalization, database introspection, diff, plan or apply. Those are covered by later roadmap items.
+`SchemaDocument` does not implement semantic normalization, database introspection, diff, plan or apply. Those are handled by separate layers.
 
 ## Tests
 

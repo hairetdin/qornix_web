@@ -4,6 +4,7 @@
 #include "config.h"
 
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <initializer_list>
@@ -27,6 +28,11 @@ struct RuntimeConfig {
     bool allowUpdateWithoutFilter = false;
     bool allowDeleteWithoutFilter = false;
     bool allowDestructiveSchemaApply = false;
+    std::chrono::milliseconds dynamicQueryTimeout{2000};
+    std::chrono::milliseconds dynamicRouteTimeout{30000};
+    std::size_t maxDynamicBodySize{1024 * 1024};
+    std::size_t maxConcurrentDbOperations{128};
+    bool preparedDynamicQueries = true;
 };
 
 inline bool fileExists(const std::filesystem::path& path) {
@@ -78,6 +84,22 @@ inline std::size_t sizeValue(Config& config, std::initializer_list<const char*> 
     }
     try {
         return static_cast<std::size_t>(std::stoull(value));
+    } catch (...) {
+        return fallback;
+    }
+}
+
+inline std::chrono::milliseconds msValue(
+    Config& config,
+    std::initializer_list<const char*> keys,
+    std::chrono::milliseconds fallback
+) {
+    const std::string value = firstValue(config, keys);
+    if (value.empty()) {
+        return fallback;
+    }
+    try {
+        return std::chrono::milliseconds{std::stoll(value)};
     } catch (...) {
         return fallback;
     }
@@ -217,6 +239,31 @@ inline RuntimeConfig loadRuntimeConfig() {
         config,
         {"dynamic_api.schema.allow_destructive_apply"},
         runtime.allowDestructiveSchemaApply
+    );
+    runtime.dynamicQueryTimeout = msValue(
+        config,
+        {"dynamic_api.async.query_timeout_ms", "dynamic_api.query.timeout_ms"},
+        runtime.dynamicQueryTimeout
+    );
+    runtime.dynamicRouteTimeout = msValue(
+        config,
+        {"dynamic_api.async.route_timeout_ms", "dynamic_api.route_timeout_ms"},
+        runtime.dynamicRouteTimeout
+    );
+    runtime.maxDynamicBodySize = sizeValue(
+        config,
+        {"dynamic_api.async.max_body_size", "dynamic_api.max_body_size"},
+        runtime.maxDynamicBodySize
+    );
+    runtime.maxConcurrentDbOperations = sizeValue(
+        config,
+        {"dynamic_api.async.max_concurrent_db_operations", "dynamic_api.max_concurrent_db_operations"},
+        runtime.maxConcurrentDbOperations
+    );
+    runtime.preparedDynamicQueries = boolValue(
+        config,
+        {"dynamic_api.async.prepared_queries", "dynamic_api.query.prepared"},
+        runtime.preparedDynamicQueries
     );
 
     return runtime;

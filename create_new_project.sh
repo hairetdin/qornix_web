@@ -9,14 +9,18 @@ Qornix Web application generator
 
 Usage:
   ./create_new_project.sh <project_name_or_path> [--with-dynamic-api]
+  ./create_new_project.sh <project_name_or_path> [--with-dynamic-api-vue]
   ./create_new_project.sh <project_name_or_path> --template dynamic-api
+  ./create_new_project.sh <project_name_or_path> --template dynamic-api-vue
 
 Examples:
   ./create_new_project.sh ../my_api
   ./create_new_project.sh my_api
+  ./create_new_project.sh ../my_api --with-dynamic-api-vue
 
 The generated application links to qornix::web_core and does not copy framework sources.
 Use --with-dynamic-api to generate a Schema-driven Dynamic API application.
+Use --with-dynamic-api-vue to generate a Schema-driven Dynamic API application with a Vue/Vite frontend scaffold.
 USAGE
 }
 
@@ -55,48 +59,24 @@ relative_path() {
     local to_path="$2"
 
     if command -v python3 >/dev/null 2>&1; then
-        python3 - "$from_dir" "$to_path" <<'PY'
-import os
-import sys
-print(os.path.relpath(os.path.abspath(sys.argv[2]), os.path.abspath(sys.argv[1])))
-PY
+        python3 -c 'import os, sys; print(os.path.relpath(os.path.abspath(sys.argv[2]), os.path.abspath(sys.argv[1])))' "$from_dir" "$to_path" < /dev/null
     else
         printf '%s\n' "$to_path"
     fi
 }
-
 replace_placeholders() {
     local file="$1"
     local project_name="$2"
     local project_name_upper="$3"
     local qornix_web_root="$4"
-
-    if command -v python3 >/dev/null 2>&1; then
-        python3 - "$file" "$project_name" "$project_name_upper" "$qornix_web_root" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-project_name = sys.argv[2]
-project_name_upper = sys.argv[3]
-qornix_web_root = sys.argv[4]
-
-text = path.read_text(encoding="utf-8")
-text = text.replace("@PROJECT_NAME@", project_name)
-text = text.replace("@PROJECT_NAME_UPPER@", project_name_upper)
-text = text.replace("@QORNIX_WEB_ROOT@", qornix_web_root)
-path.write_text(text, encoding="utf-8")
-PY
-    else
-        local tmp_file
-        tmp_file="${file}.tmp"
-        sed \
-            -e "s|@PROJECT_NAME@|$project_name|g" \
-            -e "s|@PROJECT_NAME_UPPER@|$project_name_upper|g" \
-            -e "s|@QORNIX_WEB_ROOT@|$qornix_web_root|g" \
-            "$file" > "$tmp_file"
-        mv "$tmp_file" "$file"
-    fi
+    local tmp_file
+    tmp_file="${file}.tmp"
+    sed \
+        -e "s|@PROJECT_NAME@|$project_name|g" \
+        -e "s|@PROJECT_NAME_UPPER@|$project_name_upper|g" \
+        -e "s|@QORNIX_WEB_ROOT@|$qornix_web_root|g" \
+        "$file" > "$tmp_file"
+    mv "$tmp_file" "$file"
 }
 
 project_path="${1:-}"
@@ -105,15 +85,18 @@ shift || true
 while [ $# -gt 0 ]; do
     case "$1" in
         --with-dynamic-api) template_name="dynamic_api_app" ;;
+        --with-dynamic-api-vue) template_name="dynamic_api_vue_app" ;;
         --template)
             shift || fail "--template requires a value"
             case "${1:-}" in
                 dynamic-api|dynamic_api|dynamic_api_app) template_name="dynamic_api_app" ;;
+                dynamic-api-vue|dynamic_api_vue|dynamic_api_vue_app) template_name="dynamic_api_vue_app" ;;
                 app|default) template_name="app" ;;
                 *) fail "Unknown template: $1" ;;
             esac
             ;;
         --template=dynamic-api|--template=dynamic_api|--template=dynamic_api_app) template_name="dynamic_api_app" ;;
+        --template=dynamic-api-vue|--template=dynamic_api_vue|--template=dynamic_api_vue_app) template_name="dynamic_api_vue_app" ;;
         --template=app|--template=default) template_name="app" ;;
         *) fail "Unknown option: $1" ;;
     esac
@@ -163,12 +146,17 @@ qornix_web_root_for_cmake="$(relative_path "$project_abs_path" "$framework_root"
 project_name_upper="$(printf '%s' "$project_name" | tr '[:lower:]' '[:upper:]')"
 
 # Rename *.in templates after placeholder replacement.
+template_file_list="$(mktemp)"
+find "$project_abs_path" -type f -name '*.in' | sort > "$template_file_list"
 while IFS= read -r file; do
     replace_placeholders "$file" "$project_name" "$project_name_upper" "$qornix_web_root_for_cmake"
     mv "$file" "${file%.in}"
-done < <(find "$project_abs_path" -type f -name '*.in' | sort)
+done < "$template_file_list"
+rm -f "$template_file_list"
 
 # Replace placeholders in regular text files.
+all_file_list="$(mktemp)"
+find "$project_abs_path" -type f | sort > "$all_file_list"
 while IFS= read -r file; do
     case "$file" in
         *.in) continue ;;
@@ -176,7 +164,8 @@ while IFS= read -r file; do
     if grep -q '@PROJECT_NAME@\|@PROJECT_NAME_UPPER@\|@QORNIX_WEB_ROOT@' "$file" 2>/dev/null; then
         replace_placeholders "$file" "$project_name" "$project_name_upper" "$qornix_web_root_for_cmake"
     fi
-done < <(find "$project_abs_path" -type f | sort)
+done < "$all_file_list"
+rm -f "$all_file_list"
 
 mkdir -p "$project_abs_path/logs"
 
@@ -202,4 +191,13 @@ echo "  docker run --rm -p 8008:8008 $(basename "$project_name"):runtime"
 echo ""
 echo "Open in browser:"
 echo "  http://127.0.0.1:8008/"
-echo "  http://127.0.0.1:8008/docs"
+if [ "$template_name" = "dynamic_api_vue_app" ]; then
+    echo "  http://127.0.0.1:8008/backend-admin"
+    echo "  http://127.0.0.1:8008/backend/schema-manager"
+    echo "  http://127.0.0.1:8008/api/dynamic/openapi.json"
+elif [ "$template_name" = "dynamic_api_app" ]; then
+    echo "  http://127.0.0.1:8008/schema-manager"
+    echo "  http://127.0.0.1:8008/docs"
+else
+    echo "  http://127.0.0.1:8008/docs"
+fi

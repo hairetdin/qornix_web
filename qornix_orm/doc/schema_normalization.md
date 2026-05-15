@@ -1,6 +1,6 @@
 # Schema normalization
 
-`SchemaNormalizer` is the Sprint 26 layer that prepares validated schema models for future semantic diff.
+`SchemaNormalizer` prepares validated schema models for semantic diff.
 
 The normalizer works with `SchemaDocument`, not with raw XML text:
 
@@ -65,7 +65,7 @@ exported DB schema        canonical schema generated from DB
 
 ## What is normalized
 
-Sprint 26 keeps normalization conservative and safe.
+Normalization is intentionally conservative and safe.
 
 Current rules:
 
@@ -83,7 +83,7 @@ Current rules:
 
 ## What is not normalized yet
 
-The following should be handled in later sprints together with driver capabilities and semantic diff:
+The following areas are intentionally left for future driver-capability and semantic-diff improvements:
 
 - advanced PostgreSQL type equivalence;
 - driver-specific precision/scale rules;
@@ -125,7 +125,7 @@ std::string canonicalXml = normalized.document.toCanonicalXml();
 
 ## Testing
 
-Sprint 26 adds:
+The normalizer adds:
 
 ```text
 qornix_orm/tests/schema_normalizer_test.cpp

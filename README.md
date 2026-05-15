@@ -14,13 +14,16 @@ Start with the showcase or generate an app:
 
 ```bash
 ./create_new_project.sh ../my_app --with-dynamic-api
+./create_new_project.sh ../my_vue_app --with-dynamic-api-vue
 ```
 
-See `doc/schema_driven_dynamic_api.md` and `example/schema_driven_backend`.
+Use `--with-dynamic-api` for the backend/admin showcase or `--with-dynamic-api-vue` when you want the same Dynamic API backend plus a Vue/Vite frontend scaffold served from `/`.
+
+See `doc/schema_driven_dynamic_api.md`, `doc/dynamic_api_vue_app_template.md` and `example/schema_driven_backend`.
 
 ## Framework
 
-**Qornix Web** is a C++17 framework for building HTTP servers, REST APIs and web applications on top of Boost.Beast, Boost.URL and Boost.JSON.
+**Qornix Web** is a C++20 framework for building HTTP servers, REST APIs and web applications on top of Boost.Beast, Boost.URL and Boost.JSON.
 
 The framework provides a server core, routing, a middleware pipeline, a DI container, YAML-based configuration, dynamic route extensions and optional modules: ORM, Auth and RAG.
 
@@ -78,6 +81,14 @@ Schema-driven Dynamic API application created with:
 
 ![Qornix dynamic API generated app](doc/assets/qornix_dynamyc_api_app_snap.png)
 
+Schema-driven Dynamic API + Vue application created with:
+
+```bash
+./create_new_project.sh ../my_vue_app --with-dynamic-api-vue
+```
+
+This template keeps the Dynamic API backend, moves backend/admin pages under `/backend/*`, serves Vue at `/`, provides `/backend-admin` as a developer dashboard and builds the frontend into the deploy bundle.
+
 ## Architecture components
 
 | Part | Purpose |
@@ -85,7 +96,9 @@ Schema-driven Dynamic API application created with:
 | `qornix_web_core` | Main CMake library of the framework |
 | `qornix::web_core` | Alias target used by applications |
 | `qornix_web` | Demo executable shipped with the framework |
-| `templates/app` | New-application template |
+| `templates/app` | Default new-application template |
+| `templates/dynamic_api_app` | Schema-driven Dynamic API backend/admin template |
+| `templates/dynamic_api_vue_app` | Schema-driven Dynamic API + Vue/Vite frontend template |
 | `create_new_project.sh` | Standalone application generator |
 | `doc/qornix_create_new_app_instruction.md` | Detailed application creation guide |
 | `doc/roadmap_step_by_step_example.md` | Step-by-step application example based on the framework |
@@ -258,13 +271,23 @@ docker load -i my_app-runtime.tar
 
 ## What `create_new_project.sh` does
 
-The script creates an application from the `templates/app` template.
+The script creates an application from one of the bundled templates.
+
+Available generation modes:
+
+| Command | Template | Purpose |
+|---------|----------|---------|
+| `./create_new_project.sh ../my_app` | `templates/app` | Default C++ web application. |
+| `./create_new_project.sh ../my_api --with-dynamic-api` | `templates/dynamic_api_app` | Schema-driven Dynamic API backend/admin application. |
+| `./create_new_project.sh ../my_vue --with-dynamic-api-vue` | `templates/dynamic_api_vue_app` | Dynamic API backend plus Vue/Vite frontend scaffold. |
+| `./create_new_project.sh ../my_api --template dynamic-api` | `templates/dynamic_api_app` | Explicit alias for the Dynamic API template. |
+| `./create_new_project.sh ../my_vue --template dynamic-api-vue` | `templates/dynamic_api_vue_app` | Explicit alias for the Vue template. |
 
 It performs the following actions:
 
 1. accepts a project name or path;
 2. validates the project name;
-3. copies the application template;
+3. copies the selected application template;
 4. substitutes the project name in `CMakeLists.txt` and the generated README;
 5. writes the relative path to the `qornix_web` directory;
 6. creates the `logs` directory;
@@ -278,7 +301,12 @@ Examples:
 ./create_new_project.sh my_app
 ./create_new_project.sh ../my_app
 ./create_new_project.sh /absolute/path/to/my_app
+./create_new_project.sh ../my_api --with-dynamic-api
+./create_new_project.sh ../my_vue --with-dynamic-api-vue
+./create_new_project.sh ../my_vue --template dynamic-api-vue
 ```
+
+The Vue template requires `npm` during CMake build because it compiles the frontend production bundle with Vite.
 
 The recommended option is to create the application next to the framework:
 
@@ -520,11 +548,12 @@ ORM is disabled by default in the application template to keep the initial build
 
 ## Requirements
 
+
 Minimum:
 
-- C++17 compiler: GCC 7+, Clang 5+ or compatible;
-- CMake 3.10+;
-- Boost 1.75+ with `url`, `json`, `log` components;
+- C++20 compiler: GCC 10+, Clang 10+ or compatible;
+- CMake 3.20+;
+- Boost 1.83+ with `url`, `json`, `log` components;
 - yaml-cpp.
 
 For modules:
@@ -636,6 +665,77 @@ public:
         const http::request<http::string_body>& req,
         const std::unordered_map<std::string, std::string>& path_params) override;
 };
+```
+
+### Async routes
+
+Qornix also supports coroutine-based route handlers for operations that can suspend without blocking an `io_context` thread.
+
+Use sync routes for CPU-cheap work that finishes immediately, static responses, and existing `HandlerBase` code. Use async routes for timers, async database clients, async HTTP clients, Redis, queues, or other I/O where the handler can `co_await` instead of sleeping or blocking a thread.
+
+```cpp
+server.get_async("/sleep/{ms}",
+    [](Request req, Url, Params params) -> net::awaitable<Response> {
+        auto executor = co_await net::this_coro::executor;
+
+        net::steady_timer timer(executor);
+        timer.expires_after(std::chrono::milliseconds(std::stoi(params.at("ms"))));
+        co_await timer.async_wait(net::use_awaitable);
+
+        co_return response::text("ok", req.version());
+    });
+```
+
+Available async route helpers:
+
+```cpp
+server.get_async(path, handler);
+server.post_async(path, handler);
+server.put_async(path, handler);
+server.patch_async(path, handler);
+server.delete_async(path, handler);
+server.head_async(path, handler);
+server.options_async(path, handler);
+server.any_async(path, handler);
+```
+
+Async handlers receive `Request`, owning `Url`, and `Params` by value:
+
+```cpp
+using AsyncRouteHandler = std::function<net::awaitable<Response>(
+    Request,
+    Url,
+    Params
+)>;
+```
+
+Do not keep references or pointers to request, URL, or params data across `co_await`. Copy values you need, or use the value parameters directly. Async handlers must return a `Response` value. Exceptions thrown inside an async handler are converted to `500 Internal Server Error`.
+
+Do not put blocking work inside async handlers:
+
+```cpp
+// Avoid this inside async handlers.
+std::this_thread::sleep_for(std::chrono::seconds(1));
+blocking_database_query();
+```
+
+Blocking code holds an `io_context` thread and can stop other connections from making progress. Use native async APIs or move blocking work to a dedicated worker pool.
+
+Response helpers for async and sync handlers:
+
+```cpp
+co_return response::text("hello", req.version());
+co_return response::json(R"({"ok":true})", req.version());
+co_return response::status(http::status::accepted, req.version(), "queued");
+co_return response::redirect("/login", req.version());
+```
+
+Runnable example:
+
+```bash
+cmake -S . -B build/async_examples -DQORNIX_BUILD_EXAMPLES=ON -DQORNIX_BUILD_TESTS=OFF
+cmake --build build/async_examples --target async_routes_server --parallel
+./build/async_examples/example/async_routes_server/async_routes_server 8010
 ```
 
 ### Middleware
@@ -811,7 +911,8 @@ target_link_libraries(my_app PRIVATE qornix::web_core)
 | Document | Purpose |
 |----------|---------|
 | [`doc/qornix_create_new_app_instruction.md`](doc/qornix_create_new_app_instruction.md) | Detailed guide for creating a standalone application based on Qornix Web |
-| [`doc/roadmap_step_by_step_example.md`](doc/project_doc/roadmap_step_by_step_example.md) | Step-by-step example of creating an application and using core framework modules |
+| [`doc/benchmark.md`](doc/benchmark.md) | Last generated performance benchmark report |
+| [`changelog.md`](changelog.md) | User-facing project changes and new capabilities |
 | [`example/dynamic_web_query_builder_server/README.md`](example/dynamic_web_query_builder_server/README.md) | Dynamic API, QueryBuilder UI and XML schema manager example |
 | `README.md` | Framework overview, quick start, architecture and main capabilities |
 
@@ -823,3 +924,134 @@ target_link_libraries(my_app PRIVATE qornix::web_core)
 4. Register routes in the application `routes.h`.
 5. Configure the application through `config.yaml`.
 6. Enable additional capabilities through CMake options and framework modules.
+
+## Async production controls
+
+The async server has a small production-oriented control layer for coroutine routes and middleware.
+The defaults are intentionally conservative and can be tuned with `HttpServerOptions` or setter methods:
+
+```cpp
+HttpServerOptions options;
+options.route_timeout = std::chrono::seconds{3};
+options.read_timeout = std::chrono::seconds{30};
+options.write_timeout = std::chrono::seconds{30};
+options.max_active_requests = 10000;
+options.max_request_body_size = 1024 * 1024;
+options.structured_access_log = true;
+
+HttpServer server(ioc, endpoint, options);
+server.set_route_timeout("/sleep", std::chrono::milliseconds{250});
+server.set_route_concurrency_limit("/users/{id}", 100);
+server.add_metrics_route(); // GET /qornix/metrics
+```
+
+Route timeout expiry returns `504 Gateway Timeout`. Global overload returns `503 Service Unavailable`, while a per-route concurrency limit returns `429 Too Many Requests`. The session tracks cancellation state and suppresses late coroutine responses after a timeout or disconnect.
+
+Async middleware can perform coroutine work before the route handler:
+
+```cpp
+server.add_async_middleware([](RequestContext& ctx)
+    -> net::awaitable<std::optional<Response>> {
+    if (ctx.url.path() == "/private" && !authorized(ctx)) {
+        co_return response::status(http::status::unauthorized,
+                                   ctx.request->version(),
+                                   "unauthorized");
+    }
+    co_return std::nullopt; // continue pipeline
+});
+```
+
+For existing blocking drivers, use the offload pool instead of blocking an `io_context` thread:
+
+```cpp
+auto blocking_pool = std::make_shared<qornix::async::BlockingTaskPool>(8, 1024, server.metrics_ptr());
+
+server.get_async("/users/{id}", [blocking_pool](Request req, Url, Params params)
+    -> net::awaitable<Response> {
+    auto user_json = co_await blocking_pool->submit([id = params.at("id")] {
+        return blocking_db_fetch_user(id);
+    }, std::chrono::seconds{1});
+    co_return response::json(user_json, req.version());
+});
+```
+
+`qornix::async::AsyncDbPool` is a thin awaitable pool facade for async DB-style workloads and examples. It models bounded connection acquisition, waiter limits and query timeout behavior so application code can be migrated to the dedicated async DB layer without creating one database connection per HTTP request.
+
+### Async DB layer
+
+The dedicated async DB foundation lives in `include/db/*` and `qornix_orm/database/async_*`. It provides:
+
+- `qornix::db::AsyncDatabase`, `AsyncDbConnection` and `AsyncTransaction`;
+- bounded `AsyncConnectionPool` with acquire timeout and waiter limits;
+- `CancellationToken` and `QueryOptions` for query deadline control;
+- `IAsyncDatabaseDriver` for real async PostgreSQL/MySQL driver implementations;
+- `MockAsyncDriver` for tests and examples;
+- `SyncOffloadedAsyncDriver` for explicitly marked legacy blocking drivers;
+- `AsyncDatabaseInterface` and `AsyncTableManager` for ORM-facing coroutine code.
+
+See `doc/async_db.md` for usage examples and `doc/project_doc/roadmap_async_db_changelog.md` for implementation status. For standalone `qornix_orm` async DB usage, also read `qornix_orm/Readme.md`, `qornix_orm/doc/standalone_usage.md`, `qornix_orm/doc/async_db_api.md`, `qornix_orm/doc/configuration.md` and `qornix_orm/doc/testing.md`. Real async PostgreSQL and MySQL driver paths are available behind `QORNIX_ENABLE_ASYNC_POSTGRES=ON` and `QORNIX_ENABLE_ASYNC_MYSQL=ON`; live benchmark runs are produced by `scripts/db_benchmark.py` and stored in `doc/benchmark_async_db.md`.
+
+Graceful shutdown stops accepting new connections, waits for active requests until a deadline, then stops the `io_context`:
+
+```cpp
+server.graceful_shutdown(std::chrono::seconds{10});
+```
+
+## Performance benchmark
+
+The benchmark runner starts `baseline_benchmark_server`, runs reproducible HTTP load scenarios, prints a Markdown report, and writes the latest result to `doc/benchmark.md` by default.
+
+Build the benchmark server:
+
+```bash
+cmake -S . -B build/perf -DCMAKE_BUILD_TYPE=Release -DQORNIX_BUILD_TESTS=ON -DQORNIX_BUILD_RAG=OFF
+cmake --build build/perf --target baseline_benchmark_server --parallel
+```
+
+Run the standard benchmark:
+
+```bash
+scripts/baseline_benchmark.py \
+  --server build/perf/baseline_benchmark_server \
+  --duration 5 \
+  --concurrency 64
+```
+
+Run the full performance benchmark used for the checked-in report:
+
+```bash
+scripts/baseline_benchmark.py \
+  --server build/perf/baseline_benchmark_server \
+  --port 18080 \
+  --server-threads 32 \
+  --duration 10 \
+  --concurrency 256 \
+  --extended-load \
+  --load-concurrency 1000 5000 10000 \
+  --db-normal-concurrency 128 \
+  --db-concurrency 10000 \
+  --idle-connections 10000
+```
+
+The report is saved to `doc/benchmark.md`. Use `--output path/to/report.md` to write it elsewhere. The report separates successful responses, managed HTTP overload responses and client-side errors. Metrics columns marked as `delta` are per-scenario increments, not cumulative process totals.
+
+The current reference run in `doc/benchmark.md` demonstrates 10k idle keep-alive connections opened successfully, 10k active HTTP load without client errors, async timer routes without blocking worker threads, a clean normal DB-pool scenario at 128 concurrency, and controlled overload/timeout accounting for stress scenarios.
+
+Async DB benchmark runs use the dedicated async DB benchmark server:
+
+```bash
+cmake -S . -B build/async-db-perf \
+  -DQORNIX_BUILD_TESTS=ON \
+  -DQORNIX_ENABLE_ASYNC_DB=ON \
+  -DQORNIX_ENABLE_ASYNC_POSTGRES=ON
+cmake --build build/async-db-perf --target async_db_benchmark_server --parallel
+
+export QORNIX_ASYNC_POSTGRES_URL='postgresql://user:password@127.0.0.1:5432/dbname'
+scripts/db_benchmark.py \
+  --server build/async-db-perf/async_db_benchmark_server \
+  --driver postgres \
+  --extended
+```
+
+Use `--driver mysql` with `QORNIX_ENABLE_ASYNC_MYSQL=ON` and MySQL connection environment variables. The report is saved to `doc/benchmark_async_db.md`.
+The benchmark runner defaults to a `1000ms` DB acquire timeout so the extended `*_normal_select_1000` scenario measures queued async DB work instead of immediately turning into pool backpressure; use `--acquire-timeout-ms 200` when you explicitly want a more aggressive saturation profile.
