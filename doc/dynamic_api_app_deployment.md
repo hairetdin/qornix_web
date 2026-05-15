@@ -476,3 +476,14 @@ schema/database.schema.xml
 schema/schema_history.jsonl
 logs/
 ```
+
+
+## Dynamic API + React template
+
+For the same Dynamic API backend with a React/Vite frontend scaffold, use:
+
+```bash
+./create_new_project.sh ../my_react --with-dynamic-api-react
+```
+
+See `dynamic_api_react_app_template.md` for the React template guide.

@@ -226,3 +226,14 @@ GET /async/sleep/{ms}
 These routes demonstrate `HttpServer::get_async`, value-owned `Request`/`Url`/`Params` coroutine arguments and response helpers. They are intentionally lightweight so the default template still builds without database dependencies.
 
 For DB-backed async CRUD, generate the Dynamic API template and read `templates/dynamic_api_app/doc/async_db_configuration.md`.
+
+
+## Dynamic API + React template
+
+For the same Dynamic API backend with a React/Vite frontend scaffold, use:
+
+```bash
+./create_new_project.sh ../my_react --with-dynamic-api-react
+```
+
+See `dynamic_api_react_app_template.md` for the React template guide.
