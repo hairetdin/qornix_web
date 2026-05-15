@@ -15,11 +15,12 @@ Start with the showcase or generate an app:
 ```bash
 ./create_new_project.sh ../my_app --with-dynamic-api
 ./create_new_project.sh ../my_vue_app --with-dynamic-api-vue
+./create_new_project.sh ../my_react_app --with-dynamic-api-react
 ```
 
-Use `--with-dynamic-api` for the backend/admin showcase or `--with-dynamic-api-vue` when you want the same Dynamic API backend plus a Vue/Vite frontend scaffold served from `/`.
+Use `--with-dynamic-api` for the backend/admin showcase, `--with-dynamic-api-vue` for a Vue/Vite frontend scaffold, or `--with-dynamic-api-react` for a React/Vite frontend scaffold served from `/`.
 
-See `doc/schema_driven_dynamic_api.md`, `doc/dynamic_api_vue_app_template.md` and `example/schema_driven_backend`.
+See `doc/schema_driven_dynamic_api.md`, `doc/dynamic_api_vue_app_template.md`, `doc/dynamic_api_react_app_template.md` and `example/schema_driven_backend`.
 
 ## Framework
 
@@ -81,13 +82,14 @@ Schema-driven Dynamic API application created with:
 
 ![Qornix dynamic API generated app](doc/assets/qornix_dynamyc_api_app_snap.png)
 
-Schema-driven Dynamic API + Vue application created with:
+Schema-driven Dynamic API + Vue or React applications created with:
 
 ```bash
 ./create_new_project.sh ../my_vue_app --with-dynamic-api-vue
+./create_new_project.sh ../my_react_app --with-dynamic-api-react
 ```
 
-This template keeps the Dynamic API backend, moves backend/admin pages under `/backend/*`, serves Vue at `/`, provides `/backend-admin` as a developer dashboard and builds the frontend into the deploy bundle.
+These templates keep the Dynamic API backend, move backend/admin pages under `/backend/*`, serve the frontend SPA at `/`, provide `/backend-admin` as a developer dashboard and build the frontend into the deploy bundle.
 
 ## Architecture components
 
@@ -99,6 +101,7 @@ This template keeps the Dynamic API backend, moves backend/admin pages under `/b
 | `templates/app` | Default new-application template |
 | `templates/dynamic_api_app` | Schema-driven Dynamic API backend/admin template |
 | `templates/dynamic_api_vue_app` | Schema-driven Dynamic API + Vue/Vite frontend template |
+| `templates/dynamic_api_react_app` | Schema-driven Dynamic API + React/Vite frontend template |
 | `create_new_project.sh` | Standalone application generator |
 | `doc/qornix_create_new_app_instruction.md` | Detailed application creation guide |
 | `doc/roadmap_step_by_step_example.md` | Step-by-step application example based on the framework |
@@ -280,8 +283,10 @@ Available generation modes:
 | `./create_new_project.sh ../my_app` | `templates/app` | Default C++ web application. |
 | `./create_new_project.sh ../my_api --with-dynamic-api` | `templates/dynamic_api_app` | Schema-driven Dynamic API backend/admin application. |
 | `./create_new_project.sh ../my_vue --with-dynamic-api-vue` | `templates/dynamic_api_vue_app` | Dynamic API backend plus Vue/Vite frontend scaffold. |
+| `./create_new_project.sh ../my_react --with-dynamic-api-react` | `templates/dynamic_api_react_app` | Dynamic API backend plus React/Vite frontend scaffold. |
 | `./create_new_project.sh ../my_api --template dynamic-api` | `templates/dynamic_api_app` | Explicit alias for the Dynamic API template. |
 | `./create_new_project.sh ../my_vue --template dynamic-api-vue` | `templates/dynamic_api_vue_app` | Explicit alias for the Vue template. |
+| `./create_new_project.sh ../my_react --template dynamic-api-react` | `templates/dynamic_api_react_app` | Explicit alias for the React template. |
 
 It performs the following actions:
 
@@ -304,9 +309,11 @@ Examples:
 ./create_new_project.sh ../my_api --with-dynamic-api
 ./create_new_project.sh ../my_vue --with-dynamic-api-vue
 ./create_new_project.sh ../my_vue --template dynamic-api-vue
+./create_new_project.sh ../my_react --with-dynamic-api-react
+./create_new_project.sh ../my_react --template dynamic-api-react
 ```
 
-The Vue template requires `npm` during CMake build because it compiles the frontend production bundle with Vite.
+The Vue and React templates require `npm` during CMake build because they compile the frontend production bundle with Vite.
 
 The recommended option is to create the application next to the framework:
 

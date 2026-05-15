@@ -8,6 +8,15 @@
 
 # Changelog
 
+
+## Dynamic API React application template
+
+- Added the new `templates/dynamic_api_react_app` scaffold for generated applications that combine the existing Dynamic API backend with a React/Vite frontend.
+- Added generator options `--with-dynamic-api-react` and `--template dynamic-api-react`, including aliases for `dynamic_api_react` and `dynamic_api_react_app`.
+- The generated React template serves the SPA at `/`, keeps backend tools under `/backend/*`, and includes a `/backend-admin` developer dashboard.
+- Integrated frontend production build into the normal CMake build and deploy bundle flow.
+- Updated documentation to describe the React template alongside the existing Vue template.
+
 ## Dynamic API Vue application template
 
 - Added the new `templates/dynamic_api_vue_app` scaffold for generated applications that combine the existing Dynamic API backend with a Vue/Vite frontend.

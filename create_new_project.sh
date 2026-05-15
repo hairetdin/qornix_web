@@ -10,17 +10,21 @@ Qornix Web application generator
 Usage:
   ./create_new_project.sh <project_name_or_path> [--with-dynamic-api]
   ./create_new_project.sh <project_name_or_path> [--with-dynamic-api-vue]
+  ./create_new_project.sh <project_name_or_path> [--with-dynamic-api-react]
   ./create_new_project.sh <project_name_or_path> --template dynamic-api
   ./create_new_project.sh <project_name_or_path> --template dynamic-api-vue
+  ./create_new_project.sh <project_name_or_path> --template dynamic-api-react
 
 Examples:
   ./create_new_project.sh ../my_api
   ./create_new_project.sh my_api
   ./create_new_project.sh ../my_api --with-dynamic-api-vue
+  ./create_new_project.sh ../my_api --with-dynamic-api-react
 
 The generated application links to qornix::web_core and does not copy framework sources.
 Use --with-dynamic-api to generate a Schema-driven Dynamic API application.
 Use --with-dynamic-api-vue to generate a Schema-driven Dynamic API application with a Vue/Vite frontend scaffold.
+Use --with-dynamic-api-react to generate a Schema-driven Dynamic API application with a React/Vite frontend scaffold.
 USAGE
 }
 
@@ -86,17 +90,20 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --with-dynamic-api) template_name="dynamic_api_app" ;;
         --with-dynamic-api-vue) template_name="dynamic_api_vue_app" ;;
+        --with-dynamic-api-react) template_name="dynamic_api_react_app" ;;
         --template)
             shift || fail "--template requires a value"
             case "${1:-}" in
                 dynamic-api|dynamic_api|dynamic_api_app) template_name="dynamic_api_app" ;;
                 dynamic-api-vue|dynamic_api_vue|dynamic_api_vue_app) template_name="dynamic_api_vue_app" ;;
+                dynamic-api-react|dynamic_api_react|dynamic_api_react_app) template_name="dynamic_api_react_app" ;;
                 app|default) template_name="app" ;;
                 *) fail "Unknown template: $1" ;;
             esac
             ;;
         --template=dynamic-api|--template=dynamic_api|--template=dynamic_api_app) template_name="dynamic_api_app" ;;
         --template=dynamic-api-vue|--template=dynamic_api_vue|--template=dynamic_api_vue_app) template_name="dynamic_api_vue_app" ;;
+        --template=dynamic-api-react|--template=dynamic_api_react|--template=dynamic_api_react_app) template_name="dynamic_api_react_app" ;;
         --template=app|--template=default) template_name="app" ;;
         *) fail "Unknown option: $1" ;;
     esac
@@ -191,7 +198,7 @@ echo "  docker run --rm -p 8008:8008 $(basename "$project_name"):runtime"
 echo ""
 echo "Open in browser:"
 echo "  http://127.0.0.1:8008/"
-if [ "$template_name" = "dynamic_api_vue_app" ]; then
+if [ "$template_name" = "dynamic_api_vue_app" ] || [ "$template_name" = "dynamic_api_react_app" ]; then
     echo "  http://127.0.0.1:8008/backend-admin"
     echo "  http://127.0.0.1:8008/backend/schema-manager"
     echo "  http://127.0.0.1:8008/api/dynamic/openapi.json"
