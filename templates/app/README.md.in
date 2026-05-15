@@ -209,12 +209,13 @@ server.get_async("/async/sleep/{ms}", makeAsyncSleepHandler());
 Use async handlers for timers, database calls, network calls and any operation that would otherwise block an `io_context` worker thread. Keep sync handlers for cheap CPU-only or static responses.
 
 
-## Dynamic API + React template
+## Dynamic API frontend templates
 
-For the same Dynamic API backend with a React/Vite frontend scaffold, use:
+For the same Dynamic API backend with a frontend scaffold, use either React or Angular:
 
 ```bash
 ./create_new_project.sh ../my_react --with-dynamic-api-react
+./create_new_project.sh ../my_angular --with-dynamic-api-angular
 ```
 
-See `dynamic_api_react_app_template.md` for the React template guide.
+See `dynamic_api_react_app_template.md` for React and `dynamic_api_angular_app_template.md` for Angular.

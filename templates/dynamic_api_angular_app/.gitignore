@@ -1,0 +1,6 @@
+build/
+logs/
+*.sqlite3
+backend/schema/schema_history.jsonl
+frontend/node_modules/
+frontend/dist/

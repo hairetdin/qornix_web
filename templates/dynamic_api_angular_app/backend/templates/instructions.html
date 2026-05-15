@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qornix Web - next steps</title>
+  <link rel="stylesheet" href="/static/dynamic_api.css">
+</head>
+<body>
+<div class="qdx-shell">
+  <header class="qdx-topbar">
+    <a class="qdx-brand" href="/backend"><span class="qdx-brand-mark">Qx</span><span><strong>Qornix Web</strong><small>Quick start</small></span></a>
+    <nav class="qdx-nav">
+      <a href="/backend">Home</a><a href="/backend/schema-manager">Schema Manager</a><a href="/backend/query-builder">Query Builder</a><a href="/backend/table">Table Browser</a><a href="/backend/api-playground">API Playground</a><a href="/backend/docs">Docs</a>
+    </nav>
+  </header>
+
+  <section class="qdx-card qdx-page-intro">
+    <p class="qdx-kicker">Recommended workflow</p>
+    <h1>Turn the generated template into a real schema-driven application</h1>
+    <p class="qdx-lead">The generated app now exposes the full demo path: a bundled XML schema, schema management, query building, table browsing, row editing, recipes and OpenAPI docs.</p>
+  </section>
+
+  <section class="qdx-timeline">
+    <article class="qdx-card qdx-step"><div class="qdx-step-num">1</div><div><h2>Model your domain</h2><p>Start with <code>schema/app.schema.xml</code> or click <strong>Load demo schema</strong> in Schema Manager. The bundled schema creates <code>categories</code>, <code>customers</code>, <code>products</code> and <code>orders</code>.</p></div></article>
+    <article class="qdx-card qdx-step"><div class="qdx-step-num">2</div><div><h2>Validate and plan</h2><p>Open <a href="/backend/schema-manager">Schema Manager</a>, click <strong>Load demo schema</strong>, then run <strong>Validate</strong>, <strong>Diff</strong>, <strong>Plan</strong> and <strong>Apply live plan</strong>. Leave <strong>Only dry-run</strong> unchecked when you want the database to change.</p></div></article>
+    <article class="qdx-card qdx-step"><div class="qdx-step-num">3</div><div><h2>Explore requests visually</h2><p>Open <a href="/backend/query-builder">Query Builder</a> to select tables and fields from metadata, add filters and copy the JSON payload for a frontend.</p></div></article>
+    <article class="qdx-card qdx-step"><div class="qdx-step-num">4</div><div><h2>Browse and edit data</h2><p>Open <a href="/backend/table">Table Browser</a>. Click a row id to open <code>/backend/table/{table}/{id}</code> and update the record inline.</p></div></article>
+    <article class="qdx-card qdx-step"><div class="qdx-step-num">5</div><div><h2>Integrate clients</h2><p>Use <a href="/backend/docs/schema">/docs/schema</a>, <a href="/backend/docs/query-syntax">/docs/query-syntax</a>, <a href="/backend/docs">/docs</a>, <a href="/api/dynamic/openapi.json" target="_blank" rel="noreferrer">/api/dynamic/openapi.json</a> and <a href="/backend/api-playground">API Playground</a> for schema and API integration examples.</p></div></article>
+  </section>
+
+  <section class="qdx-grid qdx-grid-2">
+    <article class="qdx-card"><h2>Useful files</h2><ul class="qdx-list"><li><code>routes.h</code> - app route registration</li><li><code>schema/app.schema.xml</code> - desired model</li><li><code>templates/*.html</code> - pages</li><li><code>static/dynamic_api.css</code> - shared style</li><li><code>static/dynamic_api_browser.js</code> - query, table, docs and wizard behavior</li><li><code>static/schema_manager.js</code> - schema manager behavior</li></ul></article>
+    <article class="qdx-card"><h2>Useful URLs</h2><div class="qdx-endpoints"><a href="/backend/schema-manager">GET /backend/schema-manager</a><a href="/backend/query-builder">GET /backend/query-builder</a><a href="/backend/table">GET /backend/table</a><a href="/backend/api-playground">GET /backend/api-playground</a><a href="/backend/docs">GET /backend/docs</a><a href="/backend/docs/schema">GET /backend/docs/schema</a><a href="/backend/docs/query-syntax">GET /backend/docs/query-syntax</a><a href="/api/dynamic/meta/tables" target="_blank" rel="noreferrer">GET /api/dynamic/meta/tables</a></div></article>
+  </section>
+
+  <footer class="qdx-footer"><span>Ready to explore?</span><a href="/backend/query-builder">Open Query Builder</a></footer>
+</div>
+</body>
+</html>

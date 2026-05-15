@@ -1,5 +1,13 @@
 # Async gate documentation/template synchronization
 
+
+## Dynamic API Angular application template
+
+- Added the new `templates/dynamic_api_angular_app` scaffold for generated applications that combine the existing Dynamic API backend with an Angular frontend.
+- Added generator options `--with-dynamic-api-angular` and `--template dynamic-api-angular`, including aliases for `dynamic_api_angular`, `dynamic_api_angular_app` and `angular-dynamic-api`.
+- Added Angular starter pages for `/`, `/backend-admin` and `/project-structure`, while preserving backend tools under `/backend/*` and Dynamic API under `/api/dynamic/*`.
+- Added Angular template documentation and roadmap/changelog tracking files.
+
 - Added `doc/project_doc/roadmap_async_gate.md` and `doc/project_doc/roadmap_async_gate_changelog.md` as the release gate source of truth for the async branch.
 - Synchronized active Boost requirements to Boost 1.83 in root, ORM, Auth and RAG CMake files.
 - Expanded `qornix_orm` documentation for standalone usage, async DB API, configuration and tests.
