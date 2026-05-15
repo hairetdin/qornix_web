@@ -149,3 +149,15 @@ Current boundary:
 - sync-compatible: schema manager, metadata, OpenAPI and schema management services.
 
 Do not describe the Dynamic API as fully async end-to-end until metadata/schema management paths are migrated and validated as async too.
+
+
+## Dynamic API frontend templates
+
+For the same Dynamic API backend with a frontend scaffold, use either React or Angular:
+
+```bash
+./create_new_project.sh ../my_react --with-dynamic-api-react
+./create_new_project.sh ../my_angular --with-dynamic-api-angular
+```
+
+See `dynamic_api_react_app_template.md` for React and `dynamic_api_angular_app_template.md` for Angular.

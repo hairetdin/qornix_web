@@ -1,0 +1,250 @@
+# @PROJECT_NAME@
+
+Generated Qornix Web application with Schema-driven Dynamic API backend and a React/Vite frontend scaffold.
+
+This template keeps the existing `qornix_dynamic_api` backend behavior and adds a normal React application on top of it. The generated backend is ready for frontend development: it exposes Dynamic API endpoints, OpenAPI JSON and the legacy backend/debug pages, while the React app is served at `/` in production.
+
+## What this template gives you
+
+- Ready C++ backend linked to `qornix::web_core` and `qornix::dynamic_api`.
+- Schema-driven Dynamic API under `/api/dynamic/*`.
+- Existing backend/admin/debug pages moved under `/backend/*`.
+- React/Vite frontend scaffold under `frontend/`.
+- React home page at `/`.
+- React backend hub at `/backend-admin`.
+- React project structure page at `/project-structure` with archive download.
+- Frontend production build copied into the backend deploy bundle during `cmake --build .`.
+- Clear extension points for custom high-performance C++ backend handlers and routes.
+
+The generated backend is a normal Qornix Web application, not a closed generated artifact. Use the Dynamic API for standard data access, then add your own C++ handlers and routes when the product needs custom operations, integrations, reports, imports or performance-sensitive business logic.
+
+The XML-driven UI constructor is intentionally not implemented in this first scaffold. Projects that need it can build that feature inside the React app later.
+
+## Project layout
+
+```text
+@PROJECT_NAME@/
+├── CMakeLists.txt
+├── README.md
+├── runtime-Dockerfile
+├── backend/
+│   ├── main.cpp
+│   ├── routes.h
+│   ├── config.yaml
+│   ├── handlers/
+│   ├── templates/
+│   ├── static/
+│   ├── schema/
+│   └── doc/
+└── frontend/
+    ├── package.json
+    ├── vite.config.ts
+    ├── index.html
+    └── src/
+```
+
+## Backend build and run
+
+```bash
+mkdir -p build
+cd build
+cmake ..
+cmake --build .
+```
+
+The build creates the executable and a portable deploy bundle:
+
+```text
+build/@PROJECT_NAME@
+build/deploy/@PROJECT_NAME@/
+```
+
+Run from the deploy bundle:
+
+```bash
+cd build/deploy/@PROJECT_NAME@
+./@PROJECT_NAME@
+```
+
+Open:
+
+```text
+http://127.0.0.1:8008/
+http://127.0.0.1:8008/backend-admin
+http://127.0.0.1:8008/project-structure
+```
+
+## Frontend development
+
+Start the backend first, then use Vite in `frontend/`:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The dev server proxies backend paths to `http://127.0.0.1:8008`:
+
+```text
+/api/*
+/backend/*
+/static/*
+/health
+```
+
+Frontend code can use relative paths such as:
+
+```ts
+fetch('/api/dynamic/meta/tables')
+```
+
+## Production frontend build
+
+The normal CMake build also builds the React frontend:
+
+```text
+cmake --build .
+```
+
+CMake runs these commands in `frontend/`:
+
+```bash
+npm install
+npm run build
+```
+
+Then it copies `frontend/dist` into the deploy bundle as `frontend/`.
+
+`npm` is required for this template. If `npm` is not available, CMake fails with a clear error.
+
+## Deploy bundle layout
+
+```text
+build/deploy/@PROJECT_NAME@/
+├── @PROJECT_NAME@
+├── config.yaml
+├── README.md
+├── backend/
+│   ├── templates/
+│   ├── static/
+│   ├── schema/
+│   └── doc/
+├── frontend/
+│   ├── index.html
+│   └── assets/
+└── logs/
+```
+
+The app discovers its root at runtime from `QORNIX_APP_ROOT`, the executable location, the current working directory and the compile-time source directory fallback. For normal use, run from `build/deploy/@PROJECT_NAME@`.
+
+## Routes
+
+```text
+GET /                              React home page
+GET /backend-admin                 React backend hub page
+GET /project-structure             React project structure browser and archive download page
+GET /assets/{filename}             React build assets
+GET /backend                       legacy Dynamic API landing page
+GET /backend/schema-manager        Schema Manager UI
+GET /backend/query-builder         visual structured query builder
+GET /backend/table                 table browser
+GET /backend/table/{table}/{id}    row view with inline update/delete
+GET /backend/api-playground        Dynamic API recipes
+GET /backend/docs                  lightweight OpenAPI viewer
+GET /backend/docs/schema           schema guide
+GET /backend/docs/query-syntax     query syntax guide
+GET /backend/instructions          generated app quick start
+GET /static/{filename}             legacy backend page assets
+GET /health                        JSON health endpoint
+GET /api/project/structure         JSON project directory listing for /project-structure
+GET /api/project/archive           compressed project snapshot download
+GET /api/dynamic/openapi.json      raw OpenAPI document
+GET /api/dynamic/meta/tables       Dynamic API metadata
+```
+
+
+## Extending the backend
+
+The generated backend is built on Qornix Web:
+
+```text
+https://github.com/hairetdin/qornix_web
+```
+
+Use the generated Dynamic API first for CRUD, metadata, query and OpenAPI-driven frontend work. When generic endpoints are not enough, add custom C++ logic in the backend application:
+
+```text
+backend/handlers/      reusable request handlers and business operations
+backend/routes.h       route registration for additional endpoints
+/api/operations/*      recommended namespace for custom product actions
+```
+
+Good candidates for custom C++ handlers:
+
+- domain operations that are not simple CRUD;
+- imports, exports and report generation;
+- integrations with external services;
+- validation workflows and business rules;
+- performance-sensitive backend logic.
+
+This keeps the frontend simple: React calls generated endpoints for normal data access and calls custom backend endpoints only for product-specific workflows.
+
+## Useful frontend documentation
+
+- React guide: https://react.dev/learn
+- React Router: https://reactrouter.com/start/declarative/installation
+- Vite guide: https://vite.dev/guide/
+- Vite plugins: https://vite.dev/plugins/
+- Zustand, optional state management: https://zustand-demo.pmnd.rs/
+
+## Recommended first run
+
+1. Open `/backend-admin` to see quick start commands and useful backend links.
+2. Open `/project-structure` to inspect the generated layout and download a project snapshot.
+3. Open `/backend/schema-manager`.
+4. Click `Load demo schema`, then run `Validate -> Diff -> Plan -> Apply live plan`.
+5. Open `/backend/table`, `/backend/query-builder` or `/backend/api-playground`.
+6. Start editing the React app in `frontend/src`.
+
+## Runtime Docker image
+
+Build the app first:
+
+```bash
+mkdir -p build
+cmake -S . -B build
+cmake --build build --target @PROJECT_NAME@_deploy
+docker build -f runtime-Dockerfile -t @PROJECT_NAME@:runtime .
+```
+
+Run:
+
+```bash
+docker run --rm -p 8008:8008 @PROJECT_NAME@:runtime
+```
+
+The image stores application files in `/app`, data in `/data` and file logs in `/logs`. For persistent SQLite data and logs, use named volumes:
+
+```bash
+docker volume create @PROJECT_NAME@_data
+docker volume create @PROJECT_NAME@_logs
+docker run -d --name @PROJECT_NAME@ \
+  -p 8008:8008 \
+  -v @PROJECT_NAME@_data:/data \
+  -v @PROJECT_NAME@_logs:/logs \
+  @PROJECT_NAME@:runtime
+```
+
+## Future direction
+
+A later project-specific iteration can turn this scaffold into an XML-driven frontend constructor:
+
+- UI XML schema files.
+- Dynamic navigation.
+- Generated list/detail pages.
+- Relation tabs.
+- Editable forms.
+- Backend operation buttons.
+
+That work remains optional because many projects only need a conventional React frontend over the generated backend API.

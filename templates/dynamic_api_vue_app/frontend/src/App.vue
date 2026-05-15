@@ -11,6 +11,7 @@
       <nav class="nav-links" aria-label="Main navigation">
         <RouterLink to="/">Home</RouterLink>
         <RouterLink to="/backend-admin">Backend Admin</RouterLink>
+        <a href="/project-structure">Project Structure</a>
         <a href="/api/dynamic/openapi.json" target="_blank" rel="noreferrer">OpenAPI</a>
       </nav>
     </header>

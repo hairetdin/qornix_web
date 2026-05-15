@@ -124,7 +124,7 @@ private:
         std::ostringstream html;
         html << R"HTML(<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>)HTML"
              << escapeHtml(title)
-             << R"HTML( · @PROJECT_NAME@</title><link rel="stylesheet" href="/static/app.css"></head><body><div class="qx-shell"><header class="qx-topbar"><a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Documentation</small></span></a><nav class="qx-nav"><a href="/">Home</a><a href="/docs">Docs</a><a href="/health">Health</a></nav></header><article class="qx-card qx-markdown-doc"><h1>)HTML"
+             << R"HTML( · @PROJECT_NAME@</title><link rel="stylesheet" href="/static/app.css"></head><body><div class="qx-shell"><header class="qx-topbar"><a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Documentation</small></span></a><nav class="qx-nav"><a href="/">Home</a><a href="/project-structure">Project Structure</a><a href="/docs">Docs</a><a href="/health">Health</a></nav></header><article class="qx-card qx-markdown-doc"><h1>)HTML"
              << escapeHtml(title)
              << "</h1><p>" << escapeHtml(body)
              << R"HTML(</p><div class="qx-actions"><a class="qx-btn" href="/docs">Back to docs</a></div></article></div></body></html>)HTML";

@@ -79,6 +79,33 @@ Use this variant when you want a ready Dynamic API backend and a Vue/Vite fronte
 
 This is the recommended starting point when a backend developer wants to hand a working API environment to a frontend developer.
 
+### Schema-driven Dynamic API + React application
+
+Generate it with:
+
+```bash
+./create_new_project.sh ../my_react --with-dynamic-api-react
+./create_new_project.sh ../my_angular --with-dynamic-api-angular
+```
+
+Equivalent explicit template form:
+
+```bash
+./create_new_project.sh ../my_react --template dynamic-api-react
+./create_new_project.sh ../my_angular --template dynamic-api-angular
+```
+
+It uses the template:
+
+```text
+templates/dynamic_api_react_app
+templates/dynamic_api_angular_app
+```
+
+Use this variant when you want a ready Dynamic API backend and a React/Vite frontend scaffold in the same generated project. The backend keeps the existing Dynamic API behavior, serves React at `/`, moves backend/admin pages under `/backend/*`, exposes `/backend-admin` as a frontend developer hub and builds the frontend into the deploy bundle during `cmake --build .`.
+
+This is the recommended starting point when a backend developer wants to hand a working API environment to a frontend developer.
+
 ## 2. Recommended workspace structure
 
 A new application does not copy framework sources into itself. It links `qornix_web` through CMake.
@@ -155,7 +182,7 @@ my_app/
 The script:
 
 1. validates the project name;
-2. chooses the template: `templates/app`, `templates/dynamic_api_app` or `templates/dynamic_api_vue_app`;
+2. chooses the template: `templates/app`, `templates/dynamic_api_app`, `templates/dynamic_api_vue_app`, `templates/dynamic_api_react_app` or `templates/dynamic_api_angular_app`;
 3. copies the template to the new directory;
 4. substitutes `@PROJECT_NAME@`, `@PROJECT_NAME_UPPER@` and `@QORNIX_WEB_ROOT@`;
 5. creates the `logs` directory;
@@ -170,11 +197,15 @@ The script:
 | no option | `templates/app` | Default C++ web application. |
 | `--with-dynamic-api` | `templates/dynamic_api_app` | Dynamic API backend/admin application. |
 | `--with-dynamic-api-vue` | `templates/dynamic_api_vue_app` | Dynamic API backend plus Vue/Vite frontend. |
+| `--with-dynamic-api-react` | `templates/dynamic_api_react_app` | Dynamic API backend plus React/Vite frontend. |
+| `--with-dynamic-api-angular` | `templates/dynamic_api_angular_app` | Dynamic API backend plus Angular frontend. |
 | `--template app` or `--template default` | `templates/app` | Explicit default template. |
 | `--template dynamic-api` | `templates/dynamic_api_app` | Explicit Dynamic API template. |
 | `--template dynamic-api-vue` | `templates/dynamic_api_vue_app` | Explicit Dynamic API + Vue template. |
+| `--template dynamic-api-react` | `templates/dynamic_api_react_app` | Explicit Dynamic API + React template. |
+| `--template dynamic-api-angular` | `templates/dynamic_api_angular_app` | Explicit Dynamic API + Angular template. |
 
-The Vue template requires `npm` during CMake build. The generated frontend can also be developed with the normal Vite workflow from the `frontend/` directory.
+The Vue and React templates require `npm` during CMake build. The generated frontend can also be developed with the normal Vite workflow from the `frontend/` directory.
 
 ## 7. Portable deploy bundle
 

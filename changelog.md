@@ -1,5 +1,13 @@
 # Async gate documentation/template synchronization
 
+
+## Dynamic API Angular application template
+
+- Added the new `templates/dynamic_api_angular_app` scaffold for generated applications that combine the existing Dynamic API backend with an Angular frontend.
+- Added generator options `--with-dynamic-api-angular` and `--template dynamic-api-angular`, including aliases for `dynamic_api_angular`, `dynamic_api_angular_app` and `angular-dynamic-api`.
+- Added Angular starter pages for `/`, `/backend-admin` and `/project-structure`, while preserving backend tools under `/backend/*` and Dynamic API under `/api/dynamic/*`.
+- Added Angular template documentation and roadmap/changelog tracking files.
+
 - Added `doc/project_doc/roadmap_async_gate.md` and `doc/project_doc/roadmap_async_gate_changelog.md` as the release gate source of truth for the async branch.
 - Synchronized active Boost requirements to Boost 1.83 in root, ORM, Auth and RAG CMake files.
 - Expanded `qornix_orm` documentation for standalone usage, async DB API, configuration and tests.
@@ -7,6 +15,15 @@
 - Added project-level async documentation audit and dependency matrix.
 
 # Changelog
+
+
+## Dynamic API React application template
+
+- Added the new `templates/dynamic_api_react_app` scaffold for generated applications that combine the existing Dynamic API backend with a React/Vite frontend.
+- Added generator options `--with-dynamic-api-react` and `--template dynamic-api-react`, including aliases for `dynamic_api_react` and `dynamic_api_react_app`.
+- The generated React template serves the SPA at `/`, keeps backend tools under `/backend/*`, and includes a `/backend-admin` developer dashboard.
+- Integrated frontend production build into the normal CMake build and deploy bundle flow.
+- Updated documentation to describe the React template alongside the existing Vue template.
 
 ## Dynamic API Vue application template
 
@@ -124,3 +141,18 @@ Highlights from the reference run:
 - Added Dynamic API template `/health` route for generated-app smoke tests.
 - Added Dynamic API template async DB health route `/api/dynamic/async-db/health` for builds with `QORNIX_ENABLE_ASYNC_DB=ON`.
 - Added a qornix_orm standalone consumer sample and gate validation reports.
+
+## Dynamic API React template follow-up
+
+- Added a React `Project Structure` page to the generated Dynamic API React template.
+- Added a top navigation entry for `/project-structure`.
+- Added a visual generated-project tree covering `backend/`, `frontend/` and `build/deploy/<app>/`.
+- Added a local project archive download endpoint at `/api/project/archive`.
+- Updated React template documentation and roadmap notes for the new project-structure/download workflow.
+
+## Project structure browser for generated templates
+
+- Promoted the project structure/archive service to the framework include layer.
+- Added `/project-structure`, `/api/project/structure` and `/api/project/archive` to generated templates.
+- Added Project Structure navigation links to default, Dynamic API, Dynamic API Vue and Dynamic API React template outputs.
+- Kept route files focused on route registration by moving project browsing/archive logic into handlers and a reusable service.

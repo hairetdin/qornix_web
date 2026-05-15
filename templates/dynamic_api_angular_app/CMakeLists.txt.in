@@ -1,0 +1,65 @@
+cmake_minimum_required(VERSION 3.20)
+project(@PROJECT_NAME@ LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(QORNIX_WEB_ROOT "@QORNIX_WEB_ROOT@" CACHE PATH "Path to Qornix Web framework root")
+set(QORNIX_BUILD_APP OFF CACHE BOOL "" FORCE)
+set(QORNIX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(QORNIX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(QORNIX_ENABLE_ORM ON CACHE BOOL "" FORCE)
+set(QORNIX_ENABLE_ASYNC_DB ON CACHE BOOL "" FORCE)
+set(QORNIX_BUILD_DYNAMIC_API ON CACHE BOOL "" FORCE)
+
+add_subdirectory("${QORNIX_WEB_ROOT}" "${CMAKE_BINARY_DIR}/_deps/qornix_web")
+
+add_executable(@PROJECT_NAME@ backend/main.cpp)
+target_link_libraries(@PROJECT_NAME@ PRIVATE qornix::web_core qornix::dynamic_api)
+target_include_directories(@PROJECT_NAME@ PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/backend
+)
+target_compile_definitions(@PROJECT_NAME@ PRIVATE
+    @PROJECT_NAME_UPPER@_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+set(@PROJECT_NAME_UPPER@_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy/@PROJECT_NAME@" CACHE PATH "Deploy directory for @PROJECT_NAME@")
+
+find_program(NPM_EXECUTABLE npm)
+if(NOT NPM_EXECUTABLE)
+    message(FATAL_ERROR "npm is required to build the Angular frontend for the dynamic_api_angular_app template")
+endif()
+
+add_custom_target(@PROJECT_NAME@_frontend_build ALL
+    COMMAND ${CMAKE_COMMAND} -E env NG_CLI_ANALYTICS=false ${NPM_EXECUTABLE} install
+    COMMAND ${CMAKE_COMMAND} -E env NG_CLI_ANALYTICS=false ${NPM_EXECUTABLE} run build
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/frontend"
+    COMMENT "Building Angular frontend for @PROJECT_NAME@"
+    VERBATIM
+)
+
+add_custom_target(@PROJECT_NAME@_deploy ALL
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/logs"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:@PROJECT_NAME@>" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/backend/config.yaml" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/config.yaml"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/README.md" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/README.md"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/backend/templates" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/backend/templates"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/backend/static" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/backend/static"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/backend/schema" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/backend/schema"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/backend/doc" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/backend/doc"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/frontend"
+    DEPENDS @PROJECT_NAME@ @PROJECT_NAME@_frontend_build
+    COMMENT "Assembling portable deploy bundle: ${@PROJECT_NAME_UPPER@_DEPLOY_DIR}"
+)
+
+install(TARGETS @PROJECT_NAME@ RUNTIME DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/backend/config.yaml" DESTINATION .)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/backend/templates" DESTINATION backend)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/backend/static" DESTINATION backend)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/backend/schema" DESTINATION backend)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/backend/doc" DESTINATION backend)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist/" DESTINATION frontend)
