@@ -1,0 +1,28 @@
+{
+  "name": "@PROJECT_NAME@-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "NG_CLI_ANALYTICS=false ng serve --host 127.0.0.1 --port 5175",
+    "build": "NG_CLI_ANALYTICS=false ng build",
+    "preview": "npx http-server dist -p 4175"
+  },
+  "dependencies": {
+    "@angular/animations": "^19.0.0",
+    "@angular/common": "^19.0.0",
+    "@angular/compiler": "^19.0.0",
+    "@angular/core": "^19.0.0",
+    "@angular/forms": "^19.0.0",
+    "@angular/platform-browser": "^19.0.0",
+    "@angular/router": "^19.0.0",
+    "rxjs": "^7.8.1",
+    "tslib": "^2.8.1",
+    "zone.js": "^0.15.0"
+  },
+  "devDependencies": {
+    "@angular/build": "^19.0.0",
+    "@angular/cli": "^19.0.0",
+    "@angular/compiler-cli": "^19.0.0",
+    "typescript": "~5.6.3"
+  }
+}

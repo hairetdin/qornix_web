@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qornix Dynamic API Query Syntax</title>
+  <link rel="stylesheet" href="/static/dynamic_api.css">
+</head>
+<body data-qdb-page="query-syntax">
+<div class="qdx-shell">
+  <header class="qdx-topbar">
+    <a class="qdx-brand" href="/backend"><span class="qdx-brand-mark">Qx</span><span><strong>Qornix Web</strong><small>Query Syntax</small></span></a>
+    <nav class="qdx-nav">
+      <a href="/backend">Home</a><a href="/backend/schema-manager">Schema Manager</a><a href="/backend/query-builder">Query Builder</a><a href="/backend/table">Table Browser</a><a href="/backend/api-playground">API Playground</a><a href="/backend/docs">Docs</a>
+    </nav>
+  </header>
+
+  <section class="qdx-card qdx-page-intro">
+    <p class="qdx-kicker">Text specification</p>
+    <h1>Dynamic API Query Syntax</h1>
+    <p class="qdx-lead">A human-readable specification of the current Qornix Dynamic API query contract. Use this page when you need to understand the JSON payload shape without reading JavaScript or C++ code.</p>
+    <div class="qdx-actions-row"><a class="qdx-btn" href="/backend/query-builder">Open Query Builder</a><a class="qdx-btn qdx-btn-secondary" href="/backend/api-playground">Run API recipes</a><a class="qdx-btn qdx-btn-secondary" href="/static/dynamic_api_query_syntax.md" target="_blank" rel="noreferrer">Raw Markdown</a></div>
+  </section>
+
+  <section class="qdb-doc-layout">
+    <aside class="qdx-card qdb-doc-toc">
+      <h2>Contents</h2>
+      <nav><a class="qdb-doc-toc-level-2" href="#1-what-this-api-is-for">1. What this API is for</a>
+<a class="qdb-doc-toc-level-2" href="#2-canonical-endpoints">2. Canonical endpoints</a>
+<a class="qdb-doc-toc-level-3" href="#metadata-endpoints">Metadata endpoints</a>
+<a class="qdb-doc-toc-level-3" href="#data-endpoints">Data endpoints</a>
+<a class="qdb-doc-toc-level-3" href="#schema-endpoints">Schema endpoints</a>
+<a class="qdb-doc-toc-level-2" href="#3-response-envelope">3. Response envelope</a>
+<a class="qdb-doc-toc-level-2" href="#4-request-envelope">4. Request envelope</a>
+<a class="qdb-doc-toc-level-2" href="#5-query-object-fields">5. Query object fields</a>
+<a class="qdb-doc-toc-level-2" href="#6-metadata-first-discover-tables-and-fields">6. Metadata first: discover tables and fields</a>
+<a class="qdb-doc-toc-level-3" href="#list-tables">List tables</a>
+<a class="qdb-doc-toc-level-3" href="#list-field-names">List field names</a>
+<a class="qdb-doc-toc-level-3" href="#field-policy-metadata">Field policy metadata</a>
+<a class="qdb-doc-toc-level-3" href="#full-allowlist">Full allowlist</a>
+<a class="qdb-doc-toc-level-2" href="#7-reading-rows">7. Reading rows</a>
+<a class="qdb-doc-toc-level-3" href="#simple-table-read">Simple table read</a>
+<a class="qdb-doc-toc-level-3" href="#read-one-row-by-id">Read one row by id</a>
+<a class="qdb-doc-toc-level-3" href="#select-specific-fields">Select specific fields</a>
+<a class="qdb-doc-toc-level-2" href="#8-structured-where">8. Structured where</a>
+<a class="qdb-doc-toc-level-2" href="#9-raw-filter">9. Raw filter</a>
+<a class="qdb-doc-toc-level-2" href="#10-sorting">10. Sorting</a>
+<a class="qdb-doc-toc-level-2" href="#11-limit">11. Limit</a>
+<a class="qdb-doc-toc-level-2" href="#12-join">12. JOIN</a>
+<a class="qdb-doc-toc-level-2" href="#13-group-by-and-having">13. GROUP BY and HAVING</a>
+<a class="qdb-doc-toc-level-2" href="#14-creating-rows">14. Creating rows</a>
+<a class="qdb-doc-toc-level-2" href="#15-updating-rows">15. Updating rows</a>
+<a class="qdb-doc-toc-level-2" href="#16-deleting-rows">16. Deleting rows</a>
+<a class="qdb-doc-toc-level-2" href="#17-table-specific-endpoint-rules">17. Table-specific endpoint rules</a>
+<a class="qdb-doc-toc-level-2" href="#18-identifier-rules">18. Identifier rules</a>
+<a class="qdb-doc-toc-level-2" href="#19-raw-url-query-dsl">19. Raw URL query DSL</a>
+<a class="qdb-doc-toc-level-2" href="#20-configuration-flags-that-affect-this-contract">20. Configuration flags that affect this contract</a>
+<a class="qdb-doc-toc-level-2" href="#21-complete-demo-database-examples">21. Complete demo-database examples</a>
+<a class="qdb-doc-toc-level-3" href="#list-products">List products</a>
+<a class="qdb-doc-toc-level-3" href="#filter-and-sort-products">Filter and sort products</a>
+<a class="qdb-doc-toc-level-3" href="#read-paid-orders-with-product-data">Read paid orders with product data</a>
+<a class="qdb-doc-toc-level-3" href="#create-a-category">Create a category</a>
+<a class="qdb-doc-toc-level-3" href="#create-a-product">Create a product</a>
+<a class="qdb-doc-toc-level-3" href="#patch-a-product-by-id">Patch a product by id</a>
+<a class="qdb-doc-toc-level-3" href="#delete-a-product-by-id">Delete a product by id</a>
+<a class="qdb-doc-toc-level-2" href="#22-recommendations-for-client-code">22. Recommendations for client code</a>
+<a class="qdb-doc-toc-level-2" href="#23-known-current-limitations">23. Known current limitations</a></nav>
+    </aside>
+    <article class="qdx-card qdb-doc-content">
+<h1 id="dynamic-api-query-syntax">Dynamic API Query Syntax</h1>
+<p>This document describes the <strong>current</strong> Qornix Schema-driven Dynamic API query contract implemented by <code>qornix_dynamic_api::DynamicQueryService</code> and the ORM <code>QueryBuilder</code>.</p>
+<p>It intentionally documents the API that exists today, not the future <code>POST /api/dynamic/query</code> contract sketched in older design notes.</p>
+<h2 id="1-what-this-api-is-for">1. What this API is for</h2>
+<p>The Dynamic API lets an application expose CRUD and query endpoints for tables discovered from the current database schema. Every request is checked against a metadata allowlist built from the database schema before SQL is generated.</p>
+<p>Typical flow for a generated <code>--with-dynamic-api</code> app:</p>
+<ol>
+<li>Initialize or apply a schema.</li>
+<li>Inspect available tables and fields through metadata endpoints.</li>
+<li>Send JSON query payloads to <code>/api/dynamic</code> or table-specific endpoints.</li>
+<li>Read the normalized JSON response.</li>
+</ol>
+<h2 id="2-canonical-endpoints">2. Canonical endpoints</h2>
+<p>Assuming the default prefix:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">/api/dynamic</code></pre>
+<h3 id="metadata-endpoints">Metadata endpoints</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">GET /api/dynamic/meta/tables
+GET /api/dynamic/meta/{table}/fields
+GET /api/dynamic/meta/{table}/fields-info
+GET /api/dynamic/meta/allowlist
+GET /api/dynamic/meta/autocomplete?type=tables&amp;q=pro
+GET /api/dynamic/meta/autocomplete?type=fields&amp;table=products&amp;q=pr</code></pre>
+<h3 id="data-endpoints">Data endpoints</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">POST   /api/dynamic
+GET    /api/dynamic/{table}
+POST   /api/dynamic/{table}
+GET    /api/dynamic/{table}/{id}
+PUT    /api/dynamic/{table}/{id}
+PATCH  /api/dynamic/{table}/{id}
+DELETE /api/dynamic/{table}/{id}</code></pre>
+<p><code>POST /api/dynamic</code> is the most flexible endpoint. It accepts a request envelope that can describe read, create, update, patch, and delete operations.</p>
+<p>Table-specific endpoints are convenient shortcuts when the table and/or id are already encoded in the URL.</p>
+<h3 id="schema-endpoints">Schema endpoints</h3>
+<p>These are not query endpoints, but they are part of the generated Dynamic API app:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">GET  /api/dynamic/schema/export
+POST /api/dynamic/schema/validate
+POST /api/dynamic/schema/diff
+POST /api/dynamic/schema/plan
+POST /api/dynamic/schema/apply
+GET  /api/dynamic/schema/history
+GET  /api/dynamic/schema.xml
+GET  /api/dynamic/openapi.json
+GET  /openapi.json</code></pre>
+<h2 id="3-response-envelope">3. Response envelope</h2>
+<p>Most Dynamic API data responses have this shape:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;ok&quot;: true,
+  &quot;message&quot;: &quot;Query executed successfully&quot;,
+  &quot;count&quot;: 2,
+  &quot;data&quot;: [
+    {
+      &quot;id&quot;: &quot;1&quot;,
+      &quot;name&quot;: &quot;Wireless Mouse&quot;
+    }
+  ]
+}</code></pre>
+<p>Fields returned by the database are serialized as strings in the current implementation.</p>
+<p>Error responses have this shape:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;ok&quot;: false,
+  &quot;error&quot;: &quot;table_not_allowed&quot;,
+  &quot;message&quot;: &quot;Table is not allowed by schema metadata: unknown_table&quot;
+}</code></pre>
+<p>Common error codes include:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">table_required
+table_not_allowed
+table_read_forbidden
+table_write_forbidden
+table_delete_forbidden
+field_not_allowed
+field_not_writable
+field_not_filterable
+field_not_sortable
+invalid_json
+invalid_field
+invalid_where
+invalid_filter
+invalid_order
+raw_join_disabled
+raw_query_disabled
+filter_required
+dynamic_query_failed</code></pre>
+<h2 id="4-request-envelope">4. Request envelope</h2>
+<p>The canonical JSON body is:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;method&quot;: &quot;GET&quot;,
+  &quot;table&quot;: &quot;products&quot;,
+  &quot;query&quot;: {
+    &quot;fields&quot;: [&quot;id&quot;, &quot;name&quot;, &quot;price&quot;],
+    &quot;where&quot;: [
+      { &quot;field&quot;: &quot;price&quot;, &quot;op&quot;: &quot;gte&quot;, &quot;value&quot;: 40 }
+    ],
+    &quot;order_by&quot;: [&quot;price DESC&quot;],
+    &quot;limit&quot;: 25
+  },
+  &quot;data&quot;: {
+    &quot;name&quot;: &quot;Wireless Mouse&quot;
+  }
+}</code></pre>
+<p>Top-level fields:</p>
+<p>| Field | Type | Required | Meaning |</p>
+<p>|---|---:|---:|---|</p>
+<p>| <code>method</code> | string | usually | Logical operation: <code>GET</code>, <code>POST</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code>. If omitted on a table-specific endpoint, the HTTP method is used. |</p>
+<p>| <code>table</code> | string | yes, unless URL has <code>{table}</code> | Table to read/write. Must exist in the metadata allowlist. |</p>
+<p>| <code>query</code> | object | no | Read filters, selected fields, sorting, joins, grouping, and limit. |</p>
+<p>| <code>data</code> | object | for writes | Column values for <code>POST</code>, <code>PUT</code>, or <code>PATCH</code>. |</p>
+<p>Recommended rule: <strong>always use the <code>data</code> envelope for writes</strong>. Do not rely on flat JSON bodies such as <code>{ &quot;name&quot;: &quot;x&quot; }</code> for the current Dynamic API service.</p>
+<h2 id="5-query-object-fields">5. Query object fields</h2>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;fields&quot;: [&quot;id&quot;, &quot;name&quot;],
+  &quot;where&quot;: [
+    { &quot;field&quot;: &quot;price&quot;, &quot;op&quot;: &quot;gte&quot;, &quot;value&quot;: 40 }
+  ],
+  &quot;filter&quot;: [&quot;stock&gt;0&quot;],
+  &quot;join&quot;: [&quot;JOIN categories ON products.category_id=categories.id&quot;],
+  &quot;group_by&quot;: [&quot;status&quot;],
+  &quot;having&quot;: [&quot;total_amount&gt;20&quot;],
+  &quot;order_by&quot;: [&quot;price DESC&quot;],
+  &quot;limit&quot;: 25
+}</code></pre>
+<p>| Field | Type | Meaning |</p>
+<p>|---|---:|---|</p>
+<p>| <code>fields</code> | array of strings | SELECT fields. Defaults to <code>*</code> when omitted. |</p>
+<p>| <code>where</code> | array of objects | Preferred structured filters. Each item is <code>{field, op, value}</code>. |</p>
+<p>| <code>filter</code> | array of strings | Raw filter strings, for example <code>&quot;price&gt;=40&quot;</code>. Use sparingly. |</p>
+<p>| <code>join</code> | array of strings | Raw JOIN clauses. Disabled by default unless <code>allowRawJoin=true</code>. |</p>
+<p>| <code>group_by</code> | array of strings | GROUP BY fields. |</p>
+<p>| <code>having</code> | array of strings | HAVING conditions using the same simple filter syntax as <code>filter</code>. |</p>
+<p>| <code>order_by</code> | array of strings | ORDER BY clauses, each requiring <code>FIELD ASC</code> or <code>FIELD DESC</code>. |</p>
+<p>| <code>limit</code> | integer | Result limit. Clamped to <code>1..maxLimit</code>. |</p>
+<h2 id="6-metadata-first-discover-tables-and-fields">6. Metadata first: discover tables and fields</h2>
+<p>Before building UI queries, ask the metadata endpoints what is currently allowed.</p>
+<h3 id="list-tables">List tables</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl &#x27;http://127.0.0.1:8008/api/dynamic/meta/tables?limit=100&amp;offset=0&#x27;</code></pre>
+<p>Example response:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;ok&quot;: true,
+  &quot;message&quot;: &quot;tables loaded&quot;,
+  &quot;tables&quot;: [&quot;categories&quot;, &quot;customers&quot;, &quot;orders&quot;, &quot;products&quot;]
+}</code></pre>
+<p>Query parameters:</p>
+<p>| Parameter | Meaning |</p>
+<p>|---|---|</p>
+<p>| <code>q</code> | Optional case-insensitive prefix filter. |</p>
+<p>| <code>limit</code> | Maximum number of table names. |</p>
+<p>| <code>offset</code> | Number of matching names to skip. |</p>
+<h3 id="list-field-names">List field names</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl &#x27;http://127.0.0.1:8008/api/dynamic/meta/products/fields&#x27;</code></pre>
+<p>Example response:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;ok&quot;: true,
+  &quot;message&quot;: &quot;fields loaded&quot;,
+  &quot;fields&quot;: [&quot;id&quot;, &quot;category_id&quot;, &quot;name&quot;, &quot;description&quot;, &quot;price&quot;, &quot;stock&quot;, &quot;created_at&quot;]
+}</code></pre>
+<p><code>q</code> can be used as a prefix filter:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">GET /api/dynamic/meta/products/fields?q=pr</code></pre>
+<h3 id="field-policy-metadata">Field policy metadata</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl &#x27;http://127.0.0.1:8008/api/dynamic/meta/products/fields-info&#x27;</code></pre>
+<p>Example response:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;ok&quot;: true,
+  &quot;message&quot;: &quot;field metadata loaded&quot;,
+  &quot;table&quot;: &quot;products&quot;,
+  &quot;fields&quot;: [
+    {
+      &quot;name&quot;: &quot;id&quot;,
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;readable&quot;: true,
+      &quot;writable&quot;: false,
+      &quot;filterable&quot;: true,
+      &quot;sortable&quot;: true,
+      &quot;hidden&quot;: false
+    }
+  ]
+}</code></pre>
+<h3 id="full-allowlist">Full allowlist</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl &#x27;http://127.0.0.1:8008/api/dynamic/meta/allowlist&#x27;</code></pre>
+<p>The allowlist is the server-side contract for what a request may read, write, filter, sort, or delete.</p>
+<h2 id="7-reading-rows">7. Reading rows</h2>
+<h3 id="simple-table-read">Simple table read</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl &#x27;http://127.0.0.1:8008/api/dynamic/products&#x27;</code></pre>
+<p>Equivalent structured request:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl -X POST &#x27;http://127.0.0.1:8008/api/dynamic&#x27; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  -d &#x27;{
+    &quot;method&quot;: &quot;GET&quot;,
+    &quot;table&quot;: &quot;products&quot;,
+    &quot;query&quot;: { &quot;limit&quot;: 25 }
+  }&#x27;</code></pre>
+<h3 id="read-one-row-by-id">Read one row by id</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl &#x27;http://127.0.0.1:8008/api/dynamic/products/1&#x27;</code></pre>
+<p>This implicitly adds the filter:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">id=1</code></pre>
+<h3 id="select-specific-fields">Select specific fields</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl -X POST &#x27;http://127.0.0.1:8008/api/dynamic&#x27; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  -d &#x27;{
+    &quot;method&quot;: &quot;GET&quot;,
+    &quot;table&quot;: &quot;products&quot;,
+    &quot;query&quot;: {
+      &quot;fields&quot;: [&quot;id&quot;, &quot;name&quot;, &quot;price&quot;, &quot;stock&quot;],
+      &quot;limit&quot;: 25
+    }
+  }&#x27;</code></pre>
+<p><code>fields</code> must contain readable fields for the base table. In the current implementation, joined-table field names such as <code>categories.name</code> are not validated against the joined table. For JOIN examples, omit <code>fields</code> and let the query use <code>SELECT *</code>, or select only fields from the base table.</p>
+<h2 id="8-structured-where">8. Structured <code>where</code></h2>
+<p>Use <code>where</code> for normal filters. It is safer than raw filter strings because the value is converted to a SQL literal by the service.</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;method&quot;: &quot;GET&quot;,
+  &quot;table&quot;: &quot;products&quot;,
+  &quot;query&quot;: {
+    &quot;fields&quot;: [&quot;id&quot;, &quot;name&quot;, &quot;price&quot;, &quot;stock&quot;],
+    &quot;where&quot;: [
+      { &quot;field&quot;: &quot;price&quot;, &quot;op&quot;: &quot;gte&quot;, &quot;value&quot;: 40 },
+      { &quot;field&quot;: &quot;stock&quot;, &quot;op&quot;: &quot;gt&quot;, &quot;value&quot;: 0 }
+    ],
+    &quot;order_by&quot;: [&quot;price DESC&quot;],
+    &quot;limit&quot;: 25
+  }
+}</code></pre>
+<p>Supported <code>op</code> values:</p>
+<p>| <code>op</code> | SQL |</p>
+<p>|---|---|</p>
+<p>| <code>eq</code> or <code>=</code> | <code>=</code> |</p>
+<p>| <code>ne</code> or <code>!=</code> | <code>!=</code> |</p>
+<p>| <code>gt</code> or <code>&gt;</code> | <code>&gt;</code> |</p>
+<p>| <code>gte</code> or <code>&gt;=</code> | <code>&gt;=</code> |</p>
+<p>| <code>lt</code> or <code>&lt;</code> | <code>&lt;</code> |</p>
+<p>| <code>lte</code> or <code>&lt;=</code> | <code>&lt;=</code> |</p>
+<p>| <code>like</code> | <code>LIKE</code> |</p>
+<p>Notes:</p>
+<ul>
+<li><code>field</code> must be filterable in the table allowlist.</li>
+<li>Qualified fields such as <code>orders.status</code> are accepted for allowlist checking by stripping the qualifier, but the SQL generated for structured <code>where</code> uses the stripped field name. For JOIN filters that need a qualified column, use raw <code>filter</code> instead.</li>
+<li>Multiple <code>where</code> items are joined with <code>AND</code>.</li>
+</ul>
+<h2 id="9-raw-filter">9. Raw <code>filter</code></h2>
+<p><code>filter</code> is an array of simple SQL-like conditions:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;method&quot;: &quot;GET&quot;,
+  &quot;table&quot;: &quot;products&quot;,
+  &quot;query&quot;: {
+    &quot;filter&quot;: [&quot;price&gt;=40&quot;, &quot;stock&gt;0&quot;],
+    &quot;order_by&quot;: [&quot;price DESC&quot;],
+    &quot;limit&quot;: 25
+  }
+}</code></pre>
+<p>Allowed raw filter shape:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">field=value
+field!=value
+field&gt;value
+field&gt;=value
+field&lt;value
+field&lt;=value</code></pre>
+<p>String values should be single-quoted:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;filter&quot;: [&quot;name=&#x27;Wireless Mouse&#x27;&quot;]
+}</code></pre>
+<p>The current raw filter validator rejects obvious injection markers in the value part, including semicolons, SQL comments, and embedded <code> OR </code> / <code> AND </code>.</p>
+<p>Use one array item per condition:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;filter&quot;: [&quot;price&gt;=40&quot;, &quot;stock&gt;0&quot;]
+}</code></pre>
+<p>Do <strong>not</strong> put this in one string:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;filter&quot;: [&quot;price&gt;=40 AND stock&gt;0&quot;]
+}</code></pre>
+<p>For joined queries, raw filter can use qualified fields:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;filter&quot;: [&quot;orders.status=&#x27;paid&#x27;&quot;]
+}</code></pre>
+<p>The allowlist check strips the qualifier and checks <code>status</code> against the base table.</p>
+<h2 id="10-sorting">10. Sorting</h2>
+<p><code>order_by</code> items must contain a field and direction:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;order_by&quot;: [&quot;price DESC&quot;, &quot;name ASC&quot;]
+}</code></pre>
+<p>Rules:</p>
+<ul>
+<li>Direction must be uppercase <code>ASC</code> or <code>DESC</code>.</li>
+<li>The field must be sortable in the table allowlist.</li>
+<li>Qualified fields such as <code>orders.order_date DESC</code> are accepted if the unqualified field exists in the base table.</li>
+</ul>
+<p>Invalid examples:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{ &quot;order_by&quot;: [&quot;price&quot;] }
+{ &quot;order_by&quot;: [&quot;price desc&quot;] }</code></pre>
+<h2 id="11-limit">11. Limit</h2>
+<p><code>limit</code> is optional.</p>
+<p>When it is omitted from a structured query, the service applies <code>DynamicApiConfig::defaultLimit</code>, currently <code>100</code> by default.</p>
+<p>When it is provided, the value is clamped to:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">1..DynamicApiConfig::maxLimit</code></pre>
+<p>The default <code>maxLimit</code> is <code>1000</code>.</p>
+<p>Example:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;query&quot;: { &quot;limit&quot;: 50 }
+}</code></pre>
+<p>Offset is not part of the current data query contract. Only the metadata table endpoint supports <code>offset</code>.</p>
+<h2 id="12-join">12. JOIN</h2>
+<p>Raw JOIN clauses are disabled by default:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-cpp">config.allowRawJoin = false;</code></pre>
+<p>A generated showcase app may explicitly enable it:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-cpp">config.allowRawJoin = true;</code></pre>
+<p>JOIN syntax accepted by <code>QueryBuilder</code>:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">JOIN table ON left_field=right_field
+INNER JOIN table ON left_field=right_field
+LEFT JOIN table ON left_field=right_field
+RIGHT JOIN table ON left_field=right_field
+FULL JOIN table ON left_field=right_field
+LEFT OUTER JOIN table ON left_field=right_field
+RIGHT OUTER JOIN table ON left_field=right_field
+FULL OUTER JOIN table ON left_field=right_field</code></pre>
+<p>Example:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl -X POST &#x27;http://127.0.0.1:8008/api/dynamic&#x27; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  -d &#x27;{
+    &quot;method&quot;: &quot;GET&quot;,
+    &quot;table&quot;: &quot;orders&quot;,
+    &quot;query&quot;: {
+      &quot;join&quot;: [&quot;JOIN products ON orders.product_id=products.id&quot;],
+      &quot;filter&quot;: [&quot;orders.status=&#x27;paid&#x27;&quot;],
+      &quot;order_by&quot;: [&quot;orders.total_amount DESC&quot;],
+      &quot;limit&quot;: 10
+    }
+  }&#x27;</code></pre>
+<p>Current JOIN limitations:</p>
+<ul>
+<li>JOIN is raw string DSL and should be treated as a showcase / trusted-admin feature until relation-aware joins are implemented.</li>
+<li><code>fields</code> validation is base-table-centric. If you need a joined query today, the most reliable first-run demo pattern is to omit <code>fields</code>, which produces <code>SELECT *</code>.</li>
+<li>JOIN table and field names must pass identifier validation: letters, digits, underscores and dots only.</li>
+<li>The JOIN condition must be equality-based and use <code>ON</code>.</li>
+</ul>
+<h2 id="13-group-by-and-having">13. GROUP BY and HAVING</h2>
+<p><code>group_by</code> accepts field identifiers:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;group_by&quot;: [&quot;status&quot;]
+}</code></pre>
+<p><code>having</code> accepts the same simple filter syntax as raw <code>filter</code>:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;having&quot;: [&quot;total_amount&gt;20&quot;]
+}</code></pre>
+<p>Current aggregation limitations:</p>
+<ul>
+<li><code>fields</code> are validated as identifiers, so aggregate expressions such as <code>COUNT(id)</code> are not supported as selected fields by the current <code>QueryBuilder</code> validation.</li>
+<li><code>having</code> does not currently support aggregate expressions such as <code>COUNT(id)&gt;0</code> because the left side must pass field identifier validation.</li>
+<li>Treat <code>group_by</code> / <code>having</code> as low-level current QueryBuilder features, not a complete analytics DSL yet.</li>
+</ul>
+<h2 id="14-creating-rows">14. Creating rows</h2>
+<p>Preferred generic endpoint:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl -X POST &#x27;http://127.0.0.1:8008/api/dynamic&#x27; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  -d &#x27;{
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;table&quot;: &quot;categories&quot;,
+    &quot;data&quot;: {
+      &quot;name&quot;: &quot;Accessories&quot;,
+      &quot;description&quot;: &quot;Small useful add-ons&quot;,
+      &quot;created_at&quot;: &quot;2026-05-08T10:00:00Z&quot;
+    }
+  }&#x27;</code></pre>
+<p>Table-specific equivalent:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl -X POST &#x27;http://127.0.0.1:8008/api/dynamic/categories&#x27; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  -d &#x27;{
+    &quot;data&quot;: {
+      &quot;name&quot;: &quot;Accessories&quot;,
+      &quot;description&quot;: &quot;Small useful add-ons&quot;,
+      &quot;created_at&quot;: &quot;2026-05-08T10:00:00Z&quot;
+    }
+  }&#x27;</code></pre>
+<p>Rules:</p>
+<ul>
+<li>The table must be writable.</li>
+<li>Every key in <code>data</code> must be writable for the table.</li>
+<li>Primary key / auto-increment / computed fields are considered non-writable by the schema allowlist.</li>
+<li>Current SQL generation uses <code>INSERT ... RETURNING id</code>. Ensure the selected database driver supports the generated SQL.</li>
+</ul>
+<h2 id="15-updating-rows">15. Updating rows</h2>
+<p>The safest path is to use the row id in the URL:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl -X PATCH &#x27;http://127.0.0.1:8008/api/dynamic/products/1&#x27; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  -d &#x27;{
+    &quot;data&quot;: {
+      &quot;price&quot;: 44.5,
+      &quot;stock&quot;: 80
+    }
+  }&#x27;</code></pre>
+<p>Equivalent generic request:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl -X POST &#x27;http://127.0.0.1:8008/api/dynamic&#x27; \
+  -H &#x27;Content-Type: application/json&#x27; \
+  -d &#x27;{
+    &quot;method&quot;: &quot;PATCH&quot;,
+    &quot;table&quot;: &quot;products&quot;,
+    &quot;query&quot;: {
+      &quot;where&quot;: [
+        { &quot;field&quot;: &quot;id&quot;, &quot;op&quot;: &quot;eq&quot;, &quot;value&quot;: 1 }
+      ]
+    },
+    &quot;data&quot;: {
+      &quot;price&quot;: 44.5,
+      &quot;stock&quot;: 80
+    }
+  }&#x27;</code></pre>
+<p>Important current safety default:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-cpp">config.allowUpdateWithoutFilter = false;</code></pre>
+<p>So <code>PUT</code> and <code>PATCH</code> without a URL id are rejected before execution. Use the URL id form for predictable updates.</p>
+<p>Current caveat: the pre-execution guard checks for a URL id, not for a filter inside the JSON body. For maximum compatibility with current code, prefer:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">PATCH /api/dynamic/{table}/{id}
+PUT   /api/dynamic/{table}/{id}</code></pre>
+<h2 id="16-deleting-rows">16. Deleting rows</h2>
+<p>Use the id-specific endpoint:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-bash">curl -X DELETE &#x27;http://127.0.0.1:8008/api/dynamic/products/1&#x27;</code></pre>
+<p>Current safety default:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-cpp">config.allowDeleteWithoutFilter = false;</code></pre>
+<p>So <code>DELETE</code> without a URL id is rejected unless the application explicitly enables delete-without-filter.</p>
+<h2 id="17-table-specific-endpoint-rules">17. Table-specific endpoint rules</h2>
+<p>For table-specific routes, the URL supplies part of the envelope:</p>
+<p>| HTTP request | Effective method | Effective table | Effective id |</p>
+<p>|---|---|---|---|</p>
+<p>| <code>GET /api/dynamic/products</code> | <code>GET</code> | <code>products</code> | empty |</p>
+<p>| <code>GET /api/dynamic/products/1</code> | <code>GET</code> | <code>products</code> | <code>1</code> |</p>
+<p>| <code>POST /api/dynamic/products</code> | <code>POST</code> | <code>products</code> | empty |</p>
+<p>| <code>PATCH /api/dynamic/products/1</code> | <code>PATCH</code> | <code>products</code> | <code>1</code> |</p>
+<p>| <code>PUT /api/dynamic/products/1</code> | <code>PUT</code> | <code>products</code> | <code>1</code> |</p>
+<p>| <code>DELETE /api/dynamic/products/1</code> | <code>DELETE</code> | <code>products</code> | <code>1</code> |</p>
+<p>The JSON body may still include <code>query</code> and <code>data</code>, but the URL table/id are authoritative when present.</p>
+<h2 id="18-identifier-rules">18. Identifier rules</h2>
+<p>The current <code>QueryBuilder</code> accepts identifiers containing:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">A-Z a-z 0-9 _ .</code></pre>
+<p>Examples that pass identifier validation:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">id
+products.name
+orders.total_amount</code></pre>
+<p>Examples that do not pass identifier validation:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">COUNT(id)
+price DESC; DROP TABLE products
+products.name AS product_name</code></pre>
+<h2 id="19-raw-url-query-dsl">19. Raw URL query DSL</h2>
+<p>There is legacy support in <code>QueryBuilder</code> for URL query strings like:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">(table:[products];method:[GET];fields:[id,name];filters:[price&gt;=40];orders:[price DESC];limit:10)</code></pre>
+<p>However, <code>DynamicQueryService</code> disables raw URL query DSL by default:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-cpp">config.allowRawFilter = false;</code></pre>
+<p>If raw URL query parsing is not explicitly enabled, a request that relies on raw URL query parsing returns:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;ok&quot;: false,
+  &quot;error&quot;: &quot;raw_query_disabled&quot;,
+  &quot;message&quot;: &quot;Raw URL query DSL is disabled by default&quot;
+}</code></pre>
+<p>New UI and client code should use the JSON request envelope instead.</p>
+<h2 id="20-configuration-flags-that-affect-this-contract">20. Configuration flags that affect this contract</h2>
+<p><code>DynamicApiConfig</code> controls several safety defaults:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-cpp">std::size_t defaultLimit = 100;
+std::size_t maxLimit = 1000;
+
+bool allowRawFilter = false;
+bool allowRawJoin = false;
+bool allowUpdateWithoutFilter = false;
+bool allowDeleteWithoutFilter = false;
+bool requirePermissions = false;
+bool allowDestructiveSchemaApply = false;</code></pre>
+<p>Meaning:</p>
+<p>| Flag | Default | Effect |</p>
+<p>|---|---:|---|</p>
+<p>| <code>defaultLimit</code> | <code>100</code> | Used when a structured query omits <code>limit</code>. |</p>
+<p>| <code>maxLimit</code> | <code>1000</code> | Upper bound for <code>query.limit</code>. |</p>
+<p>| <code>allowRawFilter</code> | <code>false</code> | Enables legacy raw URL query DSL, not JSON <code>query.filter</code>. |</p>
+<p>| <code>allowRawJoin</code> | <code>false</code> | Enables JSON <code>query.join</code>. |</p>
+<p>| <code>allowUpdateWithoutFilter</code> | <code>false</code> | Blocks PUT/PATCH without URL id. |</p>
+<p>| <code>allowDeleteWithoutFilter</code> | <code>false</code> | Blocks DELETE without URL id. |</p>
+<p>| <code>requirePermissions</code> | <code>false</code> | Enables token-based permission checks when configured. |</p>
+<p>| <code>allowDestructiveSchemaApply</code> | <code>false</code> | Controls destructive schema apply permissions. |</p>
+<h2 id="21-complete-demo-database-examples">21. Complete demo-database examples</h2>
+<p>These examples match the generated <code>dynamic_api_app</code> demo schema.</p>
+<h3 id="list-products">List products</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;method&quot;: &quot;GET&quot;,
+  &quot;table&quot;: &quot;products&quot;,
+  &quot;query&quot;: {
+    &quot;fields&quot;: [&quot;id&quot;, &quot;name&quot;, &quot;price&quot;, &quot;stock&quot;],
+    &quot;limit&quot;: 25
+  }
+}</code></pre>
+<h3 id="filter-and-sort-products">Filter and sort products</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;method&quot;: &quot;GET&quot;,
+  &quot;table&quot;: &quot;products&quot;,
+  &quot;query&quot;: {
+    &quot;fields&quot;: [&quot;id&quot;, &quot;name&quot;, &quot;price&quot;, &quot;stock&quot;],
+    &quot;where&quot;: [
+      { &quot;field&quot;: &quot;price&quot;, &quot;op&quot;: &quot;gte&quot;, &quot;value&quot;: 40 }
+    ],
+    &quot;order_by&quot;: [&quot;price DESC&quot;],
+    &quot;limit&quot;: 25
+  }
+}</code></pre>
+<h3 id="read-paid-orders-with-product-data">Read paid orders with product data</h3>
+<p>Requires <code>allowRawJoin=true</code> in the app config.</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;method&quot;: &quot;GET&quot;,
+  &quot;table&quot;: &quot;orders&quot;,
+  &quot;query&quot;: {
+    &quot;join&quot;: [
+      &quot;JOIN products ON orders.product_id=products.id&quot;
+    ],
+    &quot;filter&quot;: [
+      &quot;orders.status=&#x27;paid&#x27;&quot;
+    ],
+    &quot;order_by&quot;: [
+      &quot;orders.total_amount DESC&quot;
+    ],
+    &quot;limit&quot;: 10
+  }
+}</code></pre>
+<h3 id="create-a-category">Create a category</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;method&quot;: &quot;POST&quot;,
+  &quot;table&quot;: &quot;categories&quot;,
+  &quot;data&quot;: {
+    &quot;name&quot;: &quot;Accessories&quot;,
+    &quot;description&quot;: &quot;Small add-ons&quot;,
+    &quot;created_at&quot;: &quot;2026-05-08T10:00:00Z&quot;
+  }
+}</code></pre>
+<h3 id="create-a-product">Create a product</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;method&quot;: &quot;POST&quot;,
+  &quot;table&quot;: &quot;products&quot;,
+  &quot;data&quot;: {
+    &quot;category_id&quot;: 1,
+    &quot;name&quot;: &quot;USB-C Hub&quot;,
+    &quot;description&quot;: &quot;Compact 7-in-1 adapter&quot;,
+    &quot;price&quot;: 59.9,
+    &quot;stock&quot;: 35,
+    &quot;created_at&quot;: &quot;2026-05-08T10:00:00Z&quot;
+  }
+}</code></pre>
+<h3 id="patch-a-product-by-id">Patch a product by id</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-json">{
+  &quot;data&quot;: {
+    &quot;price&quot;: 54.9,
+    &quot;stock&quot;: 40
+  }
+}</code></pre>
+<p>Send it to:</p>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">PATCH /api/dynamic/products/1</code></pre>
+<h3 id="delete-a-product-by-id">Delete a product by id</h3>
+<pre class="qdx-code qdb-doc-code"><code class="language-text">DELETE /api/dynamic/products/1</code></pre>
+<h2 id="22-recommendations-for-client-code">22. Recommendations for client code</h2>
+<p>Use this order when building a frontend client:</p>
+<ol>
+<li>Call <code>/api/dynamic/meta/tables</code> to discover tables.</li>
+<li>Call <code>/api/dynamic/meta/{table}/fields-info</code> to discover readable/writable/filterable/sortable fields.</li>
+<li>Build JSON envelopes using structured <code>where</code> for normal filters.</li>
+<li>Use table-specific id routes for updates and deletes.</li>
+<li>Keep JOIN behind an explicit app-level opt-in.</li>
+<li>Avoid raw URL query DSL for new clients.</li>
+<li>Treat <code>group_by</code>/<code>having</code> as low-level until aggregate expression support is expanded.</li>
+</ol>
+<h2 id="23-known-current-limitations">23. Known current limitations</h2>
+<p>The current contract is useful for demos and simple CRUD/query UIs, but these limitations are important:</p>
+<ul>
+<li>No <code>offset</code> for data queries.</li>
+<li><code>fields</code> does not support aliases or aggregate expressions.</li>
+<li><code>fields</code> validation is base-table-centric and does not understand joined-table fields.</li>
+<li><code>group_by</code>/<code>having</code> are not a complete aggregation DSL.</li>
+<li>Raw JOIN is disabled by default and is not relation-aware.</li>
+<li>Generic <code>PUT</code>/<code>PATCH</code>/<code>DELETE</code> through <code>POST /api/dynamic</code> with JSON filters is less predictable than id-specific HTTP routes because the safety guard currently checks URL id before JSON query filters are applied.</li>
+<li>Flat write bodies are not the recommended Dynamic API contract; wrap write values in <code>data</code>.</li>
+</ul>
+<h2 id="24-future-contract-direction">24. Future contract direction</h2>
+<p>A cleaner future contract should add:</p>
+<ul>
+<li><code>POST /api/dynamic/query</code> as a dedicated query endpoint.</li>
+<li>Relation-aware structured joins instead of raw join strings.</li>
+<li>Expression allowlists for aggregates such as <code>COUNT(id)</code>.</li>
+<li><code>offset</code> / pagination metadata.</li>
+<li>JSON-filter-aware safety checks for update/delete.</li>
+<li>First-class field aliases for joined results.</li>
+<li>Parameterized <code>where</code> all the way through the QueryBuilder instead of converting structured values into raw filter strings.</li>
+</ul>
+    </article>
+  </section>
+
+  <footer class="qdx-footer"><span>Prefer visual examples?</span><a href="/backend/api-playground">Open API Playground</a></footer>
+</div>
+</body>
+</html>
