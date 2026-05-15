@@ -51,3 +51,25 @@ Set `QORNIX_APP_ROOT` when you want to run the binary from outside the deploy di
 ```bash
 QORNIX_APP_ROOT=/opt/my_app /opt/my_app/my_app
 ```
+
+## Async-related configuration
+
+The default template does not require DB configuration, but async HTTP routes are available immediately. For DB-backed async examples, use the Dynamic API template or enable `qornix_orm` and read `qornix_orm/doc/configuration.md`.
+
+## Async route timeout/backpressure notes
+
+The default template keeps runtime YAML minimal, but async route limits can be configured in code through `HttpServerOptions` and `RouteOptions`:
+
+```cpp
+HttpServerOptions options;
+options.route_timeout = std::chrono::seconds{30};
+options.max_active_requests = 10000;
+options.max_request_body_size = 1024 * 1024;
+
+RouteOptions route_options;
+route_options.timeout = std::chrono::seconds{2};
+route_options.max_concurrent_requests = 128;
+server.get_async("/async/work", handler, route_options);
+```
+
+Use these controls for slow downstream calls, DB-backed routes and any endpoint where overload must be bounded instead of queued indefinitely.

@@ -26,7 +26,7 @@
 4. Регистрирует HTML-страницы (`home`, `query-builder`, `table`, `row_view`, `schema-manager`), static-файлы и API routes.
 5. Позволяет сгенерировать XML-схему текущей demo-базы через `/api/dynamic/schema.xml`.
 6. Позволяет применить XML-схему к demo-базе через `/api/dynamic/schema/apply`.
-7. Поддерживает thread-local `QueryBuilder` для безопасной работы с SQLite.
+7. При `QORNIX_ENABLE_ASYNC_DB=ON` регистрирует CRUD routes через async Dynamic API path; для demo SQLite используется явный `sqlite_sync_offloaded` adapter, а PostgreSQL/MySQL могут использовать real async drivers при включенных backend flags.
 8. Запускает HTTP server на настройках фреймворка, по умолчанию `127.0.0.1:8008`.
 
 Demo-база создается в каталоге примера:

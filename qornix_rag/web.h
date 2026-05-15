@@ -42,7 +42,7 @@ public:
         const http::request<http::string_body> &req,
         http::response<http::string_body> &res,
         const urls::url_view &url_view,
-        const std::map<std::string, std::string> &path_params
+        const std::map<std::string, std::string> &
     ) override {
         try {
             // Determine request type by URL
@@ -91,7 +91,7 @@ public:
                 boost::json::value json_req = boost::json::parse(req.body());
                 std::string query;
                 size_t top_k = 10;
-                bool full_context = false;
+                [[maybe_unused]] bool full_context = false;
 
                 if (json_req.if_object()) {
                     auto obj = json_req.as_object();
@@ -152,10 +152,10 @@ public:
      * GET /api/stats - project statistics
      */
     void handleGet(
-        const http::request<http::string_body> &req,
+        const http::request<http::string_body> &,
         http::response<http::string_body> &res,
-        const urls::url_view &url_view,
-        const std::map<std::string, std::string> &path_params
+        const urls::url_view &,
+        const std::map<std::string, std::string> &
     ) override {
         try {
             auto stats = rag_engine_->get_statistics();
@@ -211,10 +211,10 @@ public:
 
 public:
     void handleGet(
-        const http::request<http::string_body> &req,
+        const http::request<http::string_body> &,
         http::response<http::string_body> &res,
-        const urls::url_view &url_view,
-        const std::map<std::string, std::string> &path_params
+        const urls::url_view &,
+        const std::map<std::string, std::string> &
     ) override {
         try {
             std::string html = TemplateLoader::loadFile("rag_interface.html", templates_dir_);

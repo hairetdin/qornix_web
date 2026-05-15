@@ -92,7 +92,7 @@ curl -X DELETE http://localhost:8008/api/products/1
 
 ### Requirements
 
-- C++17 compiler (g++ or clang++)
+- C++20 compiler (g++ or clang++)
 - Boost libraries (`url`, `json`)
 - PostgreSQL client libraries
 - SQLite3 libraries

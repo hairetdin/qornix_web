@@ -16,8 +16,8 @@ class DatabaseInterface;
 /**
  * Technical metadata about the database snapshot source.
  *
- * Sprint 27 intentionally keeps DatabaseSnapshot as an introspection artifact.
- * It is not the final semantic comparison model. Sprint 28 will convert this
+ * DatabaseSnapshot is intentionally kept as an introspection artifact.
+ * It is not the final semantic comparison model. The exporter converts this
  * snapshot into a canonical SchemaDocument current model so the diff layer can
  * compare SchemaDocument desired vs SchemaDocument current.
  */

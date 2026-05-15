@@ -14,7 +14,7 @@
 /**
  * Controls how aggressive schema normalization should be.
  *
- * Sprint 26 intentionally keeps normalization conservative: the original
+ * SchemaNormalizer intentionally keeps normalization conservative: the original
  * uploaded XML remains a separate artifact, while SchemaNormalizer returns a
  * normalized copy that can later be used by semantic diff.
  */

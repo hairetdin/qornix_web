@@ -24,4 +24,4 @@ qornix_orm/schema/schema_app.xsd
 
 `ForeignKeyField` is relation metadata. It may reuse the same `@name` as a physical `Field` when the exported schema contains both the database column and the foreign-key relationship description.
 
-All fixtures are designed for the XML validation layer introduced in Sprint 24.
+All fixtures are designed for the XML validation layer.

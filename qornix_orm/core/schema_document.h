@@ -17,7 +17,7 @@
 /**
  * Identifies where a SchemaDocument came from.
  *
- * Sprint 25 keeps uploaded XML, generated XML and future database exports as
+ * SchemaDocument keeps uploaded XML, generated XML and database exports as
  * different artifacts. This prevents a database export from overwriting the
  * user's desired XML schema by accident.
  */

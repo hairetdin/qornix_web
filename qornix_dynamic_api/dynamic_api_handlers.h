@@ -20,6 +20,14 @@
 #include <memory>
 #include <string>
 
+#ifndef QORNIX_ENABLE_ASYNC_DB
+#define QORNIX_ENABLE_ASYNC_DB 0
+#endif
+
+#if QORNIX_ENABLE_ASYNC_DB
+class AsyncDatabaseInterface;
+#endif
+
 namespace qornix_dynamic_api {
 
 class DynamicApiHandlerBase : public HandlerBase {
@@ -114,5 +122,13 @@ protected:
 };
 
 void addSchemaDrivenDynamicApiRoutes(HttpServer& server, const DynamicApiConfig& config);
+
+#if QORNIX_ENABLE_ASYNC_DB
+void addSchemaDrivenDynamicApiAsyncRoutes(
+    HttpServer& server,
+    const DynamicApiConfig& config,
+    std::shared_ptr<AsyncDatabaseInterface> asyncDatabase,
+    DynamicSchemaAllowlist allowlist);
+#endif
 
 } // namespace qornix_dynamic_api

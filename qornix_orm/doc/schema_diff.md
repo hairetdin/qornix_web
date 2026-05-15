@@ -2,7 +2,7 @@
 
 `SchemaDiffEngine` compares two normalized `SchemaDocument` instances and returns a structured semantic diff.
 
-This is the Sprint 29 layer of the ORM schema pipeline:
+This is the semantic diff layer of the ORM schema pipeline:
 
 ```text
 user XML
@@ -32,7 +32,7 @@ SchemaDocument current
 
 ## What it detects
 
-Sprint 29 supports read-only detection of these changes:
+The diff engine supports read-only detection of these changes:
 
 ```text
 table added
@@ -72,7 +72,7 @@ It does not:
 - decide whether a change is safe or destructive;
 - build a migration/apply plan.
 
-Risk classification belongs to Sprint 30. Planning belongs to Sprint 32. Apply belongs to Sprint 33.
+Risk classification, planning and apply are handled by the risk policy, planner and applier layers.
 
 ## Minimal usage
 
@@ -124,7 +124,7 @@ index_only_in_current
 foreign_key_only_in_current
 ```
 
-This is important: an object that exists only in the current database is **not** automatically considered something to drop. Sprint 30 will classify risk, and Sprint 32 will decide whether such an operation can become part of a plan.
+This is important: an object that exists only in the current database is **not** automatically considered something to drop. The risk policy classifies risk, and the planner decides whether such an operation can become part of a plan.
 
 ## Normalization
 
@@ -147,7 +147,7 @@ Original user XML remains a separate artifact and is not overwritten.
 
 ## Test coverage
 
-Sprint 29 adds:
+The diff engine adds:
 
 ```text
 qornix_orm/tests/schema_diff_engine_test.cpp

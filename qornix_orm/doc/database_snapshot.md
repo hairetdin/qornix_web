@@ -20,7 +20,7 @@ desired SchemaDocument
   -> current SchemaDocument
 ```
 
-Sprint 27 introduces the introspection layer. Sprint 28 should convert `DatabaseSnapshot` into the canonical `SchemaDocument current` model.
+`DatabaseSnapshot` is the introspection layer. The exporter converts it into the canonical `SchemaDocument current` model.
 
 ## Main types
 
@@ -91,7 +91,7 @@ SQLite internal autoindexes such as `sqlite_autoindex_*` are skipped because the
 
 ## PostgreSQL and MySQL status
 
-Sprint 27 adds a generic fallback for non-SQLite drivers through the existing `DatabaseInterface` methods:
+The implementation includes a generic fallback for non-SQLite drivers through the existing `DatabaseInterface` methods:
 
 ```text
 getTableNames()
@@ -130,7 +130,7 @@ raw XML vs raw DatabaseSnapshot
 
 ## Test coverage
 
-Sprint 27 adds:
+The snapshot layer includes:
 
 ```text
 qornix_orm/tests/database_snapshot_test.cpp

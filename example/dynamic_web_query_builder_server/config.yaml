@@ -16,6 +16,15 @@ db:
   driver: sqlite
   connection_string: dynamic_web_query_builder_demo.sqlite3
 
+dynamic_api:
+  async:
+    query_timeout_ms: 2000
+    route_timeout_ms: 30000
+    max_body_size: 1048576
+    max_concurrent_db_operations: 128
+    # SQLite runs through the explicit sync_offloaded adapter in async route mode.
+    prepared_queries: false
+
 logging:
   enabled: true
   level: debug
