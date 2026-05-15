@@ -5,6 +5,7 @@
 #include "http_server.h"
 #include "handler_base.h"
 #include "handlers/dynamic_app_page_handlers.h"
+#include "handlers/project_structure_handlers.h"
 
 #include <qornix_dynamic_api/dynamic_api_config.h>
 #include <qornix_dynamic_api/dynamic_api_handlers.h>
@@ -18,7 +19,7 @@
 #include <cstdint>
 #include <exception>
 #include <string>
-#include <utility>
+
 
 inline void setupRoutes(HttpServer& server) {
     const auto& runtime = dynamic_api_app_runtime::config();
@@ -51,7 +52,10 @@ inline void setupRoutes(HttpServer& server) {
 
     server.add_route("/", makeReactSpaHandler());
     server.add_route("/backend-admin", makeReactSpaHandler());
+    server.add_route("/project-structure", makeReactSpaHandler());
     server.add_route("/assets/{filename}", StaticFileHandler::create((dynamic_api_app_paths::frontendDistDir() / "assets").string()));
+    server.add_route("/api/project/structure", makeProjectStructureListHandler());
+    server.add_route("/api/project/archive", makeProjectArchiveHandler());
     server.add_route("/health", [](const Request& req, Response& res, const urls::url_view&, const Params&) {
         res = make_json_response(
             http::status::ok,

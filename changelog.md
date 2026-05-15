@@ -133,3 +133,18 @@ Highlights from the reference run:
 - Added Dynamic API template `/health` route for generated-app smoke tests.
 - Added Dynamic API template async DB health route `/api/dynamic/async-db/health` for builds with `QORNIX_ENABLE_ASYNC_DB=ON`.
 - Added a qornix_orm standalone consumer sample and gate validation reports.
+
+## Dynamic API React template follow-up
+
+- Added a React `Project Structure` page to the generated Dynamic API React template.
+- Added a top navigation entry for `/project-structure`.
+- Added a visual generated-project tree covering `backend/`, `frontend/` and `build/deploy/<app>/`.
+- Added a local project archive download endpoint at `/api/project/archive`.
+- Updated React template documentation and roadmap notes for the new project-structure/download workflow.
+
+## Project structure browser for generated templates
+
+- Promoted the project structure/archive service to the framework include layer.
+- Added `/project-structure`, `/api/project/structure` and `/api/project/archive` to generated templates.
+- Added Project Structure navigation links to default, Dynamic API, Dynamic API Vue and Dynamic API React template outputs.
+- Kept route files focused on route registration by moving project browsing/archive logic into handlers and a reusable service.

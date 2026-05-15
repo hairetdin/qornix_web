@@ -9,7 +9,8 @@ const backendLinks = [
   { title: 'Schema Docs', href: '/backend/docs/schema', tag: 'Docs', description: 'Review XML schema conventions and Schema Manager workflow details.' },
   { title: 'Metadata: tables', href: '/api/dynamic/meta/tables', tag: 'JSON', description: 'Use this endpoint to discover tables from frontend code or during manual inspection.' },
   { title: 'OpenAPI JSON', href: '/api/dynamic/openapi.json', tag: 'Contract', description: 'Generate TypeScript types, API clients or documentation from the live backend contract.' },
-  { title: 'Health Check', href: '/health', tag: 'Runtime', description: 'Minimal endpoint for smoke tests, reverse proxies, containers and deployment checks.' }
+  { title: 'Health Check', href: '/health', tag: 'Runtime', description: 'Minimal endpoint for smoke tests, reverse proxies, containers and deployment checks.' },
+  { title: 'Project Archive', href: '/api/project/archive', tag: 'Download', description: 'Download a compressed snapshot of the generated project or runtime bundle.' }
 ]
 
 const capabilities = [
@@ -23,7 +24,8 @@ const capabilities = [
   'React + Vite + TypeScript scaffold served as the application homepage',
   'Vite development proxy to the running backend',
   'CMake-integrated frontend production build and deploy bundle copy',
-  'Legacy backend pages preserved under /backend/* instead of occupying /'
+  'Legacy backend pages preserved under /backend/* instead of occupying /',
+  'Project structure page and archive download for easier handoff'
 ]
 
 const projectAreas = [
@@ -156,6 +158,8 @@ npm run dev`}</code></pre>
         <article className="card">
           <p className="eyebrow">Project map</p>
           <h2>Where to work</h2>
+          <p>Open the dedicated project structure page for a larger visual tree and project archive download.</p>
+          <p><a href="/project-structure">View project structure →</a></p>
           <div className="project-map">
             {projectAreas.map((area) => (
               <div key={area.name} className="project-row">

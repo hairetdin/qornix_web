@@ -200,6 +200,9 @@ echo "Open in browser:"
 echo "  http://127.0.0.1:8008/"
 if [ "$template_name" = "dynamic_api_vue_app" ] || [ "$template_name" = "dynamic_api_react_app" ]; then
     echo "  http://127.0.0.1:8008/backend-admin"
+    if [ "$template_name" = "dynamic_api_react_app" ]; then
+        echo "  http://127.0.0.1:8008/project-structure"
+    fi
     echo "  http://127.0.0.1:8008/backend/schema-manager"
     echo "  http://127.0.0.1:8008/api/dynamic/openapi.json"
 elif [ "$template_name" = "dynamic_api_app" ]; then

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, NavLink, Route, Routes } from 'react-router-dom'
 import HomeView from './views/HomeView'
 import BackendAdminView from './views/BackendAdminView'
+import ProjectStructureView from './views/ProjectStructureView'
 import './style.css'
 
 function App() {
@@ -19,6 +20,7 @@ function App() {
         <nav className="nav-links" aria-label="Main navigation">
           <NavLink to="/">Home</NavLink>
           <NavLink to="/backend-admin">Backend Admin</NavLink>
+          <NavLink to="/project-structure">Project Structure</NavLink>
           <a href="/api/dynamic/openapi.json" target="_blank" rel="noreferrer">OpenAPI</a>
         </nav>
       </header>
@@ -27,6 +29,7 @@ function App() {
         <Routes>
           <Route path="/" element={<HomeView />} />
           <Route path="/backend-admin" element={<BackendAdminView />} />
+          <Route path="/project-structure" element={<ProjectStructureView />} />
         </Routes>
       </main>
     </div>

@@ -221,6 +221,7 @@ Open:
 ```text
 http://127.0.0.1:8008/
 http://127.0.0.1:8008/backend-admin
+http://127.0.0.1:8008/project-structure
 http://127.0.0.1:8008/backend/schema-manager
 http://127.0.0.1:8008/api/dynamic/openapi.json
 ```
