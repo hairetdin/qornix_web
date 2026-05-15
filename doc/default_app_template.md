@@ -226,3 +226,15 @@ GET /async/sleep/{ms}
 These routes demonstrate `HttpServer::get_async`, value-owned `Request`/`Url`/`Params` coroutine arguments and response helpers. They are intentionally lightweight so the default template still builds without database dependencies.
 
 For DB-backed async CRUD, generate the Dynamic API template and read `templates/dynamic_api_app/doc/async_db_configuration.md`.
+
+
+## Dynamic API frontend templates
+
+For the same Dynamic API backend with a frontend scaffold, use either React or Angular:
+
+```bash
+./create_new_project.sh ../my_react --with-dynamic-api-react
+./create_new_project.sh ../my_angular --with-dynamic-api-angular
+```
+
+See `dynamic_api_react_app_template.md` for React and `dynamic_api_angular_app_template.md` for Angular.

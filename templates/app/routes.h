@@ -4,6 +4,7 @@
 #include "http_server.h"
 #include "handlers/health_handler.h"
 #include "handlers/page_handlers.h"
+#include "handlers/project_structure_handlers.h"
 #include "handlers/async_handlers.h"
 
 #include <memory>
@@ -17,6 +18,10 @@ inline void setupRoutes(HttpServer& server) {
 
     server.get_async("/async/ping", makeAsyncPingHandler());
     server.get_async("/async/sleep/{ms}", makeAsyncSleepHandler());
+    server.add_route("/project-structure", makeProjectStructurePageHandler());
+    server.add_route("/api/project/structure", makeProjectStructureListHandler());
+    server.add_route("/api/project/archive", makeProjectArchiveHandler());
+
     server.add_route("/docs", makeDocsPageHandler());
     server.add_route("/docs/getting-started", makeGettingStartedPageHandler());
     server.add_route("/docs/routing", makeRoutingDocsPageHandler());

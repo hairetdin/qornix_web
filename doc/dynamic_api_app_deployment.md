@@ -476,3 +476,15 @@ schema/database.schema.xml
 schema/schema_history.jsonl
 logs/
 ```
+
+
+## Dynamic API frontend templates
+
+For the same Dynamic API backend with a frontend scaffold, use either React or Angular:
+
+```bash
+./create_new_project.sh ../my_react --with-dynamic-api-react
+./create_new_project.sh ../my_angular --with-dynamic-api-angular
+```
+
+See `dynamic_api_react_app_template.md` for React and `dynamic_api_angular_app_template.md` for Angular.
