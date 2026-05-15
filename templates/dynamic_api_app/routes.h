@@ -5,6 +5,7 @@
 #include "http_server.h"
 #include "handler_base.h"
 #include "handlers/dynamic_app_page_handlers.h"
+#include "handlers/project_structure_handlers.h"
 
 #include <qornix_dynamic_api/dynamic_api_config.h>
 #include <qornix_dynamic_api/dynamic_api_handlers.h>
@@ -56,6 +57,9 @@ inline void setupRoutes(HttpServer& server) {
             req.version(),
             R"({"application":"@PROJECT_NAME@","status":"ok","template":"dynamic_api","path":"/health"})");
     });
+    server.add_route("/project-structure", makeProjectStructurePageHandler());
+    server.add_route("/api/project/structure", makeProjectStructureListHandler());
+    server.add_route("/api/project/archive", makeProjectArchiveHandler());
     server.add_route("/schema-manager", makeSchemaManagerPageHandler());
     server.add_route("/query-builder", makeQueryBuilderPageHandler());
     server.add_route("/table", makeTableBrowserPageHandler());
