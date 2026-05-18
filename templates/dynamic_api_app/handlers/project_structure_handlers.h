@@ -37,10 +37,61 @@ inline std::string projectStructureHtml() {
   <title>Project Structure · @PROJECT_NAME@</title>
   <link rel="stylesheet" href="/static/dynamic_api.css">
   <style>
-    .qx-shell{width:min(1180px,calc(100vw - 32px));margin:0 auto;padding:24px 0 64px}.qx-topbar{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:32px}.qx-brand{display:inline-flex;align-items:center;gap:12px;color:inherit;text-decoration:none}.qx-brand-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;background:#2453d6;color:#fff;font-weight:900}.qx-brand small{display:block;color:#64748b}.qx-nav{display:flex;flex-wrap:wrap;gap:10px}.qx-nav a{border-radius:999px;padding:8px 12px;background:#eef2ff;color:#2453d6;text-decoration:none;font-weight:700}.qx-hero{border:1px solid rgba(148,163,184,.25);border-radius:28px;background:#fff;padding:36px;margin-bottom:24px;box-shadow:0 20px 60px rgba(15,23,42,.08)}.qx-kicker{text-transform:uppercase;letter-spacing:.12em;font-size:12px;color:#2453d6;font-weight:800}.qx-lead{color:#64748b;font-size:18px;max-width:820px;line-height:1.7}.qx-card{border:1px solid rgba(148,163,184,.25);border-radius:24px;background:#fff;padding:28px;box-shadow:0 16px 44px rgba(15,23,42,.06)}.qx-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}.qx-btn{display:inline-flex;align-items:center;border-radius:999px;background:#2453d6;color:#fff;text-decoration:none;font-weight:800;padding:10px 15px;border:0;cursor:pointer}.qx-btn-secondary{background:#eef2ff;color:#2453d6}.qx-browser-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.qx-breadcrumbs{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 16px}.qx-breadcrumbs button{border:0;background:#e8eefc;color:#2453d6;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer}.qx-table{width:100%;border-collapse:collapse}.qx-table th,.qx-table td{text-align:left;border-bottom:1px solid rgba(148,163,184,.25);padding:12px;vertical-align:top}.qx-table th{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#64748b}.qx-file-btn{border:0;background:transparent;color:#2453d6;font-weight:800;cursor:pointer;padding:0}.qx-muted{color:#64748b}.qx-kind{display:inline-block;border-radius:999px;background:#eef2ff;padding:4px 8px;font-size:12px;font-weight:800}.qx-error{color:#b91c1c;font-weight:700}.qx-toolbar{display:flex;gap:12px;flex-wrap:wrap}.qx-small{font-size:13px}
+    body.qx-project-page{
+      margin:0;
+      min-height:100vh;
+      color:#1e293b;
+      font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(59,130,246,.22), transparent 30%),
+        radial-gradient(circle at top right, rgba(124,92,255,.18), transparent 26%),
+        linear-gradient(180deg,#081120 0%,#0d1830 52%,#0b1426 100%);
+    }
+    .qx-project-page .qx-shell{width:min(1180px,calc(100vw - 32px));margin:0 auto;padding:24px 0 64px}
+    .qx-project-page .qx-topbar{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:32px;color:#fff}
+    .qx-project-page .qx-brand{display:inline-flex;align-items:center;gap:12px;color:#fff;text-decoration:none}
+    .qx-project-page .qx-brand-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;background:#2453d6;color:#fff;font-weight:900;box-shadow:0 12px 28px rgba(37,83,214,.28)}
+    .qx-project-page .qx-brand strong{display:block;color:#fff}
+    .qx-project-page .qx-brand small{display:block;color:#9fb0cb}
+    .qx-project-page .qx-nav{display:flex;flex-wrap:wrap;gap:10px}
+    .qx-project-page .qx-nav a{border-radius:999px;padding:8px 12px;background:#eef2ff;color:#2453d6;text-decoration:none;font-weight:700;box-shadow:0 8px 20px rgba(15,23,42,.12)}
+    .qx-project-page .qx-nav a:hover{background:#dfe7ff;color:#1d4ed8}
+    .qx-project-page .qx-hero{border:1px solid rgba(148,163,184,.28);border-radius:28px;background:#fff;color:#1e293b;padding:36px;margin-bottom:24px;box-shadow:0 20px 60px rgba(15,23,42,.08)}
+    .qx-project-page .qx-hero h1{margin:0 0 14px;color:#0f172a;font-size:clamp(28px,4vw,44px);line-height:1.12;letter-spacing:-.03em}
+    .qx-project-page .qx-kicker{margin:0 0 12px;text-transform:uppercase;letter-spacing:.12em;font-size:12px;color:#2453d6;font-weight:800}
+    .qx-project-page .qx-lead{color:#475569;font-size:18px;max-width:820px;line-height:1.7}
+    .qx-project-page .qx-card{border:1px solid rgba(148,163,184,.28);border-radius:24px;background:#fff;color:#1e293b;padding:28px;box-shadow:0 16px 44px rgba(15,23,42,.06)}
+    .qx-project-page .qx-card h1,.qx-project-page .qx-card h2,.qx-project-page .qx-card h3{margin:0 0 10px;color:#0f172a}
+    .qx-project-page .qx-card p{color:#475569;line-height:1.6}
+    .qx-project-page .qx-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
+    .qx-project-page .qx-btn{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:#2453d6;color:#fff;text-decoration:none;font-weight:800;padding:10px 15px;border:0;cursor:pointer;box-shadow:0 10px 24px rgba(37,83,214,.24)}
+    .qx-project-page .qx-btn:hover{background:#1d4ed8;color:#fff}
+    .qx-project-page .qx-btn-secondary{background:#eef2ff;color:#2453d6;box-shadow:none}
+    .qx-project-page .qx-btn-secondary:hover{background:#dfe7ff;color:#1d4ed8}
+    .qx-project-page .qx-browser-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}
+    .qx-project-page .qx-breadcrumbs{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 16px}
+    .qx-project-page .qx-breadcrumbs button{border:0;background:#e8eefc;color:#2453d6;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer;box-shadow:none}
+    .qx-project-page .qx-breadcrumbs button:hover{background:#dbe6ff;color:#1d4ed8}
+    .qx-project-page .qx-table{width:100%;border-collapse:collapse;color:#263449;background:#fff}
+    .qx-project-page .qx-table th,.qx-project-page .qx-table td{text-align:left;border-bottom:1px solid rgba(148,163,184,.28);padding:12px;vertical-align:top;color:#334155}
+    .qx-project-page .qx-table th{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;background:#fff;font-weight:800}
+    .qx-project-page .qx-file-btn{border:0;background:transparent;color:#2453d6;font-weight:800;cursor:pointer;padding:0;box-shadow:none}
+    .qx-project-page .qx-file-btn:hover{color:#1d4ed8;text-decoration:underline}
+    .qx-project-page .qx-muted{color:#64748b}
+    .qx-project-page .qx-kind{display:inline-block;border-radius:999px;background:#eef2ff;color:#2453d6;padding:4px 8px;font-size:12px;font-weight:800}
+    .qx-project-page .qx-error{color:#b91c1c;font-weight:700}
+    .qx-project-page .qx-toolbar{display:flex;gap:12px;flex-wrap:wrap}
+    .qx-project-page .qx-small{font-size:13px}
+    @media(max-width:760px){
+      .qx-project-page .qx-shell{width:min(100% - 20px,1180px)}
+      .qx-project-page .qx-topbar,.qx-project-page .qx-browser-head{flex-direction:column;align-items:flex-start}
+      .qx-project-page .qx-nav{width:100%}
+      .qx-project-page .qx-nav a{flex:1 1 calc(50% - 10px);text-align:center}
+      .qx-project-page .qx-card{padding:22px}
+    }
   </style>
 </head>
-<body>
+<body class="qx-project-page">
 <div class="qx-shell">
   <header class="qx-topbar">
     <a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Project browser</small></span></a>

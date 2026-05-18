@@ -1,5 +1,9 @@
 # Qornix Web
 
+Website: https://qornix.org
+
+Live demo: https://demo.qornix.org
+
 ## Schema-driven Dynamic API
 
 Qornix Web is designed for C++ schema-driven backend applications. The central workflow is:
