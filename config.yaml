@@ -1,13 +1,122 @@
-# Qornix Web Server configuration
-
+# Server Configuration
 server:
-  address: 127.0.0.1
+  address: "127.0.0.1"
   port: 8008
 
+# Logging Configuration
 logging:
   enabled: false
-  level: info              # trace, debug, info, warning, error, fatal
+  level: info
   to_file: false
-  file_path: logs/server
-  rotation_size: 10485760  # 10 MB
+  file_path: "logs/server"
+  rotation_size: 10485760   # 10 MB
   max_files: 5
+
+# ============================================
+# RAG Module Configuration (optional)
+# Set rag.enabled=true to enable RAG module
+# ============================================
+rag:
+  enabled: false  # Set to true to enable RAG module
+
+  # LLM Configuration (optional, RAG works without LLM)
+  llm:
+    enabled: false
+    api_url: "http://localhost:11434"
+    api_key: ""
+    model: "llama3"
+    max_tokens: 1024
+    temperature: 0.7
+    request_timeout_ms: 30000
+    system_prompt: |
+      Ты — помощник разработчика, который отвечает на вопросы
+      на основе предоставленного контекста из кода проекта.
+
+      Правила:
+      - Используй только информацию из контекста
+      - Если информации недостаточно, скажи "Недостаточно информации"
+      - Приводи примеры кода если это уместно
+      - Отвечай на русском языке
+      - Цитируй файлы из которых взята информация
+
+  # Data Sources
+  # QA Knowledge Base
+  qa_kb:
+    enabled: false
+    name: "Project Knowledge Base"
+    source_id: "qa_default"
+    pairs:
+      - question: "Как запустить проект?"
+        answer: "Выполните: cmake -B build && cmake --build build && ./build/qornix_web"
+        category: "setup"
+        aliases: ["запуск", "start", "build"]
+      - question: "Какие требования к системе?"
+        answer: "C++20 компилятор, Boost 1.83+, Xapian, libcurl, yaml-cpp"
+        category: "setup"
+
+  # Filesystem source (code search)
+  filesystem:
+    enabled: false
+    path: "/path/to/project"
+    include_extensions: [".cpp", ".h", ".py", ".md"]
+    exclude_directories: [".git", "build", "cmake-build"]
+    max_file_size_kb: 512
+
+  # Text documents source
+  text_docs:
+    enabled: false
+    path: "/path/to/docs"
+    extensions: [".md", ".txt", ".rst", ".adoc"]
+    max_file_size_kb: 1024
+
+  # Search Configuration
+  search:
+    use_hybrid: true
+    vector_weight: 0.6
+    text_weight: 0.4
+    top_k: 10
+    min_score_threshold: 0.1
+
+  # Embedding Configuration
+  embedding:
+    backend: "onnx"  # onnx | tfidf
+    embedding_dim: 384
+    model_path: ""
+    tokenizer_path: ""
+    use_fallback: true
+
+  # Caching
+  cache:
+    enabled: true
+    backend: "memory"  # memory | redis
+    ttl_seconds: 3600
+    max_size: 1000
+
+  # Rate Limiting
+  rate_limit:
+    enabled: true
+    max_requests_per_second: 10
+    max_requests_per_minute: 100
+    per_ip_limit: true
+    max_requests_per_second_per_ip: 2
+    max_requests_per_minute_per_ip: 30
+
+  # Batch Processing
+  batch:
+    enabled: true
+    max_concurrent: 4
+    question_timeout_ms: 60000
+
+  # Prompt Cache (cache search results)
+  prompt_cache:
+    enabled: true
+    max_size: 500
+    ttl_seconds: 1800
+
+  # Prometheus Metrics
+  metrics:
+    enabled: true
+    endpoint: "/api/metrics"
+
+  # Auto-index on startup
+  auto_index: true
