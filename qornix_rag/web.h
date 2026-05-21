@@ -12,6 +12,18 @@
  */
 
 #include "core.h"
+#include "llm_client.h"
+#include "batch_processor.h"
+#include "prompt_cache.h"
+#include "prometheus_metrics.h"
+#include "qa_source.h"
+#include "data_source.h"
+#include "analytics_service.h"
+#include "markdown_source.h"
+#include "deduplication_service.h"
+#if QORNIX_HAS_SQLITE
+#include "sqlite_source.h"
+#endif
 #include "../include/handler_base.h"
 #include "../include/template_loader.h"
 #include "../include/http_server.h"
@@ -19,6 +31,7 @@
 #include <boost/url.hpp>
 #include <boost/json.hpp>
 #include <cstdint>
+#include <memory>
 
 namespace http = boost::beast::http;
 namespace urls = boost::urls;
@@ -29,11 +42,39 @@ namespace urls = boost::urls;
 class RagApiHandler : public HandlerBase {
 protected:
     std::shared_ptr<RagEngine> rag_engine_;
+    std::shared_ptr<LLMClient> llm_client_;
+    std::shared_ptr<ICache> cache_;
+    std::shared_ptr<RateLimiter> rate_limiter_;
+    std::shared_ptr<BatchProcessor> batch_processor_;
+    std::shared_ptr<IPromptCache> prompt_cache_;
+    std::shared_ptr<LLMRAGMetrics> metrics_;
+   std::shared_ptr<AnalyticsService> analytics_service_;
+    std::shared_ptr<MarkdownSource> markdown_source_;
+    std::shared_ptr<DeduplicationService> dedup_service_;
+#if QORNIX_HAS_SQLITE
+    std::shared_ptr<SQLiteSource> sqlite_source_;
+#endif
 
 public:
-    explicit RagApiHandler(std::shared_ptr<RagEngine> engine)
-        : rag_engine_(engine) {
-    }
+   RagApiHandler(std::shared_ptr<RagEngine> engine,
+                 std::shared_ptr<LLMClient> llm,
+                 std::shared_ptr<ICache> cache,
+                 std::shared_ptr<RateLimiter> limiter,
+                 std::shared_ptr<BatchProcessor> batch,
+                 std::shared_ptr<IPromptCache> pcache,
+                 std::shared_ptr<LLMRAGMetrics> metrics,
+                 std::shared_ptr<AnalyticsService> analytics,
+                 std::shared_ptr<MarkdownSource> markdown,
+                 std::shared_ptr<DeduplicationService> dedup = nullptr,
+#if QORNIX_HAS_SQLITE
+                 std::shared_ptr<SQLiteSource> sqlite = nullptr
+#endif
+                 );
+
+    /**
+     * Simple constructor for routes that only need rag_engine.
+     */
+    explicit RagApiHandler(std::shared_ptr<RagEngine> engine);
 
     /**
      * POST /api/index and /api/search - handle POST requests
@@ -43,158 +84,17 @@ public:
         http::response<http::string_body> &res,
         const urls::url_view &url_view,
         const std::map<std::string, std::string> &
-    ) override {
-        try {
-            // Determine request type by URL
-            std::string path = url_view.path();
-
-            if (path == "/api/index" || path.find("/api/index") != std::string::npos) {
-                // Project indexing
-                boost::json::value json_req = boost::json::parse(req.body());
-                std::string project_path = rag_engine_->get_indexed_project_root();
-                if (project_path.empty()) {
-                    project_path = ".";
-                }
-
-                if (json_req.if_object()) {
-                    auto obj = json_req.as_object();
-                    if (obj.contains("project_path")) {
-                        std::string requested_path = obj.at("project_path").as_string().c_str();
-                        if (!requested_path.empty() && requested_path != "." && requested_path != "./") {
-                            project_path = requested_path;
-                        }
-                    }
-                }
-
-                // Index the project
-                rag_engine_->index_project(project_path);
-
-                // Get statistics
-                auto stats = rag_engine_->get_statistics();
-
-                // Build response
-                boost::json::object response;
-                response["success"] = true;
-                response["message"] = "Project indexed successfully";
-                response["stats"] = {
-                    {"total_files", stats.total_files},
-                    {"total_lines", stats.total_lines},
-                    {"total_size_kb", stats.total_size_bytes / 1024},
-                    {"index_duration_ms", static_cast<std::int64_t>(stats.index_duration_ms)}
-                };
-
-                buildJsonResponse(res, http::status::ok,
-                                  boost::json::serialize(response));
-
-            } else if (path == "/api/search" || path.find("/api/search") != std::string::npos) {
-                // Project search
-                boost::json::value json_req = boost::json::parse(req.body());
-                std::string query;
-                size_t top_k = 10;
-                [[maybe_unused]] bool full_context = false;
-
-                if (json_req.if_object()) {
-                    auto obj = json_req.as_object();
-                    if (obj.contains("query")) {
-                        query = obj.at("query").as_string().c_str();
-                    }
-                    if (obj.contains("top_k")) {
-                        top_k = static_cast<size_t>(obj.at("top_k").as_int64());
-                    }
-                    if (obj.contains("full_context")) {
-                        full_context = obj.at("full_context").as_bool();
-                    }
-                }
-
-                if (query.empty()) {
-                    buildErrorResponse(res, http::status::bad_request, "Query is required");
-                    return;
-                }
-
-                // Search
-                auto results = rag_engine_->search(query, top_k);
-
-                // Build response
-                boost::json::array results_array;
-                for (const auto &result: results) {
-                    boost::json::object result_obj{
-                        {"path", result.document.relative_path},
-                        {"type", result.document.type},
-                        {"language", result.document.language},
-                        {"score", result.score},
-                        {"vector_score", result.vector_score},
-                        {"text_score", result.text_score},
-                        {"fused_score", result.fused_score},
-                        {"snippet", result.snippet},
-                        {"lines", result.document.lines_count},
-                        {"size", result.document.size_bytes}
-                    };
-                    results_array.emplace_back(result_obj);
-                }
-
-                boost::json::object response;
-                response["success"] = true;
-                response["query"] = query;
-                response["results"] = results_array;
-                response["count"] = results.size();
-
-                buildJsonResponse(res, http::status::ok,
-                                  boost::json::serialize(response));
-            } else {
-                buildErrorResponse(res, http::status::not_found, "Unknown endpoint");
-            }
-        } catch (const std::exception &e) {
-            buildErrorResponse(res, http::status::internal_server_error, e.what());
-        }
-    }
+    ) override;
 
     /**
-     * GET /api/stats - project statistics
+     * GET /api/stats, /api/health - project statistics and health check
      */
     void handleGet(
-        const http::request<http::string_body> &,
+        const http::request<http::string_body> &req,
         http::response<http::string_body> &res,
-        const urls::url_view &,
+        const urls::url_view &url_view,
         const std::map<std::string, std::string> &
-    ) override {
-        try {
-            auto stats = rag_engine_->get_statistics();
-
-            boost::json::object response;
-            response["success"] = true;
-            response["indexed"] = rag_engine_->is_indexed();
-            response["embedding_backend"] = rag_engine_->get_embedding_backend();
-            response["embedding_dim"] = static_cast<std::int64_t>(rag_engine_->get_embedding_dim());
-            response["onnx_ready"] = rag_engine_->is_onnx_ready();
-            response["onnx_status"] = rag_engine_->get_onnx_status_message();
-            response["project_root"] = rag_engine_->get_indexed_project_root();
-
-            boost::json::object stats_obj;
-            stats_obj["total_files"] = stats.total_files;
-            stats_obj["total_lines"] = stats.total_lines;
-            stats_obj["total_size_kb"] = stats.total_size_bytes / 1024;
-            stats_obj["index_duration_ms"] = static_cast<std::int64_t>(stats.index_duration_ms);
-
-            boost::json::object files_by_type;
-            for (const auto &[type, count]: stats.files_by_type) {
-                files_by_type[type] = count;
-            }
-            stats_obj["files_by_type"] = files_by_type;
-
-            boost::json::object files_by_dir;
-            for (const auto &[dir, count]: stats.files_by_directory) {
-                files_by_dir[dir] = count;
-            }
-            stats_obj["files_by_directory"] = files_by_dir;
-
-            response["stats"] = stats_obj;
-
-            buildJsonResponse(res, http::status::ok,
-                              boost::json::serialize(response));
-        } catch (const std::exception &e) {
-            buildErrorResponse(res, http::status::internal_server_error, e.what());
-        }
-    }
+    ) override;
 };
 
 /**
@@ -205,46 +105,31 @@ private:
     std::string templates_dir_;
 
 public:
-    explicit RagWebHandler(const std::string &templates_dir = "templates")
-        : templates_dir_(templates_dir) {
-    }
+    explicit RagWebHandler(const std::string &templates_dir = "templates");
 
-public:
     void handleGet(
         const http::request<http::string_body> &,
         http::response<http::string_body> &res,
         const urls::url_view &,
         const std::map<std::string, std::string> &
-    ) override {
-        try {
-            std::string html = TemplateLoader::loadFile("rag_interface.html", templates_dir_);
-            buildHtmlResponse(res, http::status::ok, html);
-        } catch (const std::exception &e) {
-            std::string error_html = TemplateLoader::load500Template(templates_dir_);
-            buildHtmlResponse(res, http::status::internal_server_error, error_html);
-        }
-    }
+    ) override;
 };
 
 /**
  * Configure routes for the RAG system
  */
-inline void setupRagRoutes(HttpServer& server, std::shared_ptr<RagEngine> rag_engine) {
-    std::cout << "🔧 Добавление RAG маршрутов..." << std::endl;
-
-    // Main page
-    server.add_route("/", std::make_shared<RagWebHandler>("templates"));
-    std::cout << "  ✓ GET  / - Web интерфейс" << std::endl;
-
-    // API endpoints
-    server.add_route("/api/index", std::make_shared<RagApiHandler>(rag_engine));
-    std::cout << "  ✓ POST /api/index - Индексация проекта" << std::endl;
-
-    server.add_route("/api/search", std::make_shared<RagApiHandler>(rag_engine));
-    std::cout << "  ✓ POST /api/search - Поиск" << std::endl;
-
-    server.add_route("/api/stats", std::make_shared<RagApiHandler>(rag_engine));
-    std::cout << "  ✓ GET  /api/stats - Статистика" << std::endl;
-
-    std::cout << "✅ Все маршруты добавлены" << std::endl;
-}
+void setupRagRoutes(HttpServer& server,
+                    std::shared_ptr<RagEngine> rag_engine,
+                    std::shared_ptr<LLMClient> llm_client = nullptr,
+                    std::shared_ptr<ICache> cache = nullptr,
+                    std::shared_ptr<RateLimiter> limiter = nullptr,
+                    std::shared_ptr<BatchProcessor> batch = nullptr,
+                    std::shared_ptr<IPromptCache> pcache = nullptr,
+                    std::shared_ptr<LLMRAGMetrics> metrics = nullptr,
+                    std::shared_ptr<AnalyticsService> analytics = nullptr,
+                    std::shared_ptr<MarkdownSource> markdown = nullptr,
+                    std::shared_ptr<DeduplicationService> dedup = nullptr
+#if QORNIX_HAS_SQLITE
+                    , std::shared_ptr<SQLiteSource> sqlite = nullptr
+#endif
+                    );

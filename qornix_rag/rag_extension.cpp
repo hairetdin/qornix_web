@@ -98,6 +98,20 @@ void RagExtension::initialize(DIContainer& container) {
         std::cout << "📈 AnalyticsService initialized" << std::endl;
     }
 
+    // Phase 5: Initialize DeduplicationService
+    {
+        DeduplicationService::Config dedup_config;
+        if (auto thresh_it = config_.find("rag.dedup.similarity_threshold"); thresh_it != config_.end()) {
+            dedup_config.similarity_threshold = std::stof(thresh_it->second);
+        }
+        if (auto auto_remove_it = config_.find("rag.dedup.auto_remove"); auto_remove_it != config_.end()) {
+            dedup_config.auto_remove = (auto_remove_it->second == "true");
+        }
+        dedup_service_ = std::make_shared<DeduplicationService>(dedup_config);
+        std::cout << "🔍 DeduplicationService initialized (threshold="
+                  << dedup_config.similarity_threshold << ")" << std::endl;
+    }
+
     // Register data sources
     for (const auto& source : data_sources_) {
         rag_engine_->addDataSource(source);
@@ -125,7 +139,12 @@ void RagExtension::registerRoutes(HttpServer& server, DIContainer& container) {
         batch_processor_,
         prompt_cache_,
         metrics_,
-        analytics_service_
+        analytics_service_,
+        markdown_source_,
+        dedup_service_
+#if QORNIX_HAS_SQLITE
+        , sqlite_source_
+#endif
     );
 
     std::cout << "✅ RAG routes registered successfully" << std::endl;
