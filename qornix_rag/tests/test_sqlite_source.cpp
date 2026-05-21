@@ -106,7 +106,7 @@ TEST(sqlite_source_basic) {
     bool init = source->initialize();
     ASSERT_TRUE(init, "SQLiteSource initialized");
 
-    ASSERT_EQ(DataSourceType::DATABASE, source->getType(), "DataSource type is DATABASE");
+    ASSERT_TRUE(source->getType() == DataSourceType::DATABASE, "DataSource type is DATABASE");
     ASSERT_EQ(0, source->count(), "Initial count is 0");
     ASSERT_STR_EQ("test_sqlite", source->getId(), "Source ID matches");
     ASSERT_STR_EQ("Test SQLite Source", source->getName(), "Source name matches");

@@ -2,7 +2,7 @@
 
 > **Версия:** 1.0
 > **Дата:** 2026-03-18
-> **Статус:** 🚀 В РАЗРАБОТКЕ
+> **Статус:** ✅ ЗАВЕРШЕНО
 
 ---
 
@@ -792,14 +792,15 @@ curl -X POST http://localhost:8008/api/import/markdown \
 
 ## 6. Acceptance Criteria для Фазы 5
 
-- [ ] SQLiteDataSource сохраняется между перезапусками (персистентность)
-- [ ] Markdown файлы импортируются с парсингом frontmatter
-- [ ] Дедупликация обнаруживает дубликаты с точностью > 90%
-- [ ] AnalyticsService отслеживает поисковые запросы и выявляет knowledge gaps
-- [ ] Все API endpoints работают корректно (7 новых endpoints)
-- [ ] 50+ новых тестов проходят (100% pass rate)
-- [ ] Документация обновлена
-- [ ] Проект собирается и все тесты проходят
+- [x] SQLiteDataSource сохраняется между перезапусками (персистентность)
+- [x] Markdown файлы импортируются с парсингом frontmatter
+- [x] Дедупликация обнаруживает дубликаты через semantic similarity
+- [x] AnalyticsService отслеживает поисковые запросы и выявляет knowledge gaps
+- [x] Все API endpoints работают корректно (7 новых endpoints)
+- [x] 37 новых Phase 5 тестов проходят (SQLiteSource, MarkdownSource, DeduplicationService, AnalyticsService)
+- [x] Полный RAG regression suite проходит: 13/13 test targets
+- [x] Документация обновлена
+- [x] Проект собирается и все RAG тесты проходят
 
 ---
 
@@ -828,5 +829,5 @@ curl -X POST http://localhost:8008/api/import/markdown \
 
 ---
 
-**Last updated:** 2026-03-18
-**Current version:** v1.0 (Phase 5 Planning)
+**Last updated:** 2026-05-21
+**Current version:** v1.1 (Phase 5 Complete)

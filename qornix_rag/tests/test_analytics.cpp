@@ -68,6 +68,14 @@
     } \
 } while(0)
 
+#define ASSERT_STR_EQ(expected, actual, msg) do { \
+    if ((expected) != (actual)) { \
+        std::cerr << "FAILED: " << msg << " — expected '" << (expected) << "', got '" << (actual) << "'" << std::endl; \
+        fail_count++; \
+        return; \
+    } \
+} while(0)
+
 static int test_count = 0;
 static int fail_count = 0;
 

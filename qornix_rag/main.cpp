@@ -13,6 +13,18 @@
 
 #include "core.h"
 #include "web.h"
+#include "llm_client.h"
+#include "llm_cache.h"
+#include "rate_limiter.h"
+#include "batch_processor.h"
+#include "prompt_cache.h"
+#include "prometheus_metrics.h"
+#include "analytics_service.h"
+#include "deduplication_service.h"
+#include "markdown_source.h"
+#if QORNIX_HAS_SQLITE
+#include "sqlite_source.h"
+#endif
 #include "../include/handler_base.h"
 #include "../include/http_server.h"
 #include <yaml-cpp/yaml.h>
@@ -27,6 +39,13 @@
 
 // Global variables
 std::shared_ptr<RagEngine> g_rag_engine;
+std::shared_ptr<LLMClient> g_llm_client;
+std::shared_ptr<AnalyticsService> g_analytics_service;
+std::shared_ptr<MarkdownSource> g_markdown_source;
+std::shared_ptr<DeduplicationService> g_dedup_service;
+#if QORNIX_HAS_SQLITE
+std::shared_ptr<SQLiteSource> g_sqlite_source;
+#endif
 std::unique_ptr<HttpServer> g_server;
 std::atomic<bool> g_running{true};
 
@@ -255,8 +274,223 @@ int main(int argc, char* argv[]) {
 
         g_server = std::make_unique<HttpServer>(ioc, endpoint);
 
-        // Configure RAG routes
-        setupRagRoutes(*g_server, g_rag_engine);
+        // Initialize LLM client (if config has llm section)
+        std::cout << "🤖 Инициализация LLM клиента..." << std::endl;
+        g_llm_client = std::make_shared<LLMClient>(resolved_config_path);
+        if (g_llm_client->is_enabled()) {
+            std::cout << "  ℹ️  LLM: " << g_llm_client->get_model()
+                      << " @ " << g_llm_client->get_api_url() << std::endl;
+            if (g_llm_client->is_available()) {
+                std::cout << "  ✅ LLM доступен" << std::endl;
+            } else {
+                std::cout << "  ⚠️  LLM недоступен (будет использован только поиск)" << std::endl;
+            }
+        } else {
+            std::cout << "  ℹ️  LLM не настроен (только поиск)" << std::endl;
+        }
+
+        // Phase 3: Initialize cache and rate limiter
+        std::shared_ptr<ICache> cache;
+        std::shared_ptr<RateLimiter> rate_limiter;
+        std::shared_ptr<BatchProcessor> batch_processor;
+        std::shared_ptr<IPromptCache> prompt_cache;
+        std::shared_ptr<LLMRAGMetrics> metrics;
+
+        if (!resolved_config_path.empty()) {
+            try {
+#ifdef QORNIX_HAS_YAML
+                YAML::Node node = YAML::LoadFile(resolved_config_path);
+
+                // Cache config
+                CacheConfig cache_config;
+                if (node["cache"]) {
+                    const auto& cache_node = node["cache"];
+                    cache_config.enabled = cache_node["enabled"] && cache_node["enabled"].as<bool>();
+                    if (cache_node["backend"]) {
+                        cache_config.backend = cache_node["backend"].as<std::string>();
+                    }
+                    if (cache_node["max_size"]) {
+                        cache_config.max_size = cache_node["max_size"].as<size_t>();
+                    }
+                    if (cache_node["ttl_seconds"]) {
+                        cache_config.ttl = std::chrono::seconds(cache_node["ttl_seconds"].as<int>());
+                    }
+                    if (cache_node["redis"]) {
+                        const auto& redis = cache_node["redis"];
+                        if (redis["host"]) cache_config.redis_host = redis["host"].as<std::string>();
+                        if (redis["port"]) cache_config.redis_port = redis["port"].as<int>();
+                        if (redis["db"]) cache_config.redis_db = redis["db"].as<int>();
+                        if (redis["password"]) cache_config.redis_password = redis["password"].as<std::string>();
+                        if (redis["ttl_seconds"]) cache_config.redis_ttl = std::chrono::seconds(redis["ttl_seconds"].as<int>());
+                    }
+                }
+                cache = create_cache(cache_config);
+
+                // Rate limiter config
+                RateLimiterConfig rl_config;
+                if (node["rate_limit"]) {
+                    const auto& rl_node = node["rate_limit"];
+                    rl_config.enabled = rl_node["enabled"] && rl_node["enabled"].as<bool>();
+                    if (rl_node["max_requests_per_second"]) {
+                        rl_config.max_requests_per_second = rl_node["max_requests_per_second"].as<size_t>();
+                    }
+                    if (rl_node["max_requests_per_minute"]) {
+                        rl_config.max_requests_per_minute = rl_node["max_requests_per_minute"].as<size_t>();
+                    }
+                    if (rl_node["per_ip_limit"]) {
+                        rl_config.per_ip_limit = rl_node["per_ip_limit"].as<bool>();
+                    }
+                    if (rl_node["max_requests_per_second_per_ip"]) {
+                        rl_config.max_requests_per_second_per_ip = rl_node["max_requests_per_second_per_ip"].as<size_t>();
+                    }
+                    if (rl_node["max_requests_per_minute_per_ip"]) {
+                        rl_config.max_requests_per_minute_per_ip = rl_node["max_requests_per_minute_per_ip"].as<size_t>();
+                    }
+                }
+                rate_limiter = std::make_shared<RateLimiter>(rl_config);
+
+                // Connect cache and rate limiter to LLM client
+                if (cache) {
+                    g_llm_client->set_cache(cache);
+                }
+                if (rate_limiter->is_available()) {
+                    g_llm_client->set_rate_limiter(rate_limiter);
+                }
+
+                // Phase 3: Batch processor config
+                BatchConfig batch_config;
+                if (node["batch"]) {
+                    const auto& batch_node = node["batch"];
+                    if (batch_node["max_concurrent"]) {
+                        batch_config.max_concurrent = batch_node["max_concurrent"].as<size_t>();
+                    }
+                    if (batch_node["question_timeout_ms"]) {
+                        batch_config.question_timeout_ms = batch_node["question_timeout_ms"].as<int>();
+                    }
+                    if (batch_node["batch_timeout_ms"]) {
+                        batch_config.batch_timeout_ms = batch_node["batch_timeout_ms"].as<int>();
+                    }
+                }
+                batch_processor = std::make_shared<BatchProcessor>(batch_config);
+
+                // Phase 3: Prompt cache config
+                PromptCacheConfig prompt_cache_config;
+                if (node["prompt_cache"]) {
+                    const auto& pc_node = node["prompt_cache"];
+                    prompt_cache_config.enabled = pc_node["enabled"] && pc_node["enabled"].as<bool>();
+                    if (pc_node["max_size"]) {
+                        prompt_cache_config.max_size = pc_node["max_size"].as<size_t>();
+                    }
+                    if (pc_node["ttl_seconds"]) {
+                        prompt_cache_config.ttl = std::chrono::seconds(pc_node["ttl_seconds"].as<int>());
+                    }
+                    prompt_cache = create_prompt_cache(prompt_cache_config);
+                }
+
+                // Phase 3: Prometheus metrics
+                metrics = std::make_shared<LLMRAGMetrics>();
+
+                // Update metrics with current stats
+                auto rag_stats = g_rag_engine->get_statistics();
+                metrics->set_indexed_files(rag_stats.total_files);
+                metrics->set_indexed_lines(rag_stats.total_lines);
+
+                // Phase 5: Analytics service
+                AnalyticsService::Config analytics_config;
+                if (node["rag"] && node["rag"]["analytics"]) {
+                    const auto& analytics_node = node["rag"]["analytics"];
+                    if (analytics_node["max_log_entries"]) {
+                        analytics_config.max_log_entries = analytics_node["max_log_entries"].as<size_t>();
+                    }
+                    if (analytics_node["top_n"]) {
+                        analytics_config.top_n = analytics_node["top_n"].as<size_t>();
+                    }
+                    if (analytics_node["gap_min_search_count"]) {
+                        analytics_config.gap_min_search_count = analytics_node["gap_min_search_count"].as<size_t>();
+                    }
+                }
+                g_analytics_service = std::make_shared<AnalyticsService>(analytics_config);
+
+                // Phase 5: Deduplication service
+                DeduplicationService::Config dedup_config;
+                if (node["rag"] && node["rag"]["dedup"]) {
+                    const auto& dedup_node = node["rag"]["dedup"];
+                    if (dedup_node["similarity_threshold"]) {
+                        dedup_config.similarity_threshold = dedup_node["similarity_threshold"].as<float>();
+                    }
+                    if (dedup_node["auto_remove"]) {
+                        dedup_config.auto_remove = dedup_node["auto_remove"].as<bool>();
+                    }
+                }
+                g_dedup_service = std::make_shared<DeduplicationService>(dedup_config);
+
+#if QORNIX_HAS_SQLITE
+                // Phase 5: SQLite-backed QA storage
+                if (node["rag"] && node["rag"]["sqlite"] &&
+                    node["rag"]["sqlite"]["enabled"] &&
+                    node["rag"]["sqlite"]["enabled"].as<bool>()) {
+                    const auto& sqlite_node = node["rag"]["sqlite"];
+                    SQLiteSource::Config sqlite_config;
+                    sqlite_config.db_path = sqlite_node["db_path"]
+                        ? sqlite_node["db_path"].as<std::string>()
+                        : "rag_kb.db";
+                    sqlite_config.source_id = sqlite_node["source_id"]
+                        ? sqlite_node["source_id"].as<std::string>()
+                        : "sqlite_kb";
+                    sqlite_config.name = sqlite_node["name"]
+                        ? sqlite_node["name"].as<std::string>()
+                        : "SQLite Knowledge Base";
+                    sqlite_config.auto_migrate = !sqlite_node["auto_migrate"] ||
+                        sqlite_node["auto_migrate"].as<bool>();
+
+                    g_sqlite_source = std::make_shared<SQLiteSource>(sqlite_config);
+                    if (g_sqlite_source->initialize()) {
+                        g_rag_engine->addDataSource(g_sqlite_source);
+                        std::cout << "  ✅ SQLiteSource: " << sqlite_config.db_path << std::endl;
+                    } else {
+                        std::cerr << "  ⚠️  SQLiteSource не инициализирован" << std::endl;
+                        g_sqlite_source.reset();
+                    }
+                }
+#endif
+
+                // Phase 5: Markdown import source
+                if (node["rag"] && node["rag"]["markdown"] &&
+                    node["rag"]["markdown"]["enabled"] &&
+                    node["rag"]["markdown"]["enabled"].as<bool>()) {
+                    const auto& markdown_node = node["rag"]["markdown"];
+                    MarkdownSource::Config markdown_config;
+                    markdown_config.directory_path = markdown_node["directory_path"]
+                        ? markdown_node["directory_path"].as<std::string>()
+                        : "knowledge_base";
+                    markdown_config.recursive = !markdown_node["recursive"] ||
+                        markdown_node["recursive"].as<bool>();
+
+                    g_markdown_source = std::make_shared<MarkdownSource>(markdown_config);
+                    if (g_markdown_source->initialize()) {
+                        g_rag_engine->addDataSource(g_markdown_source);
+                        std::cout << "  ✅ MarkdownSource: " << markdown_config.directory_path
+                                  << " (" << g_markdown_source->count() << " документов)" << std::endl;
+                    } else {
+                        std::cerr << "  ⚠️  MarkdownSource не инициализирован" << std::endl;
+                        g_markdown_source.reset();
+                    }
+                }
+#endif
+            } catch (const std::exception& e) {
+                std::cerr << "⚠️  Cache/rate_limiter/batch config error: " << e.what() << std::endl;
+            }
+        }
+        std::cout << std::endl;
+
+        // Configure RAG routes (with cache, rate limiter, batch, prompt cache, metrics)
+        setupRagRoutes(*g_server, g_rag_engine, g_llm_client, cache, rate_limiter,
+                      batch_processor, prompt_cache, metrics, g_analytics_service,
+                      g_markdown_source, g_dedup_service
+#if QORNIX_HAS_SQLITE
+                      , g_sqlite_source
+#endif
+        );
 
         g_server->run();
 
@@ -297,6 +531,13 @@ int main(int argc, char* argv[]) {
 
         std::cout << "\n👋 Остановка сервера..." << std::endl;
         g_server.reset();
+        g_dedup_service.reset();
+        g_markdown_source.reset();
+        g_analytics_service.reset();
+#if QORNIX_HAS_SQLITE
+        g_sqlite_source.reset();
+#endif
+        g_llm_client.reset();
         g_rag_engine.reset();
 
     } catch (const std::exception& e) {

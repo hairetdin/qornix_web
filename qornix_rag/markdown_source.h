@@ -75,7 +75,7 @@ private:
     Config config_;
     std::vector<std::string> imported_files_;
     std::vector<ParsedDocument> parsed_docs_;
-    mutable std::mutex mutex_;
+    mutable std::recursive_mutex mutex_;
 
     // Internal helpers
     bool parseFrontmatter(const std::string& content, std::map<std::string, std::string>& frontmatter, std::string& body);
