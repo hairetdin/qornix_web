@@ -33,7 +33,13 @@ RagApiHandler::RagApiHandler(
     std::shared_ptr<IPromptCache> pcache,
     std::shared_ptr<LLMRAGMetrics> metrics,
     std::shared_ptr<AnalyticsService> analytics,
-    std::shared_ptr<MarkdownSource> markdown)
+    std::shared_ptr<MarkdownSource> markdown,
+    std::shared_ptr<DeduplicationService> dedup
+#if QORNIX_HAS_SQLITE
+    , std::shared_ptr<SQLiteSource> sqlite
+#endif
+    )
+#if QORNIX_HAS_SQLITE
     : rag_engine_(std::move(engine)),
       llm_client_(std::move(llm)),
       cache_(std::move(cache)),
@@ -42,7 +48,21 @@ RagApiHandler::RagApiHandler(
       prompt_cache_(std::move(pcache)),
       metrics_(std::move(metrics)),
       analytics_service_(std::move(analytics)),
-      markdown_source_(std::move(markdown)) {}
+      markdown_source_(std::move(markdown)),
+      dedup_service_(std::move(dedup)),
+      sqlite_source_(std::move(sqlite)) {}
+#else
+    : rag_engine_(std::move(engine)),
+      llm_client_(std::move(llm)),
+      cache_(std::move(cache)),
+      rate_limiter_(std::move(limiter)),
+      batch_processor_(std::move(batch)),
+      prompt_cache_(std::move(pcache)),
+      metrics_(std::move(metrics)),
+      analytics_service_(std::move(analytics)),
+      markdown_source_(std::move(markdown)),
+      dedup_service_(std::move(dedup)) {}
+#endif
 
 RagApiHandler::RagApiHandler(std::shared_ptr<RagEngine> engine)
     : rag_engine_(std::move(engine)) {}
@@ -927,24 +947,144 @@ void RagApiHandler::handlePost(
                 res.result(http::status::ok);
             }
         } else if (path == "/api/qa/dedup" || path.find("/api/qa/dedup") != std::string::npos) {
-            // POST /api/qa/dedup - Find duplicate QA pairs (hash-based)
+            // POST /api/qa/dedup - Find duplicate QA pairs (semantic deduplication)
             {
-                // For now, return info about dedup capability
+                if (!dedup_service_) {
+                    buildErrorResponse(res, http::status::service_unavailable, "DeduplicationService not configured");
+                    return;
+                }
+
+                boost::json::value json_req = boost::json::parse(req.body());
+                std::string source_id;
+                float threshold = 0.85f;
+
+                if (json_req.if_object()) {
+                    auto obj = json_req.as_object();
+                    if (obj.contains("source_id")) {
+                        source_id = obj.at("source_id").as_string().c_str();
+                    }
+                    if (obj.contains("threshold")) {
+                        threshold = static_cast<float>(obj.at("threshold").as_double());
+                    }
+                }
+
+                // Load QA pairs from SQLiteSource if source_id specified
+                std::vector<QASource::QAPair> pairs;
+#if QORNIX_HAS_SQLITE
+                if (!source_id.empty() && sqlite_source_ && sqlite_source_->getSourceId() == source_id) {
+                    pairs = sqlite_source_->getAllPairs();
+                } else
+#endif
+                if (!source_id.empty()) {
+                    buildErrorResponse(res, http::status::bad_request, "Unknown source_id: " + source_id);
+                    return;
+                } else {
+                    // If no source_id, use all registered data sources
+                    auto sources = rag_engine_->getDataSources();
+                    for (const auto& source : sources) {
+                        if (source->getType() == DataSourceType::DATABASE) {
+#if QORNIX_HAS_SQLITE
+                            if (sqlite_source_ && sqlite_source_->count() > 0) {
+                                auto sql_pairs = sqlite_source_->getAllPairs();
+                                pairs.insert(pairs.end(), sql_pairs.begin(), sql_pairs.end());
+                            }
+#endif
+                        } else if (source->getType() == DataSourceType::QA_KB) {
+                            // QASource
+                            auto qa_source = std::dynamic_pointer_cast<QASource>(source);
+                            if (qa_source) {
+                                auto qa_pairs = qa_source->getAllPairs();
+                                pairs.insert(pairs.end(), qa_pairs.begin(), qa_pairs.end());
+                            }
+                        }
+                    }
+                }
+
+                if (pairs.empty()) {
+                    boost::json::object response;
+                    response["success"] = true;
+                    response["message"] = "No QA pairs found to check";
+                    response["total_pairs"] = static_cast<std::int64_t>(0);
+                    response["duplicates_found"] = static_cast<std::int64_t>(0);
+                    response["duplicates"] = boost::json::array{};
+                    buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+                    return;
+                }
+
+                // Run deduplication
+                auto dedup_config = dedup_service_->getConfig();
+                dedup_config.similarity_threshold = threshold;
+                dedup_service_->setConfig(dedup_config);
+
+                auto result = dedup_service_->findDuplicates(pairs, *rag_engine_);
+
+                // Build response
+                boost::json::array duplicates_array;
+                for (const auto& dup : result.duplicates) {
+                    boost::json::object dup_obj{
+                        {"primary_id", dup.primary_id},
+                        {"duplicate_id", dup.duplicate_id},
+                        {"similarity", static_cast<double>(dup.similarity)},
+                        {"reason", dup.reason}
+                    };
+                    duplicates_array.emplace_back(dup_obj);
+                }
+
                 boost::json::object response;
                 response["success"] = true;
-                response["message"] = "Semantic deduplication not yet implemented. Hash-based dedup is active on insert.";
-                response["hash_dedup_enabled"] = true;
+                response["result"] = {
+                    {"total_pairs", static_cast<std::int64_t>(result.total_pairs)},
+                    {"duplicates_found", static_cast<std::int64_t>(result.duplicates_found)},
+                    {"duplicates", duplicates_array}
+                };
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
         } else if (path == "/api/qa/dedup/remove" || path.find("/api/qa/dedup/remove") != std::string::npos) {
             // POST /api/qa/dedup/remove - Remove duplicates
             {
+                if (!dedup_service_) {
+                    buildErrorResponse(res, http::status::service_unavailable, "DeduplicationService not configured");
+                    return;
+                }
+
+#if QORNIX_HAS_SQLITE
+                if (!sqlite_source_) {
+                    buildErrorResponse(res, http::status::service_unavailable, "SQLiteSource not configured");
+                    return;
+                }
+
+                boost::json::value json_req = boost::json::parse(req.body());
+                float threshold = 0.85f;
+
+                if (json_req.if_object()) {
+                    auto obj = json_req.as_object();
+                    if (obj.contains("threshold")) {
+                        threshold = static_cast<float>(obj.at("threshold").as_double());
+                    }
+                }
+
+                // Find duplicates first
+                auto pairs = sqlite_source_->getAllPairs();
+                auto dedup_config = dedup_service_->getConfig();
+                dedup_config.similarity_threshold = threshold;
+                dedup_service_->setConfig(dedup_config);
+
+                auto result = dedup_service_->findDuplicates(pairs, *rag_engine_);
+
+                // Remove duplicates
+                size_t removed = dedup_service_->removeDuplicates(*sqlite_source_, result.duplicates);
+
                 boost::json::object response;
                 response["success"] = true;
-                response["message"] = "Semantic deduplication removal not yet implemented.";
+                response["message"] = "Duplicates removed";
+                response["duplicates_found"] = static_cast<std::int64_t>(result.duplicates_found);
+                response["duplicates_removed"] = static_cast<std::int64_t>(removed);
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+#else
+                buildErrorResponse(res, http::status::service_unavailable, "SQLiteSource not available");
+#endif
             }
         } else if (path == "/api/import/markdown" || path.find("/api/import/markdown") != std::string::npos) {
             // POST /api/import/markdown - Import Markdown files
@@ -1136,7 +1276,12 @@ void setupRagRoutes(HttpServer& server,
                     std::shared_ptr<IPromptCache> pcache,
                     std::shared_ptr<LLMRAGMetrics> metrics,
                     std::shared_ptr<AnalyticsService> analytics,
-                    std::shared_ptr<MarkdownSource> markdown) {
+                    std::shared_ptr<MarkdownSource> markdown,
+                    std::shared_ptr<DeduplicationService> dedup
+#if QORNIX_HAS_SQLITE
+                    , std::shared_ptr<SQLiteSource> sqlite
+#endif
+                    ) {
     std::cout << "\U0001f527\U0001f4dd\u0414\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0438\u0435 RAG \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u043e\u0432..." << std::endl;
 
     // Main page
@@ -1223,13 +1368,21 @@ void setupRagRoutes(HttpServer& server,
         std::cout << "  \U0001f4c8 POST /api/analytics/export - Export report" << std::endl;
     }
 
-    // Phase 5: QA dedup endpoints (stub)
-    {
-        server.add_route("/api/qa/dedup", std::make_shared<RagApiHandler>(rag_engine));
-        std::cout << "  \U0001f504 POST /api/qa/dedup - Find duplicates (stub)" << std::endl;
+    // Phase 5: QA dedup endpoints (semantic deduplication)
+    if (dedup) {
+#if QORNIX_HAS_SQLITE
+        server.add_route("/api/qa/dedup", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, markdown, dedup, sqlite));
+        std::cout << "  \U0001f504 POST /api/qa/dedup - Find duplicates (semantic)" << std::endl;
 
-        server.add_route("/api/qa/dedup/remove", std::make_shared<RagApiHandler>(rag_engine));
-        std::cout << "  \U0001f504 POST /api/qa/dedup/remove - Remove duplicates (stub)" << std::endl;
+        server.add_route("/api/qa/dedup/remove", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, markdown, dedup, sqlite));
+        std::cout << "  \U0001f504 POST /api/qa/dedup/remove - Remove duplicates" << std::endl;
+#else
+        server.add_route("/api/qa/dedup", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, markdown, dedup));
+        std::cout << "  \U0001f504 POST /api/qa/dedup - Find duplicates (semantic)" << std::endl;
+
+        server.add_route("/api/qa/dedup/remove", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, markdown, dedup));
+        std::cout << "  \U0001f504 POST /api/qa/dedup/remove - Remove duplicates" << std::endl;
+#endif
     }
 
     // Phase 5: Markdown import endpoints

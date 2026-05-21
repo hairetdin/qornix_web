@@ -228,6 +228,115 @@ target_sources(test_data_sources PRIVATE
 
 add_test(NAME test_data_sources COMMAND test_data_sources)
 
+# Phase 5: SQLiteSource tests
+add_executable(test_sqlite_source
+    test_sqlite_source.cpp
+)
+
+target_include_directories(test_sqlite_source PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${QORNIX_WEB_CORE_INCLUDE}
+)
+
+target_link_libraries(test_sqlite_source PRIVATE
+    ${QORNIX_WEB_CORE_LIB}
+)
+
+find_yaml_cpp_for(test_sqlite_source)
+
+# Link implementation files
+target_sources(test_sqlite_source PRIVATE
+    ../sqlite_source.cpp
+)
+
+if(SQLITE3_FOUND)
+    target_link_libraries(test_sqlite_source PRIVATE ${SQLITE3_LIBRARY})
+    target_include_directories(test_sqlite_source PRIVATE ${SQLITE3_INCLUDE_DIR})
+    target_compile_definitions(test_sqlite_source PRIVATE QORNIX_HAS_SQLITE=1)
+endif()
+
+add_test(NAME test_sqlite_source COMMAND test_sqlite_source)
+
+# Phase 5: MarkdownSource tests
+add_executable(test_markdown_source
+    test_markdown_source.cpp
+)
+
+target_include_directories(test_markdown_source PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${QORNIX_WEB_CORE_INCLUDE}
+)
+
+target_link_libraries(test_markdown_source PRIVATE
+    ${QORNIX_WEB_CORE_LIB}
+)
+
+find_yaml_cpp_for(test_markdown_source)
+
+# Link implementation files
+target_sources(test_markdown_source PRIVATE
+    ../markdown_source.cpp
+)
+
+add_test(NAME test_markdown_source COMMAND test_markdown_source)
+
+# Phase 5: DeduplicationService tests
+add_executable(test_deduplication
+    test_deduplication.cpp
+)
+
+target_include_directories(test_deduplication PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${QORNIX_WEB_CORE_INCLUDE}
+)
+
+target_link_libraries(test_deduplication PRIVATE
+    ${QORNIX_WEB_CORE_LIB}
+)
+
+find_yaml_cpp_for(test_deduplication)
+
+# Link implementation files
+target_sources(test_deduplication PRIVATE
+    ../deduplication_service.cpp
+    ../sqlite_source.cpp
+)
+
+if(SQLITE3_FOUND)
+    target_link_libraries(test_deduplication PRIVATE ${SQLITE3_LIBRARY})
+    target_include_directories(test_deduplication PRIVATE ${SQLITE3_INCLUDE_DIR})
+    target_compile_definitions(test_deduplication PRIVATE QORNIX_HAS_SQLITE=1)
+endif()
+
+add_test(NAME test_deduplication COMMAND test_deduplication)
+
+# Phase 5: AnalyticsService tests
+add_executable(test_analytics
+    test_analytics.cpp
+)
+
+target_include_directories(test_analytics PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${QORNIX_WEB_CORE_INCLUDE}
+)
+
+target_link_libraries(test_analytics PRIVATE
+    ${QORNIX_WEB_CORE_LIB}
+)
+
+find_yaml_cpp_for(test_analytics)
+
+# Link implementation files
+target_sources(test_analytics PRIVATE
+    ../analytics_service.cpp
+)
+
+add_test(NAME test_analytics COMMAND test_analytics)
+
 # Print test summary
 message(STATUS "qornix_rag tests enabled")
 message(STATUS "  - test_llm_client")
@@ -239,3 +348,7 @@ message(STATUS "  - test_prompt_builder")
 message(STATUS "  - test_phase3 (cache & rate limiting)")
 message(STATUS "  - test_phase3_extended (batch, prompt cache, prometheus metrics)")
 message(STATUS "  - test_data_sources (DataSource implementations)")
+message(STATUS "  - test_sqlite_source (SQLite persistent storage)")
+message(STATUS "  - test_markdown_source (Markdown import)")
+message(STATUS "  - test_deduplication (Semantic deduplication)")
+message(STATUS "  - test_analytics (Search analytics)")

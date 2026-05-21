@@ -47,6 +47,8 @@ add_library(qornix_rag_lib STATIC
     markdown_source.h
     analytics_service.cpp
     analytics_service.h
+    deduplication_service.cpp
+    deduplication_service.h
     rag_extension.cpp
     rag_extension.h
     ../server/http_server.cpp

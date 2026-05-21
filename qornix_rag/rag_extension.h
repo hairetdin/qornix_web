@@ -26,6 +26,7 @@
 #endif
 #include "markdown_source.h"
 #include "analytics_service.h"
+#include "deduplication_service.h"
 #include "llm_cache.h"
 #include "rate_limiter.h"
 #include "batch_processor.h"
@@ -81,6 +82,11 @@ public:
      */
     std::shared_ptr<LLMClient> getLLMClient() const { return llm_client_; }
 
+    /**
+     * Get the DeduplicationService pointer (for API endpoints).
+     */
+    std::shared_ptr<DeduplicationService> getDedupService() const { return dedup_service_; }
+
 private:
     std::shared_ptr<RagEngine> rag_engine_;
     std::shared_ptr<LLMClient> llm_client_;
@@ -97,6 +103,7 @@ private:
 #endif
     std::shared_ptr<MarkdownSource> markdown_source_;
     std::shared_ptr<AnalyticsService> analytics_service_;
+    std::shared_ptr<DeduplicationService> dedup_service_;
 
     RagEngineConfig rag_config_;
     LLMConfig llm_config_;
