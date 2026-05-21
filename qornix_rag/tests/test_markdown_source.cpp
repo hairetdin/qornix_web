@@ -59,6 +59,14 @@
     } \
 } while(0)
 
+#define ASSERT_GT(actual, expected, msg) do { \
+    if (!((actual) > (expected))) { \
+        std::cerr << "FAILED: " << msg << " — expected > " << (expected) << ", got " << (actual) << std::endl; \
+        fail_count++; \
+        return; \
+    } \
+} while(0)
+
 #define ASSERT_NOT_NULL(ptr, msg) do { \
     if ((ptr) == nullptr) { \
         std::cerr << "FAILED: " << msg << " — pointer is null" << std::endl; \
@@ -114,7 +122,7 @@ TEST(markdown_source_basic) {
     bool init = source->initialize();
     ASSERT_TRUE(init, "MarkdownSource initialized");
 
-    ASSERT_EQ(DataSourceType::TEXT_DOCS, source->getType(), "DataSource type is TEXT_DOCS");
+    ASSERT_TRUE(source->getType() == DataSourceType::TEXT_DOCS, "DataSource type is TEXT_DOCS");
     ASSERT_EQ(0, source->count(), "Initial count is 0");
 
     source->cleanup();

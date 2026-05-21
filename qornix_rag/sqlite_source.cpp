@@ -95,6 +95,10 @@ bool SQLiteSource::connect() {
 }
 
 bool SQLiteSource::migrate() {
+    if (!db_ && !connect()) {
+        return false;
+    }
+
     const char* create_tables = R"(
         -- QA Pairs table
         CREATE TABLE IF NOT EXISTS qa_pairs (
@@ -273,17 +277,8 @@ bool SQLiteSource::addQAPair(const std::string& id, const std::string& question,
 
         rc = sqlite3_step(check_stmt);
         if (rc == SQLITE_ROW && sqlite3_column_int(check_stmt, 0) > 0) {
-            // Duplicate found, update instead
             sqlite3_finalize(check_stmt);
-
-            std::string update_sql = "UPDATE qa_pairs SET question = ?, answer = ?, "
-                                     "category = ?, aliases = ?, metadata = ?, "
-                                     "updated_at = CURRENT_TIMESTAMP, version = version + 1 "
-                                     "WHERE source_id = ? AND hash = ?";
-            return executePreparedStatement(update_sql, {
-                question, answer, category, aliases, metadata,
-                config_.source_id, hash
-            });
+            return false;
         }
         sqlite3_finalize(check_stmt);
     }
@@ -573,8 +568,8 @@ bool SQLiteSource::executePreparedStatement(const std::string& sql,
 
 std::string SQLiteSource::computeHash(const std::string& id, const std::string& question,
                                        const std::string& answer) const {
-    // Simple hash: combine id + question + answer and use HashCalculator
-    std::string combined = id + "|" + question + "|" + answer;
+    (void)id;
+    std::string combined = question + "|" + answer;
     return HashCalculator::compute_md5(combined);
 }
 

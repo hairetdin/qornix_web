@@ -11,17 +11,25 @@ enable_testing()
 # Find qornix_web_core library
 set(QORNIX_WEB_CORE_LIB "")
 set(QORNIX_WEB_CORE_INCLUDE "")
+set(QORNIX_WEB_CORE_LINK_TARGET "")
 
-# Try common build locations
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../build/async-gate-core/libqornix_web_core.a")
+# Prefer the parent CMake target when tests are built as part of qornix_web.
+if(TARGET qornix_web_core)
+    set(QORNIX_WEB_CORE_LINK_TARGET qornix_web_core)
+    set(QORNIX_WEB_CORE_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+# Try common standalone build locations.
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../build/async-gate-core/libqornix_web_core.a")
     set(QORNIX_WEB_CORE_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../../build/async-gate-core/libqornix_web_core.a")
     set(QORNIX_WEB_CORE_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../build/libqornix_web_core.a")
     set(QORNIX_WEB_CORE_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../../build/libqornix_web_core.a")
     set(QORNIX_WEB_CORE_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake-build-debug/libqornix_web_core.a")
+    set(QORNIX_WEB_CORE_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake-build-debug/libqornix_web_core.a")
+    set(QORNIX_WEB_CORE_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 endif()
 
-if(NOT QORNIX_WEB_CORE_LIB)
+if(NOT QORNIX_WEB_CORE_LINK_TARGET AND NOT QORNIX_WEB_CORE_LIB)
     message(WARNING "qornix_web_core library not found. Tests will not build.")
     return()
 endif()
@@ -82,11 +90,10 @@ macro(add_rag_test test_name source_file)
         ${QORNIX_WEB_CORE_INCLUDE}
     )
 
+    target_link_libraries(${test_name} PRIVATE ${QORNIX_WEB_CORE_LINK_TARGET} ${QORNIX_WEB_CORE_LIB})
+
     if(CURL_FOUND)
-        target_link_libraries(${test_name} PRIVATE
-            ${QORNIX_WEB_CORE_LIB}
-            ${CURL_LIBRARIES}
-        )
+        target_link_libraries(${test_name} PRIVATE ${CURL_LIBRARIES})
         target_compile_definitions(${test_name} PRIVATE QORNIX_HAS_CURL=1)
     endif()
 
@@ -123,6 +130,7 @@ target_include_directories(test_prompt_builder PRIVATE
 )
 
 target_link_libraries(test_prompt_builder PRIVATE
+    ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
 )
 
@@ -147,6 +155,7 @@ target_include_directories(test_phase3 PRIVATE
 )
 
 target_link_libraries(test_phase3 PRIVATE
+    ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
 )
 
@@ -177,6 +186,7 @@ target_include_directories(test_phase3_extended PRIVATE
 )
 
 target_link_libraries(test_phase3_extended PRIVATE
+    ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
 )
 
@@ -208,6 +218,7 @@ target_include_directories(test_data_sources PRIVATE
 )
 
 target_link_libraries(test_data_sources PRIVATE
+    ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
 )
 
@@ -240,6 +251,7 @@ target_include_directories(test_sqlite_source PRIVATE
 )
 
 target_link_libraries(test_sqlite_source PRIVATE
+    ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
 )
 
@@ -250,7 +262,7 @@ target_sources(test_sqlite_source PRIVATE
     ../sqlite_source.cpp
 )
 
-if(SQLITE3_FOUND)
+if(SQLITE3_LIBRARY)
     target_link_libraries(test_sqlite_source PRIVATE ${SQLITE3_LIBRARY})
     target_include_directories(test_sqlite_source PRIVATE ${SQLITE3_INCLUDE_DIR})
     target_compile_definitions(test_sqlite_source PRIVATE QORNIX_HAS_SQLITE=1)
@@ -270,6 +282,7 @@ target_include_directories(test_markdown_source PRIVATE
 )
 
 target_link_libraries(test_markdown_source PRIVATE
+    ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
 )
 
@@ -294,6 +307,7 @@ target_include_directories(test_deduplication PRIVATE
 )
 
 target_link_libraries(test_deduplication PRIVATE
+    ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
 )
 
@@ -305,7 +319,7 @@ target_sources(test_deduplication PRIVATE
     ../sqlite_source.cpp
 )
 
-if(SQLITE3_FOUND)
+if(SQLITE3_LIBRARY)
     target_link_libraries(test_deduplication PRIVATE ${SQLITE3_LIBRARY})
     target_include_directories(test_deduplication PRIVATE ${SQLITE3_INCLUDE_DIR})
     target_compile_definitions(test_deduplication PRIVATE QORNIX_HAS_SQLITE=1)
@@ -325,6 +339,7 @@ target_include_directories(test_analytics PRIVATE
 )
 
 target_link_libraries(test_analytics PRIVATE
+    ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
 )
 

@@ -80,6 +80,7 @@ public:
         size_t gap_min_search_count = 3;       // Min searches to be considered a gap
     };
 
+    AnalyticsService();
     explicit AnalyticsService(Config config);
 
     /**

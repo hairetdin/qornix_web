@@ -65,9 +65,9 @@ public:
                  std::shared_ptr<LLMRAGMetrics> metrics,
                  std::shared_ptr<AnalyticsService> analytics,
                  std::shared_ptr<MarkdownSource> markdown,
-                 std::shared_ptr<DeduplicationService> dedup = nullptr,
+                 std::shared_ptr<DeduplicationService> dedup = nullptr
 #if QORNIX_HAS_SQLITE
-                 std::shared_ptr<SQLiteSource> sqlite = nullptr
+                 , std::shared_ptr<SQLiteSource> sqlite = nullptr
 #endif
                  );
 

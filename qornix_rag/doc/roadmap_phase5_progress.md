@@ -1,7 +1,7 @@
 # Фаза 5: Персистентность, Аналитика и Импорт — Прогресс
 
-> **Версия:** 1.1
-> **Дата:** 2026-03-18
+> **Версия:** 1.2
+> **Дата:** 2026-05-21
 > **Статус:** ✅ ЗАВЕРШЕНО (100%)
 
 ---
@@ -39,7 +39,7 @@
 | DeduplicationService | ✅ | Всегда инициализируется, config из `rag.dedup.*` |
 | API endpoints | ✅ | Все 7 endpoints зарегистрированы с full service injection |
 
-### ✅ Завершено (Тесты — 4 набора, 37 тестов)
+### ✅ Завершено (Phase 5 тесты — 4 набора, 37 тестов)
 
 | Набор тестов | Файл | Кол-во тестов | Описание |
 |--------------|------|---------------|----------|
@@ -47,6 +47,13 @@
 | MarkdownSource | `test_markdown_source.cpp` | 7 | File/dir import, metadata, recursive scanning, document generation |
 | DeduplicationService | `test_deduplication.cpp` | 8 | Basic ops, identical/different questions, threshold, category exclusion, batch |
 | AnalyticsService | `test_analytics.cpp` | 11 | Log search, reports, top queries, missing answers, knowledge gaps, JSON export, thread safety |
+
+### ✅ Завершено (Regression gate — 13/13 RAG test targets)
+
+| Gate | Команда | Результат |
+|------|---------|-----------|
+| Build | `cmake --build build --target qornix_rag ...` | ✅ standalone executable и RAG test targets собираются |
+| Tests | `ctest -R 'test_(llm_client|rag_api|graceful_degradation|health_check|streaming|prompt_builder|phase3|phase3_extended|data_sources|sqlite_source|markdown_source|deduplication|analytics)$' --output-on-failure` | ✅ 13/13 passed |
 
 ---
 
@@ -70,7 +77,8 @@
 - [x] AnalyticsService отслеживает поисковые запросы и выявляет knowledge gaps — ✅ `test_analytics_knowledge_gaps`
 - [x] Все API endpoints работают корректно (7 endpoints) — ✅ functional, not stubs
 - [x] 37 новых тестов написаны (11+7+8+11) — ✅ registered in CMakeLists.txt
-- [x] qornix_rag_lib собирается успешно (100%) — ✅ build verified
+- [x] Полный RAG regression suite проходит — ✅ 13/13 test targets passed
+- [x] qornix_rag_lib и standalone `qornix_rag` собираются успешно — ✅ build verified
 - [x] Документация обновлена — ✅ этот файл
 
 ---
@@ -107,15 +115,15 @@
 ✅ Этап 3 (AnalyticsService integration) — ЗАВЕРШЕНО
 ✅ Этап 4 (DeduplicationService)       — ЗАВЕРШЕНО
 ✅ Этап 5 (API Endpoints)              — ЗАВЕРШЕНО
-✅ Этап 6 (Build & Test)               — ЗАВЕРШЕНО (build OK, tests require qornix_web_core)
+✅ Этап 6 (Build & Test)               — ЗАВЕРШЕНО (build OK, 13/13 RAG test targets passed)
 ```
 
 ---
 
 ## 6. Notes
 
-- Hash-дедупликация в `SQLiteSource::addQAPair()` работает на уровне UNIQUE constraint (source_id + hash)
+- Hash-дедупликация в `SQLiteSource::addQAPair()` работает на уровне UNIQUE constraint (source_id + hash), hash считается по question+answer
 - Semantic дедупликация через DeduplicationService работает поверх hash-деда, используя embeddings
 - AnalyticsService логирует каждый запрос в `/api/search` автоматически
 - MarkdownSource поддерживает YAML frontmatter с полями: title, category, aliases
-- Тесты требуют `qornix_web_core` для сборки (CMakeLists.txt возвращает early если не найден)
+- Тесты используют parent CMake target `qornix_web_core`, когда RAG собирается внутри qornix_web; standalone fallback ищет готовую библиотеку

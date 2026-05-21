@@ -124,6 +124,31 @@ prompt_cache:
   ttl_seconds: 1800                      # Time-to-live (30 min)
 
 # ============================================================================
+# Phase 5: Persistent knowledge base, Markdown import, analytics, dedup
+# ============================================================================
+rag:
+  sqlite:
+    enabled: true                         # Persistent QA storage for Phase 5 endpoints
+    db_path: "rag_kb.db"                  # Created relative to qornix_rag/ when using run.sh
+    source_id: "sqlite_kb"
+    name: "SQLite Knowledge Base"
+    auto_migrate: true
+
+  markdown:
+    enabled: true                         # Enables /api/import/markdown endpoints
+    directory_path: "knowledge_base"      # Optional local Markdown knowledge base
+    recursive: true
+
+  analytics:
+    max_log_entries: 100000
+    top_n: 20
+    gap_min_search_count: 3
+
+  dedup:
+    similarity_threshold: 0.85
+    auto_remove: false
+
+# ============================================================================
 # Phase 3: Prometheus Metrics (always enabled)
 # ============================================================================
 # Exposed at GET /api/metrics

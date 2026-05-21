@@ -23,6 +23,9 @@
 #include <vector>
 #include <sstream>
 
+using qornix::rag::MemorySource;
+using qornix::rag::QASource;
+
 // Test helpers
 #define TEST(name) void name()
 #define RUN_TEST(name) do { \
@@ -79,7 +82,7 @@ TEST(memory_source_basic) {
     auto source = std::make_shared<MemorySource>(config);
     ASSERT_NOT_NULL(source, "MemorySource created");
     ASSERT_EQ(0, static_cast<int>(source->count()), "Initial count is 0");
-    ASSERT_EQ(DataSourceType::MEMORY, source->getType(), "Type is MEMORY");
+    ASSERT_TRUE(source->getType() == DataSourceType::MEMORY, "Type is MEMORY");
     ASSERT_TRUE(source->initialize(), "initialize() returns true");
 }
 
@@ -181,7 +184,7 @@ TEST(qa_source_basic) {
     auto source = std::make_shared<QASource>(config);
     ASSERT_NOT_NULL(source, "QASource created");
     ASSERT_EQ(0, static_cast<int>(source->count()), "Initial count is 0");
-    ASSERT_EQ(DataSourceType::QA_KB, source->getType(), "Type is QA_KB");
+    ASSERT_TRUE(source->getType() == DataSourceType::QA_KB, "Type is QA_KB");
     ASSERT_TRUE(source->initialize(), "initialize() returns true");
 }
 
@@ -217,8 +220,8 @@ TEST(qa_source_find_pair) {
 
     source->addQAPair(pair);
 
-    auto found = source->findQAPair("qa_001");
-    ASSERT_TRUE(found.has_value(), "Found QA pair by ID");
+    auto found = source->findQAPair("What is DI?");
+    ASSERT_TRUE(found.has_value(), "Found QA pair by question");
     ASSERT_EQ("What is DI?", found.value().question, "Question matches");
     ASSERT_EQ("DI is Dependency Injection.", found.value().answer, "Answer matches");
 }
@@ -307,7 +310,7 @@ TEST(qa_source_update_pair) {
     pair.answer = "Updated answer.";
     source->updateQAPair(pair);
 
-    auto found = source->findQAPair("qa_001");
+    auto found = source->findQAPair("Original question?");
     ASSERT_TRUE(found.has_value(), "Pair still exists after update");
     ASSERT_EQ("Updated answer.", found.value().answer, "Answer was updated");
 }
@@ -355,6 +358,7 @@ TEST(rag_engine_add_data_source) {
 
     MemorySource::Config mem_config;
     mem_config.name = "Test Memory Source";
+    mem_config.source_id = "test_memory_source";
     auto mem_source = std::make_shared<MemorySource>(mem_config);
 
     engine.addDataSource(mem_source);
@@ -369,12 +373,13 @@ TEST(rag_engine_remove_data_source) {
 
     MemorySource::Config mem_config;
     mem_config.name = "Test Memory Source";
+    mem_config.source_id = "test_memory_source";
     auto mem_source = std::make_shared<MemorySource>(mem_config);
 
     engine.addDataSource(mem_source);
     ASSERT_EQ(1, static_cast<int>(engine.getDataSources().size()), "Engine has 1 source");
 
-    engine.removeDataSourceByName("Test Memory Source");
+    engine.removeDataSource("test_memory_source");
     ASSERT_EQ(0, static_cast<int>(engine.getDataSources().size()), "Engine has 0 sources after remove");
 }
 

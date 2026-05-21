@@ -11,6 +11,10 @@
 // AnalyticsService implementation
 // ============================================================================
 
+AnalyticsService::AnalyticsService()
+    : AnalyticsService(Config{}) {
+}
+
 AnalyticsService::AnalyticsService(Config config)
     : config_(std::move(config)) {
 }

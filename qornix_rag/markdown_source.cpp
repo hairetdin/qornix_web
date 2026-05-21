@@ -32,7 +32,7 @@ MarkdownSource::MarkdownSource(Config config)
 }
 
 bool MarkdownSource::initialize() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     if (imported_files_.empty()) {
         importFiles();
@@ -42,18 +42,18 @@ bool MarkdownSource::initialize() {
 }
 
 void MarkdownSource::cleanup() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     imported_files_.clear();
     parsed_docs_.clear();
 }
 
 size_t MarkdownSource::count() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return parsed_docs_.size();
 }
 
 std::vector<Document> MarkdownSource::getDocuments() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     std::vector<Document> docs;
     for (size_t i = 0; i < parsed_docs_.size(); ++i) {
@@ -73,7 +73,7 @@ void MarkdownSource::removeDocument(const std::string& id) {
 }
 
 MarkdownSource::ImportResult MarkdownSource::importFiles() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     ImportResult result;
     result.files_imported = 0;
@@ -99,7 +99,7 @@ MarkdownSource::ImportResult MarkdownSource::importFiles() {
 }
 
 bool MarkdownSource::importFile(const std::string& file_path) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     // Check if already imported
     if (std::find(imported_files_.begin(), imported_files_.end(), file_path) != imported_files_.end()) {
@@ -164,17 +164,17 @@ bool MarkdownSource::importFile(const std::string& file_path) {
 }
 
 std::vector<std::string> MarkdownSource::getImportedFiles() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return imported_files_;
 }
 
 void MarkdownSource::setDirectoryPath(const std::string& path) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     config_.directory_path = path;
 }
 
 void MarkdownSource::setFilePatterns(const std::vector<std::string>& patterns) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     config_.file_patterns = patterns;
 }
 
