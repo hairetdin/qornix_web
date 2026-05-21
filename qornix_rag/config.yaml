@@ -30,3 +30,101 @@ embedding:
   onnx_threads: 2
   normalize_embeddings: true
   enable_fallback: true
+
+# LLM Configuration (optional)
+# Uncomment and configure to enable AI-powered Q&A
+llm:
+  # API URL (OpenAI-compatible)
+  api_url: "http://localhost:11434"      # Ollama по умолчанию
+  api_key: ""                            # Если требуется
+  model: "llama3"                        # Модель
+
+  # Request settings
+  max_tokens: 1024                       # Максимальная длина ответа
+  temperature: 0.7                       # Креативность (0-1)
+  top_p: 0.9                             # Nucleus sampling
+  request_timeout_ms: 30000              # Таймаут запроса
+
+  # System prompt
+  system_prompt: |
+    Ты — помощник разработчика, который отвечает на вопросы
+    на основе предоставленного контекста из кода проекта.
+
+    Правила:
+    - Используй только информацию из контекста
+    - Если информации недостаточно, скажи "Недостаточно информации"
+    - Приводи примеры кода если это уместно
+    - Отвечай на русском языке
+    - Цитируй файлы из которых взята информация
+
+  # Streaming (SSE)
+  stream: false                          # Включить streaming
+
+  # Failover (multiple LLM endpoints)
+  failover:
+    enabled: false
+    endpoints:
+      # - url: "http://localhost:8080"
+      #   model: "mistral"
+
+# ============================================================================
+# Phase 3: Caching (optional)
+# ============================================================================
+# Cache LLM responses to speed up repeated questions
+# Backend: "memory" (default, in-process) or "redis" (requires hiredis)
+cache:
+  enabled: true                          # Enable/disable caching
+  backend: "memory"                      # memory | redis
+  ttl_seconds: 3600                      # Time-to-live for cache entries (1 hour)
+  max_size: 1000                         # Maximum number of cached entries
+
+  # Redis settings (only used if backend = "redis")
+  redis:
+    host: "127.0.0.1"
+    port: 6379
+    db: 0
+    password: ""
+    ttl_seconds: 3600
+
+# ============================================================================
+# Phase 3: Rate Limiting (optional)
+# ============================================================================
+# Protect against DDoS and excessive LLM usage
+rate_limit:
+  enabled: true                          # Enable/disable rate limiting
+  max_requests_per_second: 10            # Global: max requests/sec
+  max_requests_per_minute: 100           # Global: max requests/min
+
+  per_ip_limit: true                     # Enable per-IP limits
+  max_requests_per_second_per_ip: 2      # Per-IP: max requests/sec
+  max_requests_per_minute_per_ip: 30     # Per-IP: max requests/min
+
+  # IP whitelist (bypass rate limiting)
+  # whitelist:
+  #   - "127.0.0.1"
+  #   - "192.168.1.100"
+
+# ============================================================================
+# Phase 3: Batch Processing (optional)
+# ============================================================================
+# Process multiple questions concurrently
+batch:
+  enabled: true                          # Enable/disable batch processing
+  max_concurrent: 4                      # Max concurrent LLM requests
+  question_timeout_ms: 60000             # Timeout per question (60s)
+  batch_timeout_ms: 300000               # Timeout for entire batch (5 min)
+
+# ============================================================================
+# Phase 3: Prompt Cache (optional)
+# ============================================================================
+# Cache search results to avoid redundant RAG searches
+prompt_cache:
+  enabled: true                          # Enable/disable prompt cache
+  max_size: 500                          # Maximum cached prompts
+  ttl_seconds: 1800                      # Time-to-live (30 min)
+
+# ============================================================================
+# Phase 3: Prometheus Metrics (always enabled)
+# ============================================================================
+# Exposed at GET /api/metrics
+# No configuration needed — always active

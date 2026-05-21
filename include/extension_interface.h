@@ -8,6 +8,10 @@
 #pragma once
 #include <string>
 
+// Forward declarations to avoid circular dependencies
+class HttpServer;
+class DIContainer;
+
 class ExtensionInterface {
 public:
     virtual ~ExtensionInterface() = default;

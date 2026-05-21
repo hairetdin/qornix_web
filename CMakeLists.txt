@@ -132,6 +132,10 @@ if(QORNIX_BUILD_APP)
         ${CMAKE_CURRENT_SOURCE_DIR}/handlers
     )
 
+    if(QORNIX_BUILD_RAG)
+        target_compile_definitions(qornix_web PRIVATE QORNIX_BUILD_RAG)
+    endif()
+
     target_link_libraries(qornix_web PRIVATE qornix_web_core)
 endif()
 
@@ -154,6 +158,9 @@ endif()
 
 if(QORNIX_BUILD_RAG)
     add_subdirectory(qornix_rag)
+
+    # Link RAG library into qornix_web_core for optional RAG integration
+    target_link_libraries(qornix_web_core PUBLIC qornix_rag_lib)
 endif()
 
 # Unit tests.

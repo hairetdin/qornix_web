@@ -94,9 +94,65 @@ struct Document {
     std::string hash;
     std::chrono::system_clock::time_point last_modified;
     std::vector<float> embedding; // Vector representation
+    std::map<std::string, std::string> metadata; // Additional metadata
 
     Document() : size_bytes(0), lines_count(0) {
     }
+};
+
+/**
+ * Type of data source (Phase 4).
+ */
+enum class DataSourceType {
+    FILESYSTEM,   // Files on disk (code, configs)
+    QA_KB,        // QA pairs knowledge base
+    TEXT_DOCS,    // Text documents (.md, .txt, .rst)
+    DATABASE,     // Database source
+    MEMORY,       // In-memory documents
+    CUSTOM        // User-defined source
+};
+
+// DataSource class is defined below to avoid circular dependency
+
+/**
+ * Convert DataSourceType to string.
+ */
+inline std::string data_source_type_to_string(DataSourceType type) {
+    switch (type) {
+        case DataSourceType::FILESYSTEM: return "FILESYSTEM";
+        case DataSourceType::QA_KB:      return "QA_KB";
+        case DataSourceType::TEXT_DOCS:  return "TEXT_DOCS";
+        case DataSourceType::DATABASE:   return "DATABASE";
+        case DataSourceType::MEMORY:     return "MEMORY";
+        case DataSourceType::CUSTOM:     return "CUSTOM";
+        default: return "UNKNOWN";
+    }
+}
+
+/**
+ * Abstract interface for RAG data sources.
+ * All data sources must implement this interface to be used with RagEngine.
+ */
+class DataSource {
+public:
+    virtual ~DataSource() = default;
+
+    virtual std::vector<Document> getDocuments() = 0;
+    virtual void addDocument(const Document& doc) = 0;
+    virtual void removeDocument(const std::string& id) = 0;
+    virtual DataSourceType getType() const = 0;
+    virtual size_t count() const = 0;
+    virtual std::string getId() const = 0;
+    virtual std::string getName() const = 0;
+    virtual bool initialize() = 0;
+    virtual void cleanup() = 0;
+
+    virtual void setProgressCallback(std::function<void(size_t current, size_t total)> callback) {
+        progress_callback_ = std::move(callback);
+    }
+
+protected:
+    std::function<void(size_t current, size_t total)> progress_callback_;
 };
 
 struct SearchResult {
@@ -107,6 +163,10 @@ struct SearchResult {
     double fused_score;
     std::string snippet;
     std::vector<std::pair<size_t, size_t>> match_locations;
+
+    // Phase 4: Source information
+    DataSourceType source_type = DataSourceType::FILESYSTEM;
+    std::string source_id;
 
     SearchResult() : score(0.0), vector_score(0.0), text_score(0.0), fused_score(0.0) {
     }
@@ -142,7 +202,7 @@ private:
     size_t total_terms_ = 0;
     size_t num_documents_ = 0;
 
-    const std::set<std::string> stop_words_ = {
+    std::set<std::string> stop_words_ = {
         "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
         "have", "has", "had", "do", "does", "did", "will", "would", "could", "should",
         "i", "you", "he", "she", "it", "we", "they", "what", "which", "who",
@@ -333,11 +393,17 @@ private:
     EmbeddingConfig embedding_config_;
     size_t max_file_size_bytes_ = 512 * 1024;
     bool is_hybrid_indexed_ = false;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     bool is_indexed_ = false;
     std::string indexed_project_root_ = ".";
     const std::atomic<bool>* stop_flag_ = nullptr;
     size_t last_index_duration_ms_ = 0;
+
+    // ============================================
+    // Phase 4: Data Source Support
+    // ============================================
+    std::vector<std::shared_ptr<DataSource>> data_sources_;
+    mutable std::mutex sources_mutex_;
     std::unordered_map<std::string, int64_t> tokenizer_vocab_;
     int64_t unk_token_id_ = 100;
     int64_t cls_token_id_ = 101;
@@ -1426,4 +1492,152 @@ public:
         }
         return nullptr;
     }
+
+    // ============================================
+    // Phase 4: Data Source Management
+    // ============================================
+
+    /**
+     * Add a data source to the engine.
+     * Documents from this source will be indexed when indexSources() is called.
+     *
+     * Usage:
+     *   auto qa_source = std::make_shared<QASource>(qa_config);
+     *   engine.addDataSource(qa_source);
+     */
+    void addDataSource(std::shared_ptr<DataSource> source) {
+        std::lock_guard<std::mutex> lock(sources_mutex_);
+        if (source) {
+            data_sources_.push_back(source);
+        }
+    }
+
+    /**
+     * Remove a data source by ID.
+     */
+    void removeDataSource(const std::string& source_id) {
+        std::lock_guard<std::mutex> lock(sources_mutex_);
+        data_sources_.erase(
+            std::remove_if(data_sources_.begin(), data_sources_.end(),
+                [&source_id](const std::shared_ptr<DataSource>& src) {
+                    return src->getId() == source_id;
+                }),
+            data_sources_.end()
+        );
+    }
+
+    /**
+     * Get all registered data sources.
+     */
+    std::vector<std::shared_ptr<DataSource>> getDataSources() const {
+        std::lock_guard<std::mutex> lock(sources_mutex_);
+        return data_sources_;
+    }
+
+    /**
+     * Get total document count across all data sources (before indexing).
+     */
+    size_t getTotalDataSourceCount() const;
+
+    /**
+     * Index all registered data sources.
+     * This is the Phase 4 replacement for index_project().
+     *
+     * Usage:
+     *   engine.addDataSource(std::make_shared<QASource>(qa_config));
+     *   engine.addDataSource(std::make_shared<FileSource>(file_config));
+     *   engine.indexSources();  // Index all sources
+     */
+    void indexSources() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto index_start = std::chrono::steady_clock::now();
+
+        documents_.clear();
+        path_to_index_.clear();
+        vectorizer_ = TfidfVectorizer(); // Reset TF-IDF
+
+        std::lock_guard<std::mutex> src_lock(sources_mutex_);
+
+        if (data_sources_.empty()) {
+            std::cerr << "Warning: No data sources registered. Call addDataSource() first." << std::endl;
+            is_indexed_ = false;
+            return;
+        }
+
+        size_t total_docs = 0;
+
+        for (const auto& source : data_sources_) {
+            if (!source->initialize()) {
+                std::cerr << "Warning: Failed to initialize source " << source->getId() << std::endl;
+                continue;
+            }
+
+            auto docs = source->getDocuments();
+            std::cout << "📄 Loaded " << docs.size() << " documents from source: " << source->getId() << std::endl;
+
+            for (auto& doc : docs) {
+                if (stop_flag_ && !stop_flag_->load()) {
+                    std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
+                    is_indexed_ = false;
+                    auto index_end = std::chrono::steady_clock::now();
+                    last_index_duration_ms_ = static_cast<size_t>(
+                        std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
+                    );
+                    return;
+                }
+
+                // Generate embedding
+                doc.embedding = generate_embedding(doc.content);
+
+                if (stop_flag_ && !stop_flag_->load()) {
+                    std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
+                    is_indexed_ = false;
+                    auto index_end = std::chrono::steady_clock::now();
+                    last_index_duration_ms_ = static_cast<size_t>(
+                        std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
+                    );
+                    return;
+                }
+
+                // Store document
+                documents_.push_back(std::move(doc));
+                path_to_index_[documents_.back().relative_path] = documents_.size() - 1;
+
+                // Update TF-IDF
+                vectorizer_.index_document(documents_.back().relative_path, documents_.back().content);
+
+                total_docs++;
+            }
+
+            source->cleanup();
+        }
+
+        // Build hybrid index
+        build_hybrid_index();
+
+        is_indexed_ = true;
+
+        auto stats = get_statistics();
+        std::cout << "✅ Indexed " << total_docs << " documents from " << data_sources_.size() << " sources" << std::endl;
+        std::cout << "   Total lines: " << stats.total_lines << std::endl;
+        std::cout << "   Index duration: " << last_index_duration_ms_ << " ms" << std::endl;
+    }
+
+    /**
+     * Get list of registered source IDs.
+     */
+    std::vector<std::string> getSourceIds() const {
+        std::lock_guard<std::mutex> lock(sources_mutex_);
+        std::vector<std::string> ids;
+        ids.reserve(data_sources_.size());
+        for (const auto& source : data_sources_) {
+            ids.push_back(source->getId());
+        }
+        return ids;
+    }
+
+    /**
+     * Get list of registered source types.
+     */
+    std::vector<DataSourceType> getSourceTypes() const;
 };
