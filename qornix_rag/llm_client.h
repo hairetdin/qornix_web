@@ -107,11 +107,16 @@ private:
                             const std::string& request_body,
                             int timeout_ms) const;
 
+    // Make HTTP GET request using curl
+    std::string make_get_request(const std::string& url,
+                                 int timeout_ms) const;
+
     // Check if LLM is available (health check)
     bool check_llm_available() const;
 
 public:
     explicit LLMClient(const std::string& config_path = "");
+    explicit LLMClient(const LLMConfig& config);
     ~LLMClient() = default;
 
     // Non-copyable
@@ -150,6 +155,12 @@ public:
     // Health check
     bool is_available() const;
     int health_check() const; // returns response time in ms, or -1 if unavailable
+
+    // Provider/model discovery. For Ollama this uses /api/tags; for
+    // OpenAI-compatible servers this uses /v1/models when available.
+    std::string provider_name() const;
+    std::vector<std::string> list_available_models() const;
+    bool configured_model_available() const;
 
     // Streaming support (Phase 2)
     std::vector<std::string> ask_stream(const std::string& question,

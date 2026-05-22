@@ -12,6 +12,11 @@ enable_testing()
 set(QORNIX_WEB_CORE_LIB "")
 set(QORNIX_WEB_CORE_INCLUDE "")
 set(QORNIX_WEB_CORE_LINK_TARGET "")
+set(QORNIX_RAG_CORE_LINK_TARGET "")
+
+if(TARGET qornix_rag_core)
+    set(QORNIX_RAG_CORE_LINK_TARGET qornix_rag_core)
+endif()
 
 # Prefer the parent CMake target when tests are built as part of qornix_web.
 if(TARGET qornix_web_core)
@@ -90,7 +95,11 @@ macro(add_rag_test test_name source_file)
         ${QORNIX_WEB_CORE_INCLUDE}
     )
 
-    target_link_libraries(${test_name} PRIVATE ${QORNIX_WEB_CORE_LINK_TARGET} ${QORNIX_WEB_CORE_LIB})
+    target_link_libraries(${test_name} PRIVATE
+        ${QORNIX_WEB_CORE_LINK_TARGET}
+        ${QORNIX_WEB_CORE_LIB}
+        ${QORNIX_RAG_CORE_LINK_TARGET}
+    )
 
     if(CURL_FOUND)
         target_link_libraries(${test_name} PRIVATE ${CURL_LIBRARIES})
@@ -104,10 +113,45 @@ endmacro()
 
 # Test executable
 add_rag_test(test_llm_client test_llm_client.cpp)
-target_sources(test_llm_client PRIVATE ../llm_client.cpp)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_llm_client PRIVATE
+        ../llm_client.cpp
+        ../llm_cache.cpp
+        ../rate_limiter.cpp
+    )
+endif()
 
 # API tests
 add_rag_test(test_rag_api test_rag_api.cpp)
+
+add_executable(test_rag_service
+    test_rag_service.cpp
+)
+target_include_directories(test_rag_service PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${QORNIX_WEB_CORE_INCLUDE}
+)
+target_link_libraries(test_rag_service PRIVATE
+    ${QORNIX_RAG_CORE_LINK_TARGET}
+    ${QORNIX_WEB_CORE_LINK_TARGET}
+    ${QORNIX_WEB_CORE_LIB}
+)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_rag_service PRIVATE
+        ../rag_service.cpp
+        ../rag_config.cpp
+        ../llm_client.cpp
+        ../llm_cache.cpp
+        ../rate_limiter.cpp
+        ../file_source.cpp
+        ../qa_source.cpp
+        ../text_source.cpp
+        ../memory_source.cpp
+    )
+endif()
+find_yaml_cpp_for(test_rag_service)
+add_test(NAME test_rag_service COMMAND test_rag_service)
 
 # Graceful degradation tests
 add_rag_test(test_graceful_degradation test_graceful_degradation.cpp)
@@ -132,6 +176,7 @@ target_include_directories(test_prompt_builder PRIVATE
 target_link_libraries(test_prompt_builder PRIVATE
     ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
+    ${QORNIX_RAG_CORE_LINK_TARGET}
 )
 
 if(CURL_FOUND)
@@ -157,6 +202,7 @@ target_include_directories(test_phase3 PRIVATE
 target_link_libraries(test_phase3 PRIVATE
     ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
+    ${QORNIX_RAG_CORE_LINK_TARGET}
 )
 
 if(CURL_FOUND)
@@ -167,10 +213,12 @@ endif()
 find_yaml_cpp_for(test_phase3)
 
 # Link implementation files
-target_sources(test_phase3 PRIVATE
-    ../llm_cache.cpp
-    ../rate_limiter.cpp
-)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_phase3 PRIVATE
+        ../llm_cache.cpp
+        ../rate_limiter.cpp
+    )
+endif()
 
 add_test(NAME test_phase3 COMMAND test_phase3)
 
@@ -188,6 +236,7 @@ target_include_directories(test_phase3_extended PRIVATE
 target_link_libraries(test_phase3_extended PRIVATE
     ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
+    ${QORNIX_RAG_CORE_LINK_TARGET}
 )
 
 if(CURL_FOUND)
@@ -198,11 +247,13 @@ endif()
 find_yaml_cpp_for(test_phase3_extended)
 
 # Link implementation files
-target_sources(test_phase3_extended PRIVATE
-    ../batch_processor.cpp
-    ../prompt_cache.cpp
-    ../prometheus_metrics.cpp
-)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_phase3_extended PRIVATE
+        ../batch_processor.cpp
+        ../prompt_cache.cpp
+        ../prometheus_metrics.cpp
+    )
+endif()
 
 add_test(NAME test_phase3_extended COMMAND test_phase3_extended)
 
@@ -220,6 +271,7 @@ target_include_directories(test_data_sources PRIVATE
 target_link_libraries(test_data_sources PRIVATE
     ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
+    ${QORNIX_RAG_CORE_LINK_TARGET}
 )
 
 if(CURL_FOUND)
@@ -230,12 +282,14 @@ endif()
 find_yaml_cpp_for(test_data_sources)
 
 # Link implementation files
-target_sources(test_data_sources PRIVATE
-    ../memory_source.cpp
-    ../qa_source.cpp
-    ../file_source.cpp
-    ../text_source.cpp
-)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_data_sources PRIVATE
+        ../memory_source.cpp
+        ../qa_source.cpp
+        ../file_source.cpp
+        ../text_source.cpp
+    )
+endif()
 
 add_test(NAME test_data_sources COMMAND test_data_sources)
 
@@ -253,14 +307,17 @@ target_include_directories(test_sqlite_source PRIVATE
 target_link_libraries(test_sqlite_source PRIVATE
     ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
+    ${QORNIX_RAG_CORE_LINK_TARGET}
 )
 
 find_yaml_cpp_for(test_sqlite_source)
 
 # Link implementation files
-target_sources(test_sqlite_source PRIVATE
-    ../sqlite_source.cpp
-)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_sqlite_source PRIVATE
+        ../sqlite_source.cpp
+    )
+endif()
 
 if(SQLITE3_LIBRARY)
     target_link_libraries(test_sqlite_source PRIVATE ${SQLITE3_LIBRARY})
@@ -284,14 +341,17 @@ target_include_directories(test_markdown_source PRIVATE
 target_link_libraries(test_markdown_source PRIVATE
     ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
+    ${QORNIX_RAG_CORE_LINK_TARGET}
 )
 
 find_yaml_cpp_for(test_markdown_source)
 
 # Link implementation files
-target_sources(test_markdown_source PRIVATE
-    ../markdown_source.cpp
-)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_markdown_source PRIVATE
+        ../markdown_source.cpp
+    )
+endif()
 
 add_test(NAME test_markdown_source COMMAND test_markdown_source)
 
@@ -309,15 +369,18 @@ target_include_directories(test_deduplication PRIVATE
 target_link_libraries(test_deduplication PRIVATE
     ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
+    ${QORNIX_RAG_CORE_LINK_TARGET}
 )
 
 find_yaml_cpp_for(test_deduplication)
 
 # Link implementation files
-target_sources(test_deduplication PRIVATE
-    ../deduplication_service.cpp
-    ../sqlite_source.cpp
-)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_deduplication PRIVATE
+        ../deduplication_service.cpp
+        ../sqlite_source.cpp
+    )
+endif()
 
 if(SQLITE3_LIBRARY)
     target_link_libraries(test_deduplication PRIVATE ${SQLITE3_LIBRARY})
@@ -341,14 +404,17 @@ target_include_directories(test_analytics PRIVATE
 target_link_libraries(test_analytics PRIVATE
     ${QORNIX_WEB_CORE_LINK_TARGET}
     ${QORNIX_WEB_CORE_LIB}
+    ${QORNIX_RAG_CORE_LINK_TARGET}
 )
 
 find_yaml_cpp_for(test_analytics)
 
 # Link implementation files
-target_sources(test_analytics PRIVATE
-    ../analytics_service.cpp
-)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_analytics PRIVATE
+        ../analytics_service.cpp
+    )
+endif()
 
 add_test(NAME test_analytics COMMAND test_analytics)
 
@@ -356,6 +422,7 @@ add_test(NAME test_analytics COMMAND test_analytics)
 message(STATUS "qornix_rag tests enabled")
 message(STATUS "  - test_llm_client")
 message(STATUS "  - test_rag_api")
+message(STATUS "  - test_rag_service")
 message(STATUS "  - test_graceful_degradation")
 message(STATUS "  - test_health_check")
 message(STATUS "  - test_streaming")

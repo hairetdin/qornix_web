@@ -13,6 +13,7 @@
 #include <thread>
 #include <fstream>
 #include <filesystem>
+#include <functional>
 
 #include "log_initializer.h"
 
@@ -48,6 +49,35 @@ static std::string resolveConfigPath(const std::string &config_path, const std::
     return {};
 }
 
+static std::map<std::string, std::string> loadFlatConfig(const std::string& path) {
+    std::map<std::string, std::string> values;
+    if (path.empty()) {
+        return values;
+    }
+
+    try {
+        YAML::Node node = YAML::LoadFile(path);
+        std::function<void(const YAML::Node&, const std::string&)> flatten;
+        flatten = [&](const YAML::Node& parent, const std::string& prefix) {
+            for (const auto& it : parent) {
+                const std::string key = it.first.as<std::string>();
+                const auto& val = it.second;
+                const std::string full_key = prefix.empty() ? key : prefix + "." + key;
+                if (val.IsMap()) {
+                    flatten(val, full_key);
+                } else if (val.IsScalar()) {
+                    values[full_key] = val.as<std::string>();
+                }
+            }
+        };
+        flatten(node, "");
+    } catch (const std::exception& e) {
+        std::cerr << "Config flatten error in " << path << ": " << e.what() << std::endl;
+    }
+
+    return values;
+}
+
 ServerSettings settings_;
 std::string g_resolved_config_path;
 net::io_context ioc_;
@@ -60,12 +90,23 @@ ServerManager::ServerManager(int argc, char* argv[]) {
     g_resolved_config_path = resolveConfigPath(config_path, argv[0]);
     if (!g_resolved_config_path.empty()) {
         settings_ = ConfigParser::load(g_resolved_config_path);
+        flat_config_ = loadFlatConfig(g_resolved_config_path);
     }
 
     parse_arguments(argc, argv);
     setup_logging();      // Initialize logging (uses settings_ from config)
     setup_di_container();  // Initialize DI container
     setup_server();
+}
+
+ServerManager::~ServerManager() = default;
+
+const std::map<std::string, std::string>& ServerManager::getConfig() const {
+    return flat_config_;
+}
+
+DIContainer& ServerManager::getDIContainer() {
+    return di_container_;
 }
 
 std::unique_ptr<ServerManager> create_server_manager(int argc, char* argv[]) {
@@ -233,9 +274,9 @@ void ServerManager::setup_routes() {
 
     // Load dynamic route extensions, if present.
     std::string routeExtensionsPath = "./route_extensions";
-    ExtensionLoader extensionLoader(routeExtensionsPath, di_container_);
-    if (extensionLoader.loadExtensions()) {
-        extensionLoader.registerRoutes(*server_);
+    extension_loader_ = std::make_unique<ExtensionLoader>(routeExtensionsPath, di_container_);
+    if (extension_loader_->loadExtensions()) {
+        extension_loader_->registerRoutes(*server_);
     }
 }
 

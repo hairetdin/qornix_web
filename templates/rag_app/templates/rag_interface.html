@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qornix RAG - Local Wiki</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #f5f7fb;
+            --card: #ffffff;
+            --ink: #172033;
+            --muted: #60708a;
+            --line: #e2e8f0;
+            --accent: #4f46e5;
+            --accent-dark: #3730a3;
+            --soft: #eef2ff;
+            --danger: #b91c1c;
+            --ok: #15803d;
+            --warn: #b45309;
+        }
+        body {
+            font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            min-height: 100vh;
+        }
+        .shell { max-width: 1280px; margin: 0 auto; padding: 24px; }
+        .hero {
+            background: linear-gradient(135deg, #312e81 0%, #4f46e5 58%, #7c3aed 100%);
+            color: #fff;
+            border-radius: 24px;
+            padding: 28px;
+            box-shadow: 0 18px 50px rgba(79, 70, 229, 0.25);
+            margin-bottom: 20px;
+        }
+        .hero h1 { font-size: 32px; margin-bottom: 8px; }
+        .hero p { color: rgba(255,255,255,.85); line-height: 1.55; max-width: 900px; }
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 18px;
+        }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            background: rgba(255,255,255,.14);
+            border: 1px solid rgba(255,255,255,.22);
+            border-radius: 999px;
+            padding: 8px 12px;
+            font-size: 13px;
+        }
+        .tabs {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin: 18px 0;
+        }
+        .tab-btn {
+            border: 1px solid var(--line);
+            background: var(--card);
+            color: var(--ink);
+            border-radius: 14px;
+            padding: 11px 16px;
+            cursor: pointer;
+            font-weight: 650;
+            box-shadow: 0 4px 16px rgba(15, 23, 42, .04);
+        }
+        .tab-btn.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+        .grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 18px; align-items: start; }
+        .qa-grid { grid-template-columns: minmax(340px, .9fr) minmax(560px, 1.3fr); }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 8px 30px rgba(15, 23, 42, .06);
+        }
+        .card h2 { font-size: 20px; margin-bottom: 10px; }
+        .card h3 { font-size: 16px; margin: 14px 0 8px; }
+        .muted { color: var(--muted); font-size: 14px; line-height: 1.5; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        textarea, input, select {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 13px 14px;
+            font: inherit;
+            color: var(--ink);
+            background: #fff;
+        }
+        textarea:focus, input:focus, select:focus { outline: 2px solid #c7d2fe; border-color: var(--accent); }
+        textarea { min-height: 150px; resize: vertical; line-height: 1.55; }
+        label { display: block; font-weight: 650; margin: 13px 0 7px; }
+        .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .row > * { flex: 1; }
+        .row .small { flex: 0 0 110px; }
+        .btn {
+            border: 0;
+            background: var(--accent);
+            color: #fff;
+            border-radius: 14px;
+            padding: 12px 16px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(79, 70, 229, .18);
+        }
+        .btn:hover { background: var(--accent-dark); }
+        .btn:disabled { background: #a5b4fc; cursor: wait; }
+        .btn.secondary { background: #eef2ff; color: var(--accent-dark); box-shadow: none; border: 1px solid #c7d2fe; }
+        .btn.secondary:hover { background: #e0e7ff; }
+        .btn.danger { background: #fee2e2; color: var(--danger); box-shadow: none; border: 1px solid #fecaca; }
+        .btn.danger:hover { background: #fecaca; }
+        .item-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+        .item-actions .btn { padding: 8px 10px; border-radius: 10px; font-size: 12px; }
+        .qa-editing-hint { margin-top: 10px; }
+        .qa-list-tools {
+            display: grid;
+            grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) minmax(120px, 150px) auto;
+            gap: 10px;
+            align-items: end;
+            margin: 12px 0;
+        }
+        .qa-list-tools label { margin-top: 0; }
+        .qa-summary { margin: 4px 0 10px; }
+        .qa-table-wrap {
+            overflow: auto;
+            max-height: 620px;
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: #fff;
+        }
+        .qa-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            min-width: 760px;
+            font-size: 14px;
+        }
+        .qa-table th, .qa-table td {
+            padding: 11px 12px;
+            border-bottom: 1px solid var(--line);
+            text-align: left;
+            vertical-align: top;
+        }
+        .qa-table th {
+            position: sticky;
+            top: 0;
+            background: #f8fafc;
+            color: #475569;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            z-index: 1;
+        }
+        .qa-table tr:last-child td { border-bottom: 0; }
+        .qa-table tr.selected td { background: #eef2ff; }
+        .qa-question-cell { font-weight: 750; color: var(--ink); min-width: 220px; }
+        .qa-answer-cell { color: #334155; min-width: 260px; line-height: 1.45; }
+        .qa-category-cell { white-space: nowrap; }
+        .qa-actions-cell { white-space: nowrap; min-width: 150px; }
+        .qa-actions-cell .btn { padding: 7px 9px; border-radius: 9px; font-size: 12px; margin-right: 6px; margin-bottom: 6px; }
+        .qa-pagination {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+        .qa-pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .qa-pagination-controls .btn {
+            padding: 7px 10px;
+            border-radius: 9px;
+            font-size: 12px;
+        }
+        .qa-page-size {
+            width: auto;
+            min-width: 92px;
+        }
+        .answer {
+            line-height: 1.65;
+            background: #f8fafc;
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 16px;
+            min-height: 120px;
+        }
+        .answer p { margin: 0 0 12px; }
+        .answer p:last-child { margin-bottom: 0; }
+        .answer h1, .answer h2, .answer h3, .answer h4 { margin: 16px 0 8px; line-height: 1.3; }
+        .answer h1 { font-size: 22px; }
+        .answer h2 { font-size: 20px; }
+        .answer h3 { font-size: 18px; }
+        .answer h4 { font-size: 16px; }
+        .answer ul, .answer ol { margin: 8px 0 14px 24px; }
+        .answer li { margin: 5px 0; }
+        .answer pre {
+            white-space: pre-wrap;
+            overflow-x: auto;
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 12px;
+            padding: 12px;
+            margin: 12px 0;
+        }
+        .answer code, .snippet code {
+            font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+            background: rgba(15, 23, 42, .07);
+            border-radius: 7px;
+            padding: 2px 5px;
+        }
+        .answer pre code { background: transparent; padding: 0; color: inherit; }
+        .status-line { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            background: var(--soft);
+            color: var(--accent-dark);
+        }
+        .badge.ok { background: #dcfce7; color: var(--ok); }
+        .badge.warn { background: #fef3c7; color: var(--warn); }
+        .badge.error { background: #fee2e2; color: var(--danger); }
+        .list { display: grid; gap: 12px; margin-top: 14px; }
+        .item {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 14px;
+            background: #fff;
+        }
+        .item-title { font-weight: 800; margin-bottom: 7px; word-break: break-word; }
+        .meta { color: var(--muted); font-size: 13px; display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+        .snippet { white-space: pre-wrap; line-height: 1.5; color: #334155; background: #f8fafc; border-radius: 12px; padding: 11px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin-top: 12px; }
+        .stat { background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
+        .stat strong { display: block; font-size: 24px; color: var(--accent); margin-bottom: 4px; }
+        .notice { border-radius: 14px; padding: 12px; background: #f8fafc; border: 1px solid var(--line); color: var(--muted); line-height: 1.5; }
+        .notice.error { background: #fef2f2; color: var(--danger); border-color: #fecaca; }
+        .notice.ok { background: #f0fdf4; color: var(--ok); border-color: #bbf7d0; }
+        .notice.warn { background: #fffbeb; color: #92400e; border-color: #fde68a; }
+        .system-alert {
+            margin: -4px 0 18px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: var(--card);
+            padding: 16px 18px;
+            box-shadow: 0 8px 28px rgba(15, 23, 42, .06);
+        }
+        .system-alert.ok { border-color: #bbf7d0; background: #f0fdf4; color: var(--ok); }
+        .system-alert.warn { border-color: #fde68a; background: #fffbeb; color: #92400e; }
+        .system-alert.error { border-color: #fecaca; background: #fef2f2; color: var(--danger); }
+        .system-alert strong { display: block; margin-bottom: 6px; color: inherit; }
+        .system-alert p { margin: 4px 0; line-height: 1.5; }
+        .dismissible { position: relative; padding-right: 46px; }
+        .dismiss-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 28px;
+            height: 28px;
+            border: 0;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, .08);
+            color: inherit;
+            font-size: 20px;
+            line-height: 26px;
+            cursor: pointer;
+        }
+        .dismiss-btn:hover { background: rgba(15, 23, 42, .16); }
+        .diagnostic-footer {
+            margin-top: 10px;
+            font-size: 12px;
+            color: inherit;
+            opacity: .78;
+        }
+        .setup-steps { margin: 10px 0 0 18px; line-height: 1.55; }
+        .setup-steps code, .inline-code {
+            font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+            background: rgba(15, 23, 42, .07);
+            border-radius: 7px;
+            padding: 2px 6px;
+        }
+        .hidden { display: none; }
+        @media (max-width: 900px) {
+            .grid, .qa-grid { grid-template-columns: 1fr; }
+            .qa-list-tools { grid-template-columns: 1fr; }
+            .shell { padding: 14px; }
+            .hero { border-radius: 18px; }
+            .stats-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <section class="hero">
+            <h1>Qornix RAG Local Wiki</h1>
+            <p>Интерфейс RAG-приложения для вопросов к проекту и базе знаний. Основной сценарий — Ask с LLM-ответом и источниками; поиск, QA и состояние системы доступны во вкладках.</p>
+            <div class="toolbar">
+                <span class="pill" id="hero-llm">LLM: checking...</span>
+                <span class="pill" id="hero-index">Index: checking...</span>
+                <span class="pill" id="hero-project">Project: -</span>
+            </div>
+        </section>
+
+        <section id="global-llm-diagnostic" class="system-alert hidden" aria-live="polite"></section>
+
+        <nav class="tabs" aria-label="RAG sections">
+            <button class="tab-btn active" data-tab="ask">Ask</button>
+            <button class="tab-btn" data-tab="search">Search</button>
+            <button class="tab-btn" data-tab="qa">QA</button>
+            <button class="tab-btn" data-tab="sources">Sources / Health</button>
+        </nav>
+
+        <section id="tab-ask" class="tab-panel active">
+            <div class="grid">
+                <div class="card">
+                    <h2>Ask with LLM</h2>
+                    <p class="muted">Задайте вопрос. Система найдёт локальный контекст и передаст его в LLM.</p>
+                    <div id="ask-llm-diagnostic" style="margin-top: 12px;"></div>
+                    <label for="ask-input">Вопрос</label>
+                    <textarea id="ask-input" placeholder="Например: Как запускается RAG application и какие endpoints доступны?"></textarea>
+                    <div class="row" style="margin-top: 10px;">
+                        <div class="small">
+                            <label for="ask-top-k">Top K</label>
+                            <input id="ask-top-k" type="number" min="1" max="20" value="5">
+                        </div>
+                        <div style="align-self: end;">
+                            <button class="btn" id="ask-btn" onclick="askQuestion()">Получить ответ</button>
+                            <button class="btn secondary" onclick="clearAsk()">Очистить</button>
+                        </div>
+                    </div>
+                    <div class="status-line" id="ask-status"></div>
+                    <div id="answer-box" class="answer">Ответ появится здесь.</div>
+                </div>
+                <aside class="card">
+                    <h2>Sources</h2>
+                    <p class="muted">Фрагменты, которые были переданы в prompt как контекст.</p>
+                    <div id="ask-sources" class="list"><div class="notice">Пока нет источников.</div></div>
+                </aside>
+            </div>
+        </section>
+
+        <section id="tab-search" class="tab-panel">
+            <div class="card">
+                <h2>Search</h2>
+                <p class="muted">Поиск по текущему индексу без генерации ответа.</p>
+                <div class="row">
+                    <div>
+                        <label for="search-input">Запрос</label>
+                        <input id="search-input" placeholder="Например: LLMClient health_check">
+                    </div>
+                    <div class="small">
+                        <label for="search-top-k">Top K</label>
+                        <input id="search-top-k" type="number" min="1" max="30" value="10">
+                    </div>
+                    <div style="align-self: end; flex: 0 0 auto;">
+                        <button class="btn" id="search-btn" onclick="performSearch()">Найти</button>
+                    </div>
+                </div>
+                <div id="search-results" class="list"><div class="notice">Введите запрос для поиска.</div></div>
+            </div>
+        </section>
+
+        <section id="tab-qa" class="tab-panel">
+            <div class="grid qa-grid">
+                <div class="card">
+                    <h2>Add QA pair</h2>
+                    <p class="muted">Локальная база знаний для wiki-сценариев. В этом приложении она хранится в локальной SQLite-базе, если SQLite включён в конфиге.</p>
+                    <label for="qa-question">Question</label>
+                    <input id="qa-question" placeholder="Например: Какой порт по умолчанию у RAG-приложения?">
+                    <label for="qa-answer">Answer</label>
+                    <textarea id="qa-answer" placeholder="Например: По умолчанию 8081, но можно передать --port 8082."></textarea>
+                    <label for="qa-category">Category</label>
+                    <input id="qa-category" value="general">
+                    <div style="margin-top: 12px;">
+                        <button class="btn" id="qa-add-btn" onclick="addQAPair()">Добавить QA</button>
+                        <button class="btn secondary hidden" id="qa-cancel-btn" onclick="cancelQAEdit()">Отменить правку</button>
+                        <button class="btn secondary" onclick="loadQAPairs()">Обновить список</button>
+                    </div>
+                    <div id="qa-message" style="margin-top: 12px;"></div>
+                </div>
+                <aside class="card">
+                    <h2>QA pairs</h2>
+                    <p class="muted">Поиск и выбор QA-пары для редактирования. Таблица фильтруется локально по загруженному списку.</p>
+                    <div class="qa-list-tools">
+                        <div>
+                            <label for="qa-filter">Search QA</label>
+                            <input id="qa-filter" placeholder="Вопрос, ответ, категория или id">
+                        </div>
+                        <div>
+                            <label for="qa-category-filter">Category</label>
+                            <select id="qa-category-filter">
+                                <option value="">All categories</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="qa-page-size">Per page</label>
+                            <select id="qa-page-size" class="qa-page-size">
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="0">All</option>
+                            </select>
+                        </div>
+                        <div>
+                            <button class="btn secondary" onclick="resetQAFilter()">Сбросить</button>
+                        </div>
+                    </div>
+                    <div id="qa-list-summary" class="muted qa-summary">Список ещё не загружен.</div>
+                    <div id="qa-list" class="qa-table-wrap"><div class="notice">Список ещё не загружен.</div></div>
+                    <div id="qa-pagination" class="qa-pagination hidden"></div>
+                </aside>
+            </div>
+        </section>
+
+        <section id="tab-sources" class="tab-panel">
+            <div class="grid">
+                <div class="card">
+                    <h2>Health</h2>
+                    <div id="health-box" class="list"><div class="notice">Загрузка...</div></div>
+                    <h3>Project stats</h3>
+                    <div class="stats-grid">
+                        <div class="stat"><strong id="total-files">-</strong><span>Files</span></div>
+                        <div class="stat"><strong id="total-lines">-</strong><span>Lines</span></div>
+                        <div class="stat"><strong id="total-size">-</strong><span>Size KB</span></div>
+                        <div class="stat"><strong id="index-time">-</strong><span>Index ms</span></div>
+                    </div>
+                    <div style="margin-top: 14px;">
+                        <button class="btn" id="reindex-btn" onclick="reindexProject()">Переиндексировать проект</button>
+                    </div>
+                </div>
+                <aside class="card">
+                    <h2>Data sources</h2>
+                    <div id="sources-list" class="list"><div class="notice">Загрузка...</div></div>
+                </aside>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const API_BASE = '{{QORNIX_RAG_API_BASE}}';
+        let currentProjectRoot = '.';
+        let currentLlmDiagnostic = null;
+        let editingQaPairId = null;
+        let selectedQaPairId = null;
+        let lastQAPairs = [];
+        let qaCurrentPage = 1;
+        let qaPageSize = 25;
+
+        window.addEventListener('load', async () => {
+            setupTabs();
+            setupShortcuts();
+            await refreshDashboard();
+        });
+
+        function setupTabs() {
+            document.querySelectorAll('.tab-btn').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+                    btn.classList.add('active');
+                    document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+                    if (btn.dataset.tab === 'qa') await loadQAPairs();
+                    if (btn.dataset.tab === 'sources') await refreshDashboard();
+                });
+            });
+        }
+
+        function setupShortcuts() {
+            document.getElementById('ask-input').addEventListener('keydown', (event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') askQuestion();
+            });
+            document.getElementById('search-input').addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') performSearch();
+            });
+            document.getElementById('qa-filter').addEventListener('input', () => {
+                qaCurrentPage = 1;
+                renderQATable();
+            });
+            document.getElementById('qa-category-filter').addEventListener('change', () => {
+                qaCurrentPage = 1;
+                renderQATable();
+            });
+            document.getElementById('qa-page-size').addEventListener('change', () => {
+                qaPageSize = Number(document.getElementById('qa-page-size').value || 25);
+                qaCurrentPage = 1;
+                renderQATable();
+            });
+        }
+
+        async function api(path, options = {}) {
+            const targetPath = API_BASE && path.startsWith('/api/')
+                ? `${API_BASE}${path.slice(4)}`
+                : `${API_BASE}${path}`;
+            const response = await fetch(targetPath, {
+                headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+                ...options
+            });
+            let data = null;
+            try { data = await response.json(); } catch (_) { data = {}; }
+            if (!response.ok) {
+                const message = data.error || data.message || `HTTP ${response.status}`;
+                throw new Error(message);
+            }
+            return data;
+        }
+
+        async function refreshDashboard() {
+            await Promise.allSettled([loadStats(), loadHealth(), loadSources()]);
+        }
+
+        async function loadStats() {
+            try {
+                const data = await api('/api/stats');
+                const stats = data.stats || {};
+                currentProjectRoot = data.project_root || currentProjectRoot || '.';
+                document.getElementById('total-files').textContent = stats.total_files || 0;
+                document.getElementById('total-lines').textContent = Number(stats.total_lines || 0).toLocaleString();
+                document.getElementById('total-size').textContent = stats.total_size_kb || 0;
+                document.getElementById('index-time').textContent = stats.index_duration_ms || 0;
+                document.getElementById('hero-index').textContent = `Index: ${data.indexed ? 'ready' : 'not ready'}`;
+                document.getElementById('hero-project').textContent = `Project: ${currentProjectRoot || '.'}`;
+            } catch (error) {
+                document.getElementById('hero-index').textContent = 'Index: error';
+                console.error(error);
+            }
+        }
+
+        async function loadHealth() {
+            try {
+                const data = await api('/api/health');
+                const llm = data.llm || {};
+                const rag = data.rag || {};
+                const llmOk = Boolean(llm.available);
+                const configuredModelOk = Boolean(llm.configured_model_available);
+                const availableModels = Array.isArray(llm.available_models) ? llm.available_models : [];
+                const modelsText = availableModels.length ? availableModels.join(', ') : 'not reported';
+                const diagnostic = buildLlmDiagnostic(llm);
+                currentLlmDiagnostic = diagnostic;
+
+                document.getElementById('hero-llm').textContent = diagnostic.heroText;
+                renderGlobalLlmDiagnostic(diagnostic);
+                renderAskLlmDiagnostic(diagnostic);
+
+                document.getElementById('health-box').innerHTML = `
+                    <div class="item">
+                        <div class="item-title">LLM: human-readable status</div>
+                        ${renderLlmHumanBlock(diagnostic)}
+                    </div>
+                    <div class="item">
+                        <div class="item-title">LLM: technical details</div>
+                        <div class="meta">
+                            <span class="badge ${llmOk ? 'ok' : 'warn'}">${escapeHtml(llm.status || 'unknown')}</span>
+                            <span>provider: ${escapeHtml(llm.provider || '-')}</span>
+                            <span>model: ${escapeHtml(llm.model || '-')}</span>
+                            <span class="badge ${configuredModelOk ? 'ok' : 'warn'}">configured model: ${configuredModelOk ? 'found' : 'missing'}</span>
+                            <span>latency: ${llm.response_time_ms ?? '-'} ms</span>
+                        </div>
+                        <div class="snippet">${escapeHtml(llm.api_url || 'N/A')}
+Available models: ${escapeHtml(modelsText)}</div>
+                    </div>
+                    <div class="item">
+                        <div class="item-title">RAG index</div>
+                        <div class="meta">
+                            <span class="badge ${rag.indexed ? 'ok' : 'warn'}">${rag.indexed ? 'indexed' : 'not indexed'}</span>
+                            <span>files: ${rag.files || 0}</span>
+                            <span>lines: ${Number(rag.lines || 0).toLocaleString()}</span>
+                            <span>embeddings: ${escapeHtml(rag.embedding_backend || '-')}</span>
+                        </div>
+                    </div>`;
+            } catch (error) {
+                document.getElementById('hero-llm').textContent = 'LLM: status error';
+                document.getElementById('health-box').innerHTML = renderNotice(error.message, 'error');
+                const diagnostic = {
+                    severity: 'error',
+                    heroText: 'LLM: status error',
+                    title: 'Не удалось проверить состояние LLM',
+                    summary: 'Интерфейс не смог получить данные health API. Проверьте, что приложение запущено и обновите страницу.',
+                    actions: ['Перезапустите приложение.', 'Откройте endpoint health в браузере для быстрой проверки.']
+                };
+                currentLlmDiagnostic = diagnostic;
+                renderGlobalLlmDiagnostic(diagnostic);
+                renderAskLlmDiagnostic(diagnostic);
+            }
+        }
+
+        function buildLlmDiagnostic(llm) {
+            const provider = llm.provider || 'unknown';
+            const configuredModel = llm.model || '';
+            const availableModels = Array.isArray(llm.available_models) ? llm.available_models.filter(Boolean) : [];
+            const providerAvailable = Boolean(llm.available);
+            const configuredAvailable = Boolean(llm.configured_model_available);
+            const status = llm.status || 'unknown';
+            const apiUrl = llm.api_url || '';
+            const recommendedModel = chooseRecommendedModel(configuredModel, availableModels);
+
+            if (providerAvailable && configuredAvailable) {
+                return {
+                    severity: 'ok',
+                    heroText: `LLM: ready (${configuredModel || provider})`,
+                    title: 'LLM подключена и готова отвечать',
+                    summary: `Сейчас используется ${providerLabel(provider)}. В настройке указана модель ${quoteOrDash(configuredModel)}, и она найдена среди доступных моделей.`,
+                    actions: [`Доступные модели: ${formatAvailableModels(availableModels)}.`],
+                    provider, configuredModel, availableModels, apiUrl, status, recommendedModel
+                };
+            }
+
+            if (providerAvailable && !configuredAvailable && availableModels.length > 0) {
+                const replacementLine = recommendedModel ? `model: "${recommendedModel}"` : 'model: "<имя доступной модели>"';
+                const pullLine = configuredModel ? `ollama pull ${configuredModel}` : 'ollama pull <имя модели>';
+                return {
+                    severity: 'warn',
+                    heroText: 'LLM: model missing',
+                    title: 'Модель из настроек не найдена',
+                    summary: `Сервер ${providerLabel(provider)} отвечает, но в настройке указана модель ${quoteOrDash(configuredModel)}, а среди доступных моделей её нет. Доступные модели: ${formatAvailableModels(availableModels)}.`,
+                    actions: [
+                        `Самый простой вариант: открыть config.yaml и заменить llm.model на ${replacementLine}.`,
+                        provider === 'ollama' ? `Или установить нужную модель командой: ${pullLine}.` : 'Или установить/подключить модель с именем из конфигурации.',
+                        'После изменения config.yaml перезапустите приложение.'
+                    ],
+                    provider, configuredModel, availableModels, apiUrl, status, recommendedModel
+                };
+            }
+
+            if (providerAvailable && !availableModels.length) {
+                return {
+                    severity: 'warn',
+                    heroText: 'LLM: no models reported',
+                    title: 'LLM подключена, но список моделей пустой',
+                    summary: `Сервер ${providerLabel(provider)} отвечает, но не сообщил ни одной доступной модели. В настройке указана модель ${quoteOrDash(configuredModel)}.`,
+                    actions: [
+                        provider === 'ollama' ? `Установите модель: ollama pull ${configuredModel || 'llama3'}.` : 'Проверьте настройки provider и доступные модели на стороне LLM сервера.',
+                        'После установки модели обновите страницу или перезапустите приложение.'
+                    ],
+                    provider, configuredModel, availableModels, apiUrl, status, recommendedModel
+                };
+            }
+
+            return {
+                severity: 'error',
+                heroText: 'LLM: unavailable',
+                title: 'LLM не подключена или недоступна',
+                summary: `Qornix RAG запущен, но LLM provider сейчас недоступен. Вопросы могут работать только как поиск по локальному контексту без полноценной генерации ответа.`,
+                actions: buildUnavailableActions(provider, apiUrl, configuredModel),
+                provider, configuredModel, availableModels, apiUrl, status, recommendedModel
+            };
+        }
+
+        function buildUnavailableActions(provider, apiUrl, configuredModel) {
+            if (provider === 'ollama' || (apiUrl && apiUrl.includes('11434'))) {
+                return [
+                    'Запустите Ollama на локальном компьютере.',
+                    `Проверьте адрес LLM API: ${apiUrl || 'http://localhost:11434'}.`,
+                    `Убедитесь, что модель установлена: ollama pull ${configuredModel || 'llama3'}.`,
+                    'После запуска Ollama обновите страницу.'
+                ];
+            }
+            return [
+                'Проверьте LLM API URL в config.yaml.',
+                'Проверьте API key или параметры подключения, если provider требует авторизацию.',
+                'После исправления настроек перезапустите приложение или обновите страницу.'
+            ];
+        }
+
+        function renderGlobalLlmDiagnostic(diagnostic) {
+            const box = document.getElementById('global-llm-diagnostic');
+            if (!box) return;
+            const dismissKey = diagnosticDismissKey('global', diagnostic);
+            if (isDiagnosticDismissed(dismissKey)) {
+                box.classList.add('hidden');
+                box.innerHTML = '';
+                return;
+            }
+            box.className = `system-alert dismissible ${diagnostic.severity || 'warn'}`;
+            box.dataset.dismissKey = dismissKey;
+            box.innerHTML = `
+                <button class="dismiss-btn" type="button" aria-label="Скрыть сообщение" onclick="dismissDiagnosticById('global-llm-diagnostic')">×</button>
+                <strong>${escapeHtml(diagnostic.title)}</strong>
+                <p>${escapeHtml(diagnostic.summary)}</p>
+                ${renderDiagnosticActions(diagnostic.actions, 2)}
+                <div class="diagnostic-footer">Это сообщение можно скрыть. Оно появится снова, если изменится состояние LLM или список моделей.</div>
+            `;
+            box.classList.remove('hidden');
+        }
+
+        function renderAskLlmDiagnostic(diagnostic) {
+            const box = document.getElementById('ask-llm-diagnostic');
+            if (!box) return;
+            const dismissKey = diagnosticDismissKey('ask', diagnostic);
+            if (isDiagnosticDismissed(dismissKey)) {
+                box.classList.add('hidden');
+                box.innerHTML = '';
+                return;
+            }
+            box.classList.remove('hidden');
+            if (diagnostic.severity === 'ok') {
+                box.innerHTML = `
+                    <div class="notice ok dismissible" data-dismiss-key="${escapeAttr(dismissKey)}">
+                        <button class="dismiss-btn" type="button" aria-label="Скрыть сообщение" onclick="dismissInlineDiagnostic(this)">×</button>
+                        ${escapeHtml(diagnostic.summary)}
+                    </div>`;
+                return;
+            }
+            box.innerHTML = `
+                <div class="notice ${diagnostic.severity || 'warn'} dismissible" data-dismiss-key="${escapeAttr(dismissKey)}">
+                    <button class="dismiss-btn" type="button" aria-label="Скрыть сообщение" onclick="dismissInlineDiagnostic(this)">×</button>
+                    <strong>${escapeHtml(diagnostic.title)}</strong><br>
+                    ${escapeHtml(diagnostic.summary)}
+                    ${renderDiagnosticActions(diagnostic.actions, 3)}
+                </div>`;
+        }
+
+        function diagnosticDismissKey(scope, diagnostic) {
+            const pieces = [
+                'qornix-rag-llm-diagnostic',
+                scope,
+                diagnostic.severity || '',
+                diagnostic.status || '',
+                diagnostic.provider || '',
+                diagnostic.configuredModel || '',
+                (diagnostic.availableModels || []).join('|')
+            ];
+            return pieces.join(':');
+        }
+
+        function isDiagnosticDismissed(key) {
+            try { return localStorage.getItem(key) === 'dismissed'; }
+            catch (_) { return false; }
+        }
+
+        function dismissDiagnosticById(elementId) {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+            const key = element.dataset.dismissKey;
+            if (key) {
+                try { localStorage.setItem(key, 'dismissed'); } catch (_) {}
+            }
+            element.classList.add('hidden');
+        }
+
+        function dismissInlineDiagnostic(button) {
+            const panel = button.closest('[data-dismiss-key]');
+            if (!panel) return;
+            try { localStorage.setItem(panel.dataset.dismissKey, 'dismissed'); } catch (_) {}
+            const host = panel.parentElement;
+            panel.remove();
+            if (host && host.id === 'ask-llm-diagnostic') host.classList.add('hidden');
+        }
+
+        function renderLlmHumanBlock(diagnostic) {
+            return `
+                <div class="notice ${diagnostic.severity || ''}">
+                    <strong>${escapeHtml(diagnostic.title)}</strong><br>
+                    ${escapeHtml(diagnostic.summary)}
+                    ${renderDiagnosticActions(diagnostic.actions, 5)}
+                </div>`;
+        }
+
+        function renderDiagnosticActions(actions, limit) {
+            const visible = (actions || []).filter(Boolean).slice(0, limit || 5);
+            if (!visible.length) return '';
+            return `<ol class="setup-steps">${visible.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`;
+        }
+
+        function chooseRecommendedModel(configuredModel, availableModels) {
+            if (!availableModels.length) return '';
+            if (configuredModel) {
+                const exact = availableModels.find((name) => name === configuredModel);
+                if (exact) return exact;
+                const alias = availableModels.find((name) => name === `${configuredModel}:latest` || name.replace(/:latest$/, '') === configuredModel);
+                if (alias) return alias;
+            }
+            return availableModels[0];
+        }
+
+        function providerLabel(provider) {
+            if (provider === 'ollama') return 'Ollama';
+            if (provider === 'openai') return 'OpenAI-compatible API';
+            if (!provider || provider === 'unknown') return 'LLM provider';
+            return provider;
+        }
+
+        function quoteOrDash(value) {
+            return value ? `"${value}"` : 'не указана';
+        }
+
+        function formatAvailableModels(models) {
+            const list = Array.isArray(models) ? models.filter(Boolean) : [];
+            return list.length ? list.join(', ') : 'нет данных';
+        }
+
+        async function loadSources() {
+            const container = document.getElementById('sources-list');
+            try {
+                const data = await api('/api/sources');
+                const sources = data.sources || [];
+                if (!sources.length) {
+                    container.innerHTML = renderNotice('Источники данных пока не зарегистрированы.');
+                    return;
+                }
+                container.innerHTML = sources.map((source) => `
+                    <div class="item">
+                        <div class="item-title">${escapeHtml(source.name || source.id || 'source')}</div>
+                        <div class="meta">
+                            <span class="badge">${escapeHtml(source.type || '-')}</span>
+                            <span>id: ${escapeHtml(source.id || '-')}</span>
+                            <span>documents: ${source.document_count ?? 0}</span>
+                        </div>
+                    </div>`).join('');
+            } catch (error) {
+                container.innerHTML = renderNotice(error.message, 'error');
+            }
+        }
+
+        async function askQuestion() {
+            const question = document.getElementById('ask-input').value.trim();
+            const topK = Number(document.getElementById('ask-top-k').value || 5);
+            if (!question) {
+                showAskStatus('Введите вопрос.', 'warn');
+                return;
+            }
+            const btn = document.getElementById('ask-btn');
+            btn.disabled = true;
+            btn.textContent = 'Генерация...';
+            renderAnswer('Ищу контекст и вызываю LLM...');
+            document.getElementById('ask-sources').innerHTML = '<div class="notice">Загрузка источников...</div>';
+            showAskStatus('request in progress', 'warn');
+            try {
+                const data = await api('/api/ask', {
+                    method: 'POST',
+                    body: JSON.stringify({ question, top_k: topK, stream: false })
+                });
+                renderAnswer(data.answer || 'Пустой ответ.');
+                const statusType = data.llm_status === 'ok' ? 'ok' : 'warn';
+                showAskStatus(`LLM: ${data.llm_status || 'unknown'} | ${data.response_time_ms ?? 0} ms | sources: ${(data.context || []).length}`, statusType);
+                renderAskSources(data.context || [], data.sources || []);
+            } catch (error) {
+                renderAnswer(error.message);
+                document.getElementById('ask-sources').innerHTML = renderNotice('Источники не получены.', 'error');
+                showAskStatus('request failed', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Получить ответ';
+            }
+        }
+
+        function renderAnswer(rawText) {
+            const box = document.getElementById('answer-box');
+            if (!box) return;
+            box.innerHTML = renderMarkdownish(rawText || '');
+        }
+
+        function normalizeLlmText(text) {
+            return String(text || '')
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n')
+                .replace(/\\r\\n/g, '\n')
+                .replace(/\\n/g, '\n')
+                .replace(/\\t/g, '    ');
+        }
+
+        function renderMarkdownish(text) {
+            const normalized = normalizeLlmText(text);
+            const parts = normalized.split(/```/);
+            return parts.map((part, index) => {
+                if (index % 2 === 1) {
+                    const cleaned = part.replace(/^\s*([a-zA-Z0-9_+.-]+)?\n/, '');
+                    return `<pre><code>${escapeHtml(cleaned.trim())}</code></pre>`;
+                }
+                return renderMarkdownishBlock(part);
+            }).join('').trim() || '<p></p>';
+        }
+
+        function renderMarkdownishBlock(block) {
+            const lines = block.split('\n');
+            let html = '';
+            let paragraph = [];
+            let listType = null;
+
+            const flushParagraph = () => {
+                if (!paragraph.length) return;
+                html += `<p>${formatInline(paragraph.join(' '))}</p>`;
+                paragraph = [];
+            };
+            const closeList = () => {
+                if (!listType) return;
+                html += `</${listType}>`;
+                listType = null;
+            };
+            const openList = (type) => {
+                if (listType === type) return;
+                closeList();
+                listType = type;
+                html += `<${type}>`;
+            };
+
+            lines.forEach((line) => {
+                const trimmed = line.trim();
+                if (!trimmed) {
+                    flushParagraph();
+                    closeList();
+                    return;
+                }
+
+                const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+                if (heading) {
+                    flushParagraph();
+                    closeList();
+                    const level = Math.min(heading[1].length + 1, 4);
+                    html += `<h${level}>${formatInline(heading[2])}</h${level}>`;
+                    return;
+                }
+
+                const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+                if (bullet) {
+                    flushParagraph();
+                    openList('ul');
+                    html += `<li>${formatInline(bullet[1])}</li>`;
+                    return;
+                }
+
+                const numbered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+                if (numbered) {
+                    flushParagraph();
+                    openList('ol');
+                    html += `<li>${formatInline(numbered[1])}</li>`;
+                    return;
+                }
+
+                closeList();
+                paragraph.push(trimmed);
+            });
+
+            flushParagraph();
+            closeList();
+            return html;
+        }
+
+        function formatInline(text) {
+            return escapeHtml(text)
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        }
+
+        function renderAskSources(context, sources) {
+            const container = document.getElementById('ask-sources');
+            if (!context.length && !sources.length) {
+                container.innerHTML = renderNotice('Источники не найдены.');
+                return;
+            }
+            container.innerHTML = context.map((item, index) => `
+                <div class="item">
+                    <div class="item-title">${index + 1}. ${escapeHtml(item.path || sources[index] || 'source')}</div>
+                    <div class="meta">
+                        <span class="badge">score: ${formatScore(item.score)}</span>
+                        <span>source: ${escapeHtml(item.source_type || 'project')}</span>
+                        ${item.category ? `<span>category: ${escapeHtml(item.category)}</span>` : ''}
+                    </div>
+                    <div class="snippet">${escapeHtml(item.snippet || '')}</div>
+                </div>`).join('');
+        }
+
+        function showAskStatus(message, type) {
+            document.getElementById('ask-status').innerHTML = `<span class="badge ${type || ''}">${escapeHtml(message)}</span>`;
+        }
+
+        function clearAsk() {
+            document.getElementById('ask-input').value = '';
+            renderAnswer('Ответ появится здесь.');
+            document.getElementById('ask-sources').innerHTML = '<div class="notice">Пока нет источников.</div>';
+            document.getElementById('ask-status').innerHTML = '';
+        }
+
+        async function performSearch() {
+            const query = document.getElementById('search-input').value.trim();
+            const topK = Number(document.getElementById('search-top-k').value || 10);
+            const container = document.getElementById('search-results');
+            if (!query) {
+                container.innerHTML = renderNotice('Введите запрос.', 'error');
+                return;
+            }
+            const btn = document.getElementById('search-btn');
+            btn.disabled = true;
+            btn.textContent = 'Поиск...';
+            container.innerHTML = '<div class="notice">Идёт поиск...</div>';
+            try {
+                const data = await api('/api/search', {
+                    method: 'POST',
+                    body: JSON.stringify({ query, top_k: topK, full_context: true })
+                });
+                const results = data.results || [];
+                if (!results.length) {
+                    container.innerHTML = renderNotice('Ничего не найдено.');
+                    return;
+                }
+                container.innerHTML = results.map((result, index) => `
+                    <div class="item">
+                        <div class="item-title">${index + 1}. ${escapeHtml(result.path || '-')}</div>
+                        <div class="meta">
+                            <span class="badge">score: ${formatScore(result.score)}</span>
+                            <span>source: ${escapeHtml(result.source_type || 'project')}</span>
+                            <span>type: ${escapeHtml(result.type || '-')}</span>
+                            <span>language: ${escapeHtml(result.language || '-')}</span>
+                            <span>lines: ${result.lines ?? '-'}</span>
+                        </div>
+                        <div class="snippet">${escapeHtml(result.snippet || '')}</div>
+                    </div>`).join('');
+            } catch (error) {
+                container.innerHTML = renderNotice(error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Найти';
+            }
+        }
+
+        async function addQAPair() {
+            const question = document.getElementById('qa-question').value.trim();
+            const answer = document.getElementById('qa-answer').value.trim();
+            const category = document.getElementById('qa-category').value.trim() || 'general';
+            if (!question || !answer) {
+                document.getElementById('qa-message').innerHTML = renderNotice('Question и Answer обязательны.', 'error');
+                return;
+            }
+            const btn = document.getElementById('qa-add-btn');
+            btn.disabled = true;
+            btn.textContent = editingQaPairId ? 'Обновление...' : 'Сохранение...';
+            try {
+                const endpoint = editingQaPairId ? '/api/qa/update' : '/api/qa/add';
+                const payload = editingQaPairId
+                    ? { pair_id: editingQaPairId, question, answer, category }
+                    : { question, answer, category };
+                await api(endpoint, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                document.getElementById('qa-question').value = '';
+                document.getElementById('qa-answer').value = '';
+                document.getElementById('qa-message').innerHTML = renderNotice(
+                    editingQaPairId
+                        ? 'QA-пара обновлена. Она сразу будет учитываться в Ask и Search.'
+                        : 'QA-пара добавлена. Она сразу будет учитываться в Ask и Search.',
+                    'ok'
+                );
+                cancelQAEdit(false);
+                await loadQAPairs();
+            } catch (error) {
+                document.getElementById('qa-message').innerHTML = renderNotice(error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                updateQAFormMode();
+            }
+        }
+
+        async function loadQAPairs() {
+            const container = document.getElementById('qa-list');
+            const summary = document.getElementById('qa-list-summary');
+            summary.textContent = 'Загрузка QA...';
+            container.innerHTML = '<div class="notice">Загрузка QA...</div>';
+            try {
+                const data = await api('/api/qa/list?per_page=500');
+                lastQAPairs = data.pairs || [];
+                qaCurrentPage = 1;
+                populateQACategoryFilter();
+                renderQATable();
+            } catch (error) {
+                summary.textContent = 'Ошибка загрузки QA.';
+                container.innerHTML = renderNotice(error.message, 'error');
+            }
+        }
+
+        function populateQACategoryFilter() {
+            const select = document.getElementById('qa-category-filter');
+            const current = select.value;
+            const categories = Array.from(new Set(lastQAPairs.map((pair) => pair.category || 'general'))).sort((a, b) => a.localeCompare(b));
+            select.innerHTML = '<option value="">All categories</option>' + categories.map((category) =>
+                `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`
+            ).join('');
+            if (categories.includes(current)) {
+                select.value = current;
+            }
+        }
+
+        function getFilteredQAPairs() {
+            const query = document.getElementById('qa-filter').value.trim().toLowerCase();
+            const category = document.getElementById('qa-category-filter').value;
+            return lastQAPairs.filter((pair) => {
+                const pairCategory = pair.category || 'general';
+                if (category && pairCategory !== category) return false;
+                if (!query) return true;
+                const haystack = [pair.id, pair.question, pair.answer, pairCategory]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase();
+                return haystack.includes(query);
+            });
+        }
+
+        function renderQATable() {
+            const container = document.getElementById('qa-list');
+            const summary = document.getElementById('qa-list-summary');
+            const pagination = document.getElementById('qa-pagination');
+            if (!lastQAPairs.length) {
+                summary.textContent = '0 QA pairs';
+                pagination.classList.add('hidden');
+                pagination.innerHTML = '';
+                container.innerHTML = renderNotice('QA-пары пока не добавлены. Добавьте первую пару слева, затем задайте похожий вопрос во вкладке Ask.', 'warn');
+                return;
+            }
+
+            const filtered = getFilteredQAPairs();
+            if (!filtered.length) {
+                summary.textContent = `Показано 0 из ${lastQAPairs.length} QA-пар.`;
+                pagination.classList.add('hidden');
+                pagination.innerHTML = '';
+                container.innerHTML = renderNotice('По текущему фильтру QA-пары не найдены.', 'warn');
+                return;
+            }
+
+            qaPageSize = Number(document.getElementById('qa-page-size').value || qaPageSize || 25);
+            const showAll = qaPageSize === 0;
+            const totalPages = showAll ? 1 : Math.max(1, Math.ceil(filtered.length / qaPageSize));
+            qaCurrentPage = Math.min(Math.max(1, qaCurrentPage), totalPages);
+            const startIndex = showAll ? 0 : (qaCurrentPage - 1) * qaPageSize;
+            const endIndex = showAll ? filtered.length : Math.min(startIndex + qaPageSize, filtered.length);
+            const pageItems = filtered.slice(startIndex, endIndex);
+            const rangeText = showAll
+                ? `Показано все ${filtered.length} из ${lastQAPairs.length} QA-пар.`
+                : `Показано ${startIndex + 1}–${endIndex} из ${filtered.length} найденных QA-пар. Всего: ${lastQAPairs.length}.`;
+            summary.textContent = rangeText;
+
+            container.innerHTML = `
+                <table class="qa-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Question</th>
+                            <th>Answer</th>
+                            <th>Category</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${pageItems.map((pair, index) => `
+                            <tr class="${pair.id === selectedQaPairId ? 'selected' : ''}">
+                                <td>${startIndex + index + 1}</td>
+                                <td class="qa-question-cell">${escapeHtml(truncateText(pair.question || '', 160))}</td>
+                                <td class="qa-answer-cell">${escapeHtml(truncateText(pair.answer || '', 220))}</td>
+                                <td class="qa-category-cell"><span class="badge">${escapeHtml(pair.category || 'general')}</span></td>
+                                <td class="qa-actions-cell">
+                                    <button class="btn secondary" onclick="startQAEdit('${escapeJs(pair.id || '')}')">Править</button>
+                                    <button class="btn danger" onclick="deleteQAPair('${escapeJs(pair.id || '')}')">Удалить</button>
+                                </td>
+                            </tr>`).join('')}
+                    </tbody>
+                </table>`;
+
+            renderQAPagination(filtered.length, totalPages, showAll);
+        }
+
+        function renderQAPagination(filteredCount, totalPages, showAll) {
+            const pagination = document.getElementById('qa-pagination');
+            if (showAll || filteredCount <= qaPageSize) {
+                pagination.classList.add('hidden');
+                pagination.innerHTML = '';
+                return;
+            }
+            pagination.classList.remove('hidden');
+            const pages = buildVisiblePages(qaCurrentPage, totalPages);
+            pagination.innerHTML = `
+                <div class="muted">Страница ${qaCurrentPage} из ${totalPages}</div>
+                <div class="qa-pagination-controls">
+                    <button class="btn secondary" onclick="setQAPage(${qaCurrentPage - 1})" ${qaCurrentPage <= 1 ? 'disabled' : ''}>← Назад</button>
+                    ${pages.map((page) => page === '…'
+                        ? '<span class="muted">…</span>'
+                        : `<button class="btn ${page === qaCurrentPage ? '' : 'secondary'}" onclick="setQAPage(${page})">${page}</button>`
+                    ).join('')}
+                    <button class="btn secondary" onclick="setQAPage(${qaCurrentPage + 1})" ${qaCurrentPage >= totalPages ? 'disabled' : ''}>Вперёд →</button>
+                </div>`;
+        }
+
+        function buildVisiblePages(current, total) {
+            if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
+            const pages = new Set([1, total, current, current - 1, current + 1]);
+            const sorted = Array.from(pages)
+                .filter((page) => page >= 1 && page <= total)
+                .sort((a, b) => a - b);
+            const result = [];
+            for (const page of sorted) {
+                const previous = result[result.length - 1];
+                if (typeof previous === 'number' && page - previous > 1) result.push('…');
+                result.push(page);
+            }
+            return result;
+        }
+
+        function setQAPage(page) {
+            qaCurrentPage = page;
+            renderQATable();
+            document.getElementById('qa-list').scrollTop = 0;
+        }
+
+        function resetQAFilter() {
+            document.getElementById('qa-filter').value = '';
+            document.getElementById('qa-category-filter').value = '';
+            qaCurrentPage = 1;
+            renderQATable();
+        }
+
+        function startQAEdit(pairId) {
+            const pair = lastQAPairs.find((item) => item.id === pairId);
+            if (!pair) {
+                document.getElementById('qa-message').innerHTML = renderNotice('QA-пара не найдена в текущем списке. Обновите список и повторите.', 'error');
+                return;
+            }
+            editingQaPairId = pair.id;
+            selectedQaPairId = pair.id;
+            document.getElementById('qa-question').value = pair.question || '';
+            document.getElementById('qa-answer').value = pair.answer || '';
+            document.getElementById('qa-category').value = pair.category || 'general';
+            document.getElementById('qa-message').innerHTML = renderNotice(`Режим правки QA: ${pair.id}`, 'warn');
+            updateQAFormMode();
+            renderQATable();
+            document.getElementById('qa-question').focus();
+        }
+
+        function cancelQAEdit(clearMessage = true) {
+            editingQaPairId = null;
+            selectedQaPairId = null;
+            updateQAFormMode();
+            if (lastQAPairs.length) renderQATable();
+            if (clearMessage) {
+                document.getElementById('qa-message').innerHTML = '';
+            }
+        }
+
+        function updateQAFormMode() {
+            const btn = document.getElementById('qa-add-btn');
+            const cancel = document.getElementById('qa-cancel-btn');
+            if (editingQaPairId) {
+                btn.textContent = 'Сохранить изменения';
+                cancel.classList.remove('hidden');
+            } else {
+                btn.textContent = 'Добавить QA';
+                cancel.classList.add('hidden');
+            }
+        }
+
+        async function deleteQAPair(pairId) {
+            const pair = lastQAPairs.find((item) => item.id === pairId);
+            const label = pair?.question || pairId;
+            if (!confirm(`Удалить QA-пару?
+
+${label}`)) {
+                return;
+            }
+            try {
+                await api('/api/qa/delete', {
+                    method: 'POST',
+                    body: JSON.stringify({ pair_id: pairId })
+                });
+                if (editingQaPairId === pairId) {
+                    cancelQAEdit(false);
+                }
+                if (selectedQaPairId === pairId) {
+                    selectedQaPairId = null;
+                }
+                document.getElementById('qa-message').innerHTML = renderNotice('QA-пара удалена.', 'ok');
+                await loadQAPairs();
+            } catch (error) {
+                document.getElementById('qa-message').innerHTML = renderNotice(error.message, 'error');
+            }
+        }
+
+        async function reindexProject() {
+            const btn = document.getElementById('reindex-btn');
+            btn.disabled = true;
+            btn.textContent = 'Индексация...';
+            try {
+                await api('/api/index', {
+                    method: 'POST',
+                    body: JSON.stringify({ project_path: currentProjectRoot || '.' })
+                });
+                await refreshDashboard();
+            } catch (error) {
+                document.getElementById('health-box').innerHTML = renderNotice(error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Переиндексировать проект';
+            }
+        }
+
+        function renderNotice(message, type = '') {
+            return `<div class="notice ${type}">${escapeHtml(message)}</div>`;
+        }
+
+        function formatScore(value) {
+            const num = Number(value || 0);
+            return Number.isFinite(num) ? num.toFixed(4) : '-';
+        }
+
+        function escapeHtml(value) {
+            const div = document.createElement('div');
+            div.textContent = value == null ? '' : String(value);
+            return div.innerHTML;
+        }
+
+        function truncateText(value, maxLength) {
+            const text = String(value ?? '');
+            if (text.length <= maxLength) return text;
+            return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+        }
+
+        function escapeAttr(value) {
+            return escapeHtml(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function escapeJs(value) {
+            return String(value ?? '')
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/"/g, '\\"')
+                .replace(/\r/g, '\\r')
+                .replace(/\n/g, '\\n')
+                .replace(/</g, '\\x3C')
+                .replace(/>/g, '\\x3E');
+        }
+    </script>
+</body>
+</html>

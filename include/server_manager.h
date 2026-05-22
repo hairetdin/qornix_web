@@ -8,19 +8,27 @@
 #pragma once
 #include <memory>
 #include <functional>
+#include <map>
+#include <string>
 #include <vector>
 
 #include "http_server.h"
+#include "di_container.h"
+
+class ExtensionLoader;
 
 class ServerManager {
 public:
     ServerManager(int argc, char* argv[]);
-    ~ServerManager() = default;
+    ~ServerManager();
 
     // Method for setting the custom route function
     void addRouteFunction(std::function<void(HttpServer&)> route_func) {
         custom_routes_.push_back(route_func);
     }
+
+    const std::map<std::string, std::string>& getConfig() const;
+    DIContainer& getDIContainer();
 
     void run();
 
@@ -33,6 +41,8 @@ private:
     void setup_di_container();
     void start_io_threads();
     std::vector<std::function<void(HttpServer&)>> custom_routes_;
+    std::unique_ptr<ExtensionLoader> extension_loader_;
+    std::map<std::string, std::string> flat_config_;
 };
 
 std::unique_ptr<ServerManager> create_server_manager(int argc, char* argv[]);

@@ -11,105 +11,91 @@
 #include <iostream>
 #include <algorithm>
 
+RagExtension::RagExtension()
+    : runtime_config_(makeRagConfigFromIntegratedFlatMap({}, "default integrated RAG config")) {
+    rag_config_ = runtime_config_.engine;
+    llm_config_ = runtime_config_.llm;
+}
+
 void RagExtension::initialize(DIContainer& container) {
+    (void)container;
     if (initialized_) return;
 
     std::cout << "🚀 Initializing RAG module..." << std::endl;
+    std::cout << "  Mode: " << ragRuntimeModeToString(runtime_config_.mode) << std::endl;
+    std::cout << "  Config source: " << runtime_config_.config_source << std::endl;
+    std::cout << "  Route UI: " << runtime_config_.routes.ui_path << std::endl;
+    std::cout << "  Route API prefix: " << runtime_config_.routes.api_prefix << std::endl;
+    std::cout << "  LLM: "
+              << (runtime_config_.llm.enabled ? runtime_config_.llm.model : std::string("disabled"))
+              << " @ " << runtime_config_.llm.api_url << std::endl;
 
     // Initialize RagEngine
-    rag_engine_ = std::make_shared<RagEngine>(rag_config_);
+    rag_engine_ = std::make_shared<RagEngine>(runtime_config_.engine);
 
-    // Initialize LLMClient (config from YAML or defaults)
-    llm_client_ = std::make_shared<LLMClient>("");
+    // Initialize LLMClient from the parsed RagConfig contract.
+    llm_client_ = std::make_shared<LLMClient>(runtime_config_.llm);
 
     // Initialize cache
-    CacheConfig cache_config;
-    cache_config.enabled = true;
-    cache_config.backend = "memory";
-    cache_config.ttl = std::chrono::seconds(3600);
-    cache_config.max_size = 1000;
-    cache_ = create_cache(cache_config);
+    cache_ = create_cache(runtime_config_.cache);
 
     // Initialize rate limiter
-    RateLimiterConfig rl_config;
-    rl_config.enabled = true;
-    rl_config.max_requests_per_second = 10;
-    rl_config.max_requests_per_minute = 100;
-    rl_config.per_ip_limit = true;
-    rl_config.max_requests_per_second_per_ip = 2;
-    rate_limiter_ = std::make_shared<RateLimiter>(rl_config);
+    rate_limiter_ = std::make_shared<RateLimiter>(runtime_config_.rate_limit);
+    if (cache_) {
+        llm_client_->set_cache(cache_);
+    }
+    if (rate_limiter_ && rate_limiter_->is_available()) {
+        llm_client_->set_rate_limiter(rate_limiter_);
+    }
 
     // Initialize batch processor
-    BatchConfig batch_config;
-    batch_config.max_concurrent = 4;
-    batch_config.question_timeout_ms = 60000;
-    batch_processor_ = std::make_shared<BatchProcessor>(batch_config);
+    batch_processor_ = std::make_shared<BatchProcessor>(runtime_config_.batch);
 
     // Initialize prompt cache
-    PromptCacheConfig pc_config;
-    pc_config.enabled = true;
-    pc_config.max_size = 500;
-    pc_config.ttl = std::chrono::seconds(1800);
-    prompt_cache_ = create_prompt_cache(pc_config);
+    prompt_cache_ = create_prompt_cache(runtime_config_.prompt_cache);
 
     // Initialize metrics
     metrics_ = std::make_shared<LLMRAGMetrics>();
 
     // Phase 5: Initialize SQLiteSource if configured
 #if QORNIX_HAS_SQLITE
-    if (auto it = config_.find("rag.sqlite.enabled"); it != config_.end() && it->second == "true") {
-        SQLiteSource::Config sqlite_config;
-        sqlite_config.db_path = "rag_kb.db";
-        if (auto db_it = config_.find("rag.sqlite.db_path"); db_it != config_.end()) {
-            sqlite_config.db_path = db_it->second;
+    if (runtime_config_.sqlite_enabled) {
+        sqlite_source_ = std::make_shared<SQLiteSource>(runtime_config_.sqlite);
+        if (sqlite_source_->initialize()) {
+            data_sources_.push_back(sqlite_source_);
+            std::cout << "📊 SQLiteSource initialized: " << runtime_config_.sqlite.db_path << std::endl;
+        } else {
+            std::cerr << "⚠️ SQLiteSource was configured but failed to initialize" << std::endl;
+            sqlite_source_.reset();
         }
-        sqlite_config.source_id = "sqlite_kb";
-        sqlite_config.name = "SQLite Knowledge Base";
-        sqlite_config.auto_migrate = true;
-        sqlite_source_ = std::make_shared<SQLiteSource>(sqlite_config);
-        data_sources_.push_back(sqlite_source_);
-        std::cout << "📊 SQLiteSource initialized: " << sqlite_config.db_path << std::endl;
     }
 #endif
 
     // Phase 5: Initialize MarkdownSource if configured
     {
-        if (auto it = config_.find("rag.markdown.enabled"); it != config_.end() && it->second == "true") {
-            MarkdownSource::Config md_config;
-            md_config.directory_path = "./knowledge_base";
-            if (auto dir_it = config_.find("rag.markdown.directory_path"); dir_it != config_.end()) {
-                md_config.directory_path = dir_it->second;
+        if (runtime_config_.markdown_enabled) {
+            markdown_source_ = std::make_shared<MarkdownSource>(runtime_config_.markdown);
+            if (markdown_source_->initialize()) {
+                data_sources_.push_back(markdown_source_);
+                std::cout << "📝 MarkdownSource initialized: " << runtime_config_.markdown.directory_path << std::endl;
+            } else {
+                std::cerr << "⚠️ MarkdownSource was configured but failed to initialize" << std::endl;
+                markdown_source_.reset();
             }
-            md_config.file_patterns = {"*.md"};
-            md_config.recursive = true;
-            markdown_source_ = std::make_shared<MarkdownSource>(md_config);
-            data_sources_.push_back(markdown_source_);
-            std::cout << "📝 MarkdownSource initialized: " << md_config.directory_path << std::endl;
         }
     }
 
     // Phase 5: Initialize AnalyticsService
     {
-        AnalyticsService::Config analytics_config;
-        if (auto max_it = config_.find("rag.analytics.max_log_entries"); max_it != config_.end()) {
-            analytics_config.max_log_entries = std::stoull(max_it->second);
-        }
-        analytics_service_ = std::make_shared<AnalyticsService>(analytics_config);
+        analytics_service_ = std::make_shared<AnalyticsService>(runtime_config_.analytics);
         std::cout << "📈 AnalyticsService initialized" << std::endl;
     }
 
     // Phase 5: Initialize DeduplicationService
     {
-        DeduplicationService::Config dedup_config;
-        if (auto thresh_it = config_.find("rag.dedup.similarity_threshold"); thresh_it != config_.end()) {
-            dedup_config.similarity_threshold = std::stof(thresh_it->second);
-        }
-        if (auto auto_remove_it = config_.find("rag.dedup.auto_remove"); auto_remove_it != config_.end()) {
-            dedup_config.auto_remove = (auto_remove_it->second == "true");
-        }
-        dedup_service_ = std::make_shared<DeduplicationService>(dedup_config);
+        dedup_service_ = std::make_shared<DeduplicationService>(runtime_config_.dedup);
         std::cout << "🔍 DeduplicationService initialized (threshold="
-                  << dedup_config.similarity_threshold << ")" << std::endl;
+                  << runtime_config_.dedup.similarity_threshold << ")" << std::endl;
     }
 
     // Register data sources
@@ -125,6 +111,7 @@ void RagExtension::initialize(DIContainer& container) {
 }
 
 void RagExtension::registerRoutes(HttpServer& server, DIContainer& container) {
+    (void)container;
     if (!initialized_) {
         std::cerr << "RagExtension: Not initialized, routes not registered" << std::endl;
         return;
@@ -145,6 +132,11 @@ void RagExtension::registerRoutes(HttpServer& server, DIContainer& container) {
 #if QORNIX_HAS_SQLITE
         , sqlite_source_
 #endif
+        , RagRouteOptions{
+            runtime_config_.routes.expose_root_ui,
+            runtime_config_.routes.ui_path,
+            runtime_config_.routes.api_prefix
+        }
     );
 
     std::cout << "✅ RAG routes registered successfully" << std::endl;
@@ -161,67 +153,20 @@ void RagExtension::cleanup() {
 }
 
 bool RagExtension::configure(const std::map<std::string, std::string>& config) {
-    // Store full config for later use (Phase 5)
     config_ = config;
+    return configure(makeRagConfigFromIntegratedFlatMap(config));
+}
 
-    // Parse rag.enabled
-    if (auto it = config.find("rag.enabled"); it != config.end()) {
-        // Enabled flag - just note it
-    }
-
-    // Parse LLM config
-    if (auto it = config.find("rag.llm.enabled"); it != config.end()) {
-        llm_config_.enabled = (it->second == "true");
-    }
-    if (auto it = config.find("rag.llm.api_url"); it != config.end()) {
-        llm_config_.api_url = it->second;
-    }
-    if (auto it = config.find("rag.llm.api_key"); it != config.end()) {
-        llm_config_.api_key = it->second;
-    }
-    if (auto it = config.find("rag.llm.model"); it != config.end()) {
-        llm_config_.model = it->second;
-    }
-    if (auto it = config.find("rag.llm.max_tokens"); it != config.end()) {
-        llm_config_.max_tokens = std::stoi(it->second);
-    }
-    if (auto it = config.find("rag.llm.temperature"); it != config.end()) {
-        llm_config_.temperature = std::stof(it->second);
-    }
-    if (auto it = config.find("rag.llm.request_timeout_ms"); it != config.end()) {
-        llm_config_.request_timeout_ms = std::stoi(it->second);
-    }
-
-    // Parse search config
-    if (auto it = config.find("rag.search.vector_weight"); it != config.end()) {
-        rag_config_.search.vector_weight = std::stof(it->second);
-    }
-    if (auto it = config.find("rag.search.text_weight"); it != config.end()) {
-        rag_config_.search.text_weight = std::stof(it->second);
-    }
-    if (auto it = config.find("rag.search.top_k"); it != config.end()) {
-        rag_config_.search.top_k = std::stoi(it->second);
-    }
-    if (auto it = config.find("rag.search.min_score_threshold"); it != config.end()) {
-        rag_config_.search.min_score_threshold = std::stof(it->second);
-    }
-
-    // Parse embedding config
-    if (auto it = config.find("rag.embedding.backend"); it != config.end()) {
-        rag_config_.embedding.backend = it->second;
-    }
-
-    // Parse cache config
-    if (auto it = config.find("rag.cache.enabled"); it != config.end()) {
-        // Cache will be configured in initialize()
-    }
-
-    // Parse rate limit config
-    if (auto it = config.find("rag.rate_limit.max_requests_per_second"); it != config.end()) {
-        // Rate limiter will be configured in initialize()
-    }
-
-    std::cout << "RAG module configured" << std::endl;
+bool RagExtension::configure(const RagConfig& config) {
+    runtime_config_ = config;
+    rag_config_ = config.engine;
+    llm_config_ = config.llm;
+    std::cout << "RAG module configured"
+              << " (mode=" << ragRuntimeModeToString(runtime_config_.mode)
+              << ", source=" << runtime_config_.config_source
+              << ", ui=" << runtime_config_.routes.ui_path
+              << ", api_prefix=" << runtime_config_.routes.api_prefix
+              << ")" << std::endl;
     return true;
 }
 

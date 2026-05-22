@@ -22,6 +22,7 @@
 #include "analytics_service.h"
 #include "deduplication_service.h"
 #include "markdown_source.h"
+#include "rag_config.h"
 #if QORNIX_HAS_SQLITE
 #include "sqlite_source.h"
 #endif
@@ -35,6 +36,8 @@
 #include <filesystem>
 #include <atomic>
 #include <functional>
+#include <algorithm>
+#include <cctype>
 
 
 // Global variables
@@ -71,7 +74,7 @@ void print_usage(const char* program) {
     std::cout << "  " << program << " [опции]" << std::endl;
     std::cout << "\nОпции:" << std::endl;
     std::cout << "  --port, -p <port>     Порт сервера (по умолчанию: 8081)" << std::endl;
-    std::cout << "  --address, -a <addr>  Адрес (по умолчанию: 0.0.0.0)" << std::endl;
+    std::cout << "  --address, -a <addr>  Адрес (по умолчанию: 127.0.0.1)" << std::endl;
     std::cout << "  --project, -P <path>  Путь к проекту для индексации" << std::endl;
     std::cout << "  --config, -c <path>   Путь к config.yaml (по умолчанию: ./config.yaml)" << std::endl;
     std::cout << "  --help, -h            Показать эту справку" << std::endl;
@@ -148,19 +151,14 @@ static std::unordered_map<std::string, std::string> loadIniWithFallback(
     return {};
 }
 
-static bool toBool(const std::string &value, bool fallback) {
-    if (value == "true" || value == "1" || value == "yes") return true;
-    if (value == "false" || value == "0" || value == "no") return false;
-    return fallback;
-}
-
 int main(int argc, char* argv[]) {
     // Default settings
-    std::string address = "0.0.0.0";
+    std::string address = "127.0.0.1";
     int port = 8081;
     std::string project_path = ".";
     std::string config_path = "config.yaml";
-    RagEngineConfig engine_config;
+    RagConfig rag_runtime_config;
+    bool auto_index_on_startup = true;
     bool cli_port_set = false;
     bool cli_address_set = false;
     bool cli_project_set = false;
@@ -202,26 +200,27 @@ int main(int argc, char* argv[]) {
 
     std::string resolved_config_path;
     auto ini = loadIniWithFallback(config_path, argv[0], resolved_config_path);
-    if (!ini.empty()) {
-        if (!cli_address_set && ini.count("server.address")) address = ini["server.address"];
-        if (!cli_port_set && ini.count("server.port")) port = std::stoi(ini["server.port"]);
-        if (!cli_project_set && ini.count("server.project_path")) project_path = ini["server.project_path"];
+    rag_runtime_config = makeRagConfigFromStandaloneFlatMap(
+        ini,
+        resolved_config_path.empty() ? "standalone defaults" : resolved_config_path);
 
-        if (ini.count("search.use_hybrid")) engine_config.search.use_hybrid = toBool(ini["search.use_hybrid"], true);
-        if (ini.count("search.vector_weight")) engine_config.search.vector_weight = std::stof(ini["search.vector_weight"]);
-        if (ini.count("search.text_weight")) engine_config.search.text_weight = std::stof(ini["search.text_weight"]);
-        if (ini.count("search.top_k")) engine_config.search.top_k = static_cast<size_t>(std::stoul(ini["search.top_k"]));
-        if (ini.count("search.min_score_threshold")) engine_config.search.min_score_threshold = std::stof(ini["search.min_score_threshold"]);
-        if (ini.count("indexing.max_file_size_kb")) engine_config.max_file_size_kb = static_cast<size_t>(std::stoul(ini["indexing.max_file_size_kb"]));
-
-        if (ini.count("embedding.backend")) engine_config.embedding.backend = ini["embedding.backend"];
-        if (ini.count("embedding.model_path")) engine_config.embedding.model_path = ini["embedding.model_path"];
-        if (ini.count("embedding.tokenizer_path")) engine_config.embedding.tokenizer_path = ini["embedding.tokenizer_path"];
-        if (ini.count("embedding.max_seq_len")) engine_config.embedding.max_seq_len = static_cast<size_t>(std::stoul(ini["embedding.max_seq_len"]));
-        if (ini.count("embedding.onnx_threads")) engine_config.embedding.onnx_threads = static_cast<size_t>(std::stoul(ini["embedding.onnx_threads"]));
-        if (ini.count("embedding.normalize_embeddings")) engine_config.embedding.normalize_embeddings = toBool(ini["embedding.normalize_embeddings"], true);
-        if (ini.count("embedding.enable_fallback")) engine_config.embedding.enable_fallback = toBool(ini["embedding.enable_fallback"], true);
+    if (!cli_address_set) {
+        address = rag_runtime_config.address;
+    } else {
+        rag_runtime_config.address = address;
     }
+    if (!cli_port_set) {
+        port = rag_runtime_config.port;
+    } else {
+        rag_runtime_config.port = port;
+    }
+    if (!cli_project_set) {
+        project_path = rag_runtime_config.project_path;
+    } else {
+        rag_runtime_config.project_path = project_path;
+    }
+    auto_index_on_startup = rag_runtime_config.auto_index_on_startup;
+    RagEngineConfig engine_config = rag_runtime_config.engine;
 
     // Set signal handler
     std::signal(SIGINT, signal_handler);
@@ -230,15 +229,20 @@ int main(int argc, char* argv[]) {
     print_banner();
 
     std::cout << "🚀 Запуск Qornix RAG..." << std::endl;
-    std::cout << "📡 Адрес: " << address << ":" << port << std::endl;
-    std::cout << "📂 Проект: " << project_path << std::endl;
-    if (!resolved_config_path.empty()) {
-        std::cout << "⚙️ Конфиг: " << resolved_config_path << std::endl;
-    } else if (cli_config_set) {
-        std::cout << "⚠️ Конфиг не найден по пути: " << config_path << std::endl;
-    } else {
-        std::cout << "⚠️ Конфиг не найден, используются значения по умолчанию" << std::endl;
+    std::cout << "🧭 RAG mode: " << ragRuntimeModeToString(rag_runtime_config.mode) << std::endl;
+    std::cout << "⚙️ Config source: " << rag_runtime_config.config_source << std::endl;
+    std::cout << "📡 Bind address: " << address << ":" << port << std::endl;
+    std::cout << "🌐 Local URL: http://localhost:" << port << std::endl;
+    if (address == "0.0.0.0" || address == "::") {
+        std::cout << "⚠️ Сервер слушает все сетевые интерфейсы. Для локального режима используйте 127.0.0.1." << std::endl;
     }
+    std::cout << "📂 Project path: " << project_path << std::endl;
+    std::cout << "🔎 Auto-index on startup: " << (auto_index_on_startup ? "enabled" : "disabled") << std::endl;
+    if (resolved_config_path.empty() && cli_config_set) {
+        std::cout << "⚠️ Конфиг не найден по пути: " << config_path << std::endl;
+    }
+    std::cout << "🧠 Embedding backend: " << engine_config.embedding.backend << std::endl;
+    std::cout << "🛟 Embedding fallback: " << (engine_config.embedding.enable_fallback ? "enabled" : "disabled") << std::endl;
     std::cout << std::endl;
 
     try {
@@ -247,20 +251,24 @@ int main(int argc, char* argv[]) {
         g_rag_engine = std::make_shared<RagEngine>(engine_config);
         g_rag_engine->set_stop_flag(&g_running);
 
-        // Automatic indexing on startup
-        std::cout << "📚 Индексация проекта..." << std::endl;
-        g_rag_engine->index_project(project_path);
+        if (auto_index_on_startup) {
+            // Automatic indexing on startup is kept for the local standalone workflow.
+            std::cout << "📚 Индексация проекта..." << std::endl;
+            g_rag_engine->index_project(project_path);
 
-        if (!g_running.load()) {
-            std::cout << "\n🛑 Получен сигнал остановки" << std::endl;
-            std::cout << "👋 Остановка во время индексации" << std::endl;
-            return 0;
+            if (!g_running.load()) {
+                std::cout << "\n🛑 Получен сигнал остановки" << std::endl;
+                std::cout << "👋 Остановка во время индексации" << std::endl;
+                return 0;
+            }
+
+            auto stats = g_rag_engine->get_statistics();
+            std::cout << "✅ Проиндексировано: " << stats.total_files << " файлов" << std::endl;
+            std::cout << "   Строк кода: " << stats.total_lines << std::endl;
+            std::cout << "   Размер: " << (stats.total_size_bytes / 1024) << " KB" << std::endl;
+        } else {
+            std::cout << "⏭️ Автоиндексация отключена; используйте web UI или POST /api/index." << std::endl;
         }
-
-        auto stats = g_rag_engine->get_statistics();
-        std::cout << "✅ Проиндексировано: " << stats.total_files << " файлов" << std::endl;
-        std::cout << "   Строк кода: " << stats.total_lines << std::endl;
-        std::cout << "   Размер: " << (stats.total_size_bytes / 1024) << " KB" << std::endl;
         std::cout << std::endl;
 
         // Create and configure the server
@@ -276,17 +284,33 @@ int main(int argc, char* argv[]) {
 
         // Initialize LLM client (if config has llm section)
         std::cout << "🤖 Инициализация LLM клиента..." << std::endl;
-        g_llm_client = std::make_shared<LLMClient>(resolved_config_path);
+        g_llm_client = std::make_shared<LLMClient>(rag_runtime_config.llm);
         if (g_llm_client->is_enabled()) {
-            std::cout << "  ℹ️  LLM: " << g_llm_client->get_model()
-                      << " @ " << g_llm_client->get_api_url() << std::endl;
+            std::cout << "  ℹ️  LLM provider: " << g_llm_client->provider_name() << std::endl;
+            std::cout << "  ℹ️  LLM model: " << g_llm_client->get_model() << std::endl;
+            std::cout << "  ℹ️  LLM API: " << g_llm_client->get_api_url() << std::endl;
+
+            const auto available_models = g_llm_client->list_available_models();
+            if (!available_models.empty()) {
+                std::cout << "  ℹ️  Available LLM models:";
+                for (const auto& model : available_models) {
+                    std::cout << " " << model;
+                }
+                std::cout << std::endl;
+            } else {
+                std::cout << "  ⚠️  Available LLM models: not reported" << std::endl;
+            }
+
             if (g_llm_client->is_available()) {
                 std::cout << "  ✅ LLM доступен" << std::endl;
+            } else if (!available_models.empty() && !g_llm_client->configured_model_available()) {
+                std::cout << "  ⚠️  LLM model not found in provider model list; "
+                          << "search-only fallback enabled" << std::endl;
             } else {
-                std::cout << "  ⚠️  LLM недоступен (будет использован только поиск)" << std::endl;
+                std::cout << "  ⚠️  LLM недоступен (search-only fallback enabled)" << std::endl;
             }
         } else {
-            std::cout << "  ℹ️  LLM не настроен (только поиск)" << std::endl;
+            std::cout << "  ℹ️  LLM не настроен (search-only mode)" << std::endl;
         }
 
         // Phase 3: Initialize cache and rate limiter
@@ -296,190 +320,53 @@ int main(int argc, char* argv[]) {
         std::shared_ptr<IPromptCache> prompt_cache;
         std::shared_ptr<LLMRAGMetrics> metrics;
 
-        if (!resolved_config_path.empty()) {
-            try {
-#ifdef QORNIX_HAS_YAML
-                YAML::Node node = YAML::LoadFile(resolved_config_path);
+        try {
+            cache = create_cache(rag_runtime_config.cache);
+            rate_limiter = std::make_shared<RateLimiter>(rag_runtime_config.rate_limit);
+            if (cache) {
+                g_llm_client->set_cache(cache);
+            }
+            if (rate_limiter->is_available()) {
+                g_llm_client->set_rate_limiter(rate_limiter);
+            }
 
-                // Cache config
-                CacheConfig cache_config;
-                if (node["cache"]) {
-                    const auto& cache_node = node["cache"];
-                    cache_config.enabled = cache_node["enabled"] && cache_node["enabled"].as<bool>();
-                    if (cache_node["backend"]) {
-                        cache_config.backend = cache_node["backend"].as<std::string>();
-                    }
-                    if (cache_node["max_size"]) {
-                        cache_config.max_size = cache_node["max_size"].as<size_t>();
-                    }
-                    if (cache_node["ttl_seconds"]) {
-                        cache_config.ttl = std::chrono::seconds(cache_node["ttl_seconds"].as<int>());
-                    }
-                    if (cache_node["redis"]) {
-                        const auto& redis = cache_node["redis"];
-                        if (redis["host"]) cache_config.redis_host = redis["host"].as<std::string>();
-                        if (redis["port"]) cache_config.redis_port = redis["port"].as<int>();
-                        if (redis["db"]) cache_config.redis_db = redis["db"].as<int>();
-                        if (redis["password"]) cache_config.redis_password = redis["password"].as<std::string>();
-                        if (redis["ttl_seconds"]) cache_config.redis_ttl = std::chrono::seconds(redis["ttl_seconds"].as<int>());
-                    }
-                }
-                cache = create_cache(cache_config);
+            batch_processor = std::make_shared<BatchProcessor>(rag_runtime_config.batch);
+            prompt_cache = create_prompt_cache(rag_runtime_config.prompt_cache);
+            metrics = std::make_shared<LLMRAGMetrics>();
 
-                // Rate limiter config
-                RateLimiterConfig rl_config;
-                if (node["rate_limit"]) {
-                    const auto& rl_node = node["rate_limit"];
-                    rl_config.enabled = rl_node["enabled"] && rl_node["enabled"].as<bool>();
-                    if (rl_node["max_requests_per_second"]) {
-                        rl_config.max_requests_per_second = rl_node["max_requests_per_second"].as<size_t>();
-                    }
-                    if (rl_node["max_requests_per_minute"]) {
-                        rl_config.max_requests_per_minute = rl_node["max_requests_per_minute"].as<size_t>();
-                    }
-                    if (rl_node["per_ip_limit"]) {
-                        rl_config.per_ip_limit = rl_node["per_ip_limit"].as<bool>();
-                    }
-                    if (rl_node["max_requests_per_second_per_ip"]) {
-                        rl_config.max_requests_per_second_per_ip = rl_node["max_requests_per_second_per_ip"].as<size_t>();
-                    }
-                    if (rl_node["max_requests_per_minute_per_ip"]) {
-                        rl_config.max_requests_per_minute_per_ip = rl_node["max_requests_per_minute_per_ip"].as<size_t>();
-                    }
-                }
-                rate_limiter = std::make_shared<RateLimiter>(rl_config);
+            auto rag_stats = g_rag_engine->get_statistics();
+            metrics->set_indexed_files(rag_stats.total_files);
+            metrics->set_indexed_lines(rag_stats.total_lines);
 
-                // Connect cache and rate limiter to LLM client
-                if (cache) {
-                    g_llm_client->set_cache(cache);
-                }
-                if (rate_limiter->is_available()) {
-                    g_llm_client->set_rate_limiter(rate_limiter);
-                }
-
-                // Phase 3: Batch processor config
-                BatchConfig batch_config;
-                if (node["batch"]) {
-                    const auto& batch_node = node["batch"];
-                    if (batch_node["max_concurrent"]) {
-                        batch_config.max_concurrent = batch_node["max_concurrent"].as<size_t>();
-                    }
-                    if (batch_node["question_timeout_ms"]) {
-                        batch_config.question_timeout_ms = batch_node["question_timeout_ms"].as<int>();
-                    }
-                    if (batch_node["batch_timeout_ms"]) {
-                        batch_config.batch_timeout_ms = batch_node["batch_timeout_ms"].as<int>();
-                    }
-                }
-                batch_processor = std::make_shared<BatchProcessor>(batch_config);
-
-                // Phase 3: Prompt cache config
-                PromptCacheConfig prompt_cache_config;
-                if (node["prompt_cache"]) {
-                    const auto& pc_node = node["prompt_cache"];
-                    prompt_cache_config.enabled = pc_node["enabled"] && pc_node["enabled"].as<bool>();
-                    if (pc_node["max_size"]) {
-                        prompt_cache_config.max_size = pc_node["max_size"].as<size_t>();
-                    }
-                    if (pc_node["ttl_seconds"]) {
-                        prompt_cache_config.ttl = std::chrono::seconds(pc_node["ttl_seconds"].as<int>());
-                    }
-                    prompt_cache = create_prompt_cache(prompt_cache_config);
-                }
-
-                // Phase 3: Prometheus metrics
-                metrics = std::make_shared<LLMRAGMetrics>();
-
-                // Update metrics with current stats
-                auto rag_stats = g_rag_engine->get_statistics();
-                metrics->set_indexed_files(rag_stats.total_files);
-                metrics->set_indexed_lines(rag_stats.total_lines);
-
-                // Phase 5: Analytics service
-                AnalyticsService::Config analytics_config;
-                if (node["rag"] && node["rag"]["analytics"]) {
-                    const auto& analytics_node = node["rag"]["analytics"];
-                    if (analytics_node["max_log_entries"]) {
-                        analytics_config.max_log_entries = analytics_node["max_log_entries"].as<size_t>();
-                    }
-                    if (analytics_node["top_n"]) {
-                        analytics_config.top_n = analytics_node["top_n"].as<size_t>();
-                    }
-                    if (analytics_node["gap_min_search_count"]) {
-                        analytics_config.gap_min_search_count = analytics_node["gap_min_search_count"].as<size_t>();
-                    }
-                }
-                g_analytics_service = std::make_shared<AnalyticsService>(analytics_config);
-
-                // Phase 5: Deduplication service
-                DeduplicationService::Config dedup_config;
-                if (node["rag"] && node["rag"]["dedup"]) {
-                    const auto& dedup_node = node["rag"]["dedup"];
-                    if (dedup_node["similarity_threshold"]) {
-                        dedup_config.similarity_threshold = dedup_node["similarity_threshold"].as<float>();
-                    }
-                    if (dedup_node["auto_remove"]) {
-                        dedup_config.auto_remove = dedup_node["auto_remove"].as<bool>();
-                    }
-                }
-                g_dedup_service = std::make_shared<DeduplicationService>(dedup_config);
+            g_analytics_service = std::make_shared<AnalyticsService>(rag_runtime_config.analytics);
+            g_dedup_service = std::make_shared<DeduplicationService>(rag_runtime_config.dedup);
 
 #if QORNIX_HAS_SQLITE
-                // Phase 5: SQLite-backed QA storage
-                if (node["rag"] && node["rag"]["sqlite"] &&
-                    node["rag"]["sqlite"]["enabled"] &&
-                    node["rag"]["sqlite"]["enabled"].as<bool>()) {
-                    const auto& sqlite_node = node["rag"]["sqlite"];
-                    SQLiteSource::Config sqlite_config;
-                    sqlite_config.db_path = sqlite_node["db_path"]
-                        ? sqlite_node["db_path"].as<std::string>()
-                        : "rag_kb.db";
-                    sqlite_config.source_id = sqlite_node["source_id"]
-                        ? sqlite_node["source_id"].as<std::string>()
-                        : "sqlite_kb";
-                    sqlite_config.name = sqlite_node["name"]
-                        ? sqlite_node["name"].as<std::string>()
-                        : "SQLite Knowledge Base";
-                    sqlite_config.auto_migrate = !sqlite_node["auto_migrate"] ||
-                        sqlite_node["auto_migrate"].as<bool>();
-
-                    g_sqlite_source = std::make_shared<SQLiteSource>(sqlite_config);
-                    if (g_sqlite_source->initialize()) {
-                        g_rag_engine->addDataSource(g_sqlite_source);
-                        std::cout << "  ✅ SQLiteSource: " << sqlite_config.db_path << std::endl;
-                    } else {
-                        std::cerr << "  ⚠️  SQLiteSource не инициализирован" << std::endl;
-                        g_sqlite_source.reset();
-                    }
+            if (rag_runtime_config.sqlite_enabled) {
+                g_sqlite_source = std::make_shared<SQLiteSource>(rag_runtime_config.sqlite);
+                if (g_sqlite_source->initialize()) {
+                    g_rag_engine->addDataSource(g_sqlite_source);
+                    std::cout << "  ✅ SQLiteSource: " << rag_runtime_config.sqlite.db_path << std::endl;
+                } else {
+                    std::cerr << "  ⚠️  SQLiteSource не инициализирован" << std::endl;
+                    g_sqlite_source.reset();
                 }
-#endif
-
-                // Phase 5: Markdown import source
-                if (node["rag"] && node["rag"]["markdown"] &&
-                    node["rag"]["markdown"]["enabled"] &&
-                    node["rag"]["markdown"]["enabled"].as<bool>()) {
-                    const auto& markdown_node = node["rag"]["markdown"];
-                    MarkdownSource::Config markdown_config;
-                    markdown_config.directory_path = markdown_node["directory_path"]
-                        ? markdown_node["directory_path"].as<std::string>()
-                        : "knowledge_base";
-                    markdown_config.recursive = !markdown_node["recursive"] ||
-                        markdown_node["recursive"].as<bool>();
-
-                    g_markdown_source = std::make_shared<MarkdownSource>(markdown_config);
-                    if (g_markdown_source->initialize()) {
-                        g_rag_engine->addDataSource(g_markdown_source);
-                        std::cout << "  ✅ MarkdownSource: " << markdown_config.directory_path
-                                  << " (" << g_markdown_source->count() << " документов)" << std::endl;
-                    } else {
-                        std::cerr << "  ⚠️  MarkdownSource не инициализирован" << std::endl;
-                        g_markdown_source.reset();
-                    }
-                }
-#endif
-            } catch (const std::exception& e) {
-                std::cerr << "⚠️  Cache/rate_limiter/batch config error: " << e.what() << std::endl;
             }
+#endif
+
+            if (rag_runtime_config.markdown_enabled) {
+                g_markdown_source = std::make_shared<MarkdownSource>(rag_runtime_config.markdown);
+                if (g_markdown_source->initialize()) {
+                    g_rag_engine->addDataSource(g_markdown_source);
+                    std::cout << "  ✅ MarkdownSource: " << rag_runtime_config.markdown.directory_path
+                              << " (" << g_markdown_source->count() << " документов)" << std::endl;
+                } else {
+                    std::cerr << "  ⚠️  MarkdownSource не инициализирован" << std::endl;
+                    g_markdown_source.reset();
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "⚠️  RAG runtime config error: " << e.what() << std::endl;
         }
         std::cout << std::endl;
 
@@ -490,6 +377,11 @@ int main(int argc, char* argv[]) {
 #if QORNIX_HAS_SQLITE
                       , g_sqlite_source
 #endif
+                      , RagRouteOptions{
+                            rag_runtime_config.routes.expose_root_ui,
+                            rag_runtime_config.routes.ui_path,
+                            rag_runtime_config.routes.api_prefix
+                        }
         );
 
         g_server->run();
@@ -497,6 +389,7 @@ int main(int argc, char* argv[]) {
         std::cout << "✅ Сервер запущен!" << std::endl;
         std::cout << std::endl;
         std::cout << "🌐 Откройте в браузере: http://localhost:" << port << std::endl;
+        std::cout << "💚 API Health: http://localhost:" << port << "/api/health" << std::endl;
         std::cout << "📊 API Stats: http://localhost:" << port << "/api/stats" << std::endl;
         std::cout << "🔍 API Search: http://localhost:" << port << "/api/search" << std::endl;
         std::cout << std::endl;

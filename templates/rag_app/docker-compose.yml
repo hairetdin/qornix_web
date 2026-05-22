@@ -1,0 +1,23 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: runtime-Dockerfile
+    ports:
+      - "8008:8008"
+    volumes:
+      - ./knowledge_base:/app/knowledge_base
+      - ./data:/app/data
+    environment:
+      QORNIX_APP_ROOT: /app
+      QORNIX_RAG_TEMPLATES_DIR: /app/templates
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  ollama:

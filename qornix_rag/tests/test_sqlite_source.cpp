@@ -203,6 +203,13 @@ TEST(sqlite_source_update_pair) {
     ASSERT_STR_EQ("Updated answer.", found->answer, "Answer updated");
     ASSERT_STR_EQ("cat2", found->category, "Category updated");
 
+    bool question_updated = source->updateQAPair("qa_001", "", "", "", "Updated question?");
+    ASSERT_TRUE(question_updated, "QA question updated");
+
+    found = source->findQAPair("qa_001");
+    ASSERT_TRUE(found.has_value(), "Question-updated pair found");
+    ASSERT_STR_EQ("Updated question?", found->question, "Question updated");
+
     source->cleanup();
     cleanup_test_db(db_path);
 #else

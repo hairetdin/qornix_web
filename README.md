@@ -21,11 +21,13 @@ Start with the showcase or generate an app:
 ./create_new_project.sh ../my_vue_app --with-dynamic-api-vue
 ./create_new_project.sh ../my_react_app --with-dynamic-api-react
 ./create_new_project.sh ../my_angular_app --with-dynamic-api-angular
+./create_new_project.sh ../my_rag_app --template rag_app
 ```
 
 Use `--with-dynamic-api` for the backend/admin showcase, `--with-dynamic-api-vue` for a Vue/Vite frontend scaffold, `--with-dynamic-api-react` for a React/Vite frontend scaffold, or `--with-dynamic-api-angular` for an Angular frontend scaffold served from `/`.
+Use `--template rag_app` for a full Qornix Web application with embedded RAG UI at `/rag` and API routes under `/api/rag/*`.
 
-See `doc/schema_driven_dynamic_api.md`, `doc/dynamic_api_vue_app_template.md`, `doc/dynamic_api_react_app_template.md`, `doc/dynamic_api_angular_app_template.md` and `example/schema_driven_backend`.
+See `doc/schema_driven_dynamic_api.md`, `doc/dynamic_api_vue_app_template.md`, `doc/dynamic_api_react_app_template.md`, `doc/dynamic_api_angular_app_template.md`, `doc/rag_app_template.md` and `example/schema_driven_backend`.
 
 ## Framework
 
@@ -864,13 +866,35 @@ cmake .. -DMY_APP_ENABLE_JWT=ON
 
 ### `qornix_rag`
 
-RAG module based on Xapian and ONNX Runtime.
+RAG module for local/wiki-style retrieval, QA storage, source indexing and LLM Ask workflows.
 
-It is not built by default:
+For a dedicated generated RAG application:
+
+```bash
+./create_new_project.sh ../my_rag_app --template rag_app
+cd ../my_rag_app
+cmake -S . -B build
+cmake --build build
+./build/my_rag_app
+```
+
+Open:
+
+```text
+http://127.0.0.1:8008/rag
+http://127.0.0.1:8008/api/rag/health
+```
+
+The generated app uses its own `config.yaml`, links the reusable RAG extension, and does not use the standalone `qornix_rag/run.sh` launcher.
+It starts with TF-IDF retrieval, so no embedding model files are required for the first run. To enable ONNX semantic retrieval, place the embedding model and tokenizer under the generated app's `models/` directory and set `rag.embedding.backend: onnx`.
+
+To build the framework RAG module directly:
 
 ```bash
 cmake .. -DQORNIX_BUILD_RAG=ON
 ```
+
+See [`doc/rag_app_template.md`](doc/rag_app_template.md) for the generated RAG application guide.
 
 ## Common issues
 

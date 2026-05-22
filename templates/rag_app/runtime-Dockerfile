@@ -1,0 +1,25 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libboost-json1.83.0 \
+    libboost-log1.83.0 \
+    libboost-filesystem1.83.0 \
+    libboost-url1.83.0 \
+    libcurl4 \
+    libsqlite3-0 \
+    libxapian30 \
+    libyaml-cpp0.8 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY build/deploy/@PROJECT_NAME@/ /app/
+
+ENV QORNIX_APP_ROOT=/app
+ENV QORNIX_RAG_TEMPLATES_DIR=/app/templates
+
+RUN chmod +x /app/@PROJECT_NAME@ && \
+    sed -i 's/address: 127.0.0.1/address: 0.0.0.0/' /app/config.yaml
+
+EXPOSE 8008
+CMD ["/app/@PROJECT_NAME@"]

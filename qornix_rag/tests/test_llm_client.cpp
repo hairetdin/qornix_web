@@ -167,6 +167,31 @@ void test_response_parsing() {
         parsed = llm_client.parse_response(openai_response);
         
         test_helpers::assert_contains(parsed, "OpenAI answer", "Should parse OpenAI response");
+
+        // Escaped quotes and newlines in code snippets must not truncate the answer.
+        std::string ollama_code_response =
+            R"({"message":{"role":"assistant","content":"#include \"rag_extension.h\"\nint main() { return 0; }"},"done":true})";
+        parsed = llm_client.parse_response(ollama_code_response);
+        test_helpers::assert_contains(parsed, "#include \"rag_extension.h\"", "Should preserve escaped quotes in code");
+        test_helpers::assert_contains(parsed, "int main()", "Should preserve text after escaped quotes");
+
+        // Ollama /api/generate format.
+        std::string ollama_generate_response =
+            R"({"response":"Generated line 1\nGenerated line 2","done":true})";
+        parsed = llm_client.parse_response(ollama_generate_response);
+        test_helpers::assert_contains(parsed, "Generated line 1", "Should parse Ollama generate response");
+        test_helpers::assert_contains(parsed, "Generated line 2", "Should unescape newlines");
+
+        // Streaming NDJSON fallback: join all chunks if a provider returns them.
+        std::string ollama_stream_response =
+            R"({"message":{"content":"#include \"rag_extension.h\"\n"},"done":false})"
+            "\n"
+            R"({"message":{"content":"void register_rag();"},"done":false})"
+            "\n"
+            R"({"done":true})";
+        parsed = llm_client.parse_response(ollama_stream_response);
+        test_helpers::assert_contains(parsed, "#include \"rag_extension.h\"", "Should parse streamed escaped quotes");
+        test_helpers::assert_contains(parsed, "void register_rag();", "Should join streamed content chunks");
         
         test_passed("Response parsing");
     } catch (const std::exception& e) {

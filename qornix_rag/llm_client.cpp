@@ -12,10 +12,267 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <utility>
 
 #ifndef QORNIX_HAS_CURL
 #define QORNIX_HAS_CURL 0
 #endif
+
+namespace {
+
+bool response_has_error(const std::string& response) {
+    return response.empty() ||
+           response.find("error") != std::string::npos ||
+           response.find("Error") != std::string::npos ||
+           response.find("Ошибка") != std::string::npos ||
+           response.find("недоступ") != std::string::npos;
+}
+
+bool is_ollama_url(const std::string& url) {
+    return url.find("11434") != std::string::npos ||
+           url.find("/api/chat") != std::string::npos ||
+           url.find("/api/generate") != std::string::npos ||
+           url.find("/api/tags") != std::string::npos;
+}
+
+std::string ollama_base_url(std::string url) {
+    const std::vector<std::string> suffixes = {
+        "/api/chat",
+        "/api/generate",
+        "/api/tags"
+    };
+
+    for (const auto& suffix : suffixes) {
+        const auto pos = url.find(suffix);
+        if (pos != std::string::npos) {
+            url = url.substr(0, pos);
+            break;
+        }
+    }
+
+    while (!url.empty() && url.back() == '/') {
+        url.pop_back();
+    }
+
+    return url;
+}
+
+bool ollama_tags_contain_model(const std::string& response,
+                               const std::string& model) {
+    if (model.empty()) {
+        return true;
+    }
+
+    if (response.find("\"name\":\"" + model + "\"") != std::string::npos ||
+        response.find("\"name\":\"" + model + ":latest\"") != std::string::npos) {
+        return true;
+    }
+
+    // Fallback for pretty-printed JSON or model tags such as llama3:8b.
+    return response.find(model + ":") != std::string::npos;
+}
+
+std::string openai_models_url(std::string url) {
+    const std::vector<std::string> suffixes = {
+        "/v1/chat/completions",
+        "/chat/completions",
+        "/v1/models"
+    };
+
+    for (const auto& suffix : suffixes) {
+        const auto pos = url.find(suffix);
+        if (pos != std::string::npos) {
+            url = url.substr(0, pos);
+            break;
+        }
+    }
+
+    while (!url.empty() && url.back() == '/') {
+        url.pop_back();
+    }
+
+    return url + "/v1/models";
+}
+
+std::vector<std::string> extract_json_string_values(const std::string& json,
+                                                    const std::vector<std::string>& keys) {
+    std::vector<std::string> values;
+
+    for (const auto& key : keys) {
+        std::size_t pos = 0;
+        const std::string needle = "\"" + key + "\"";
+
+        while ((pos = json.find(needle, pos)) != std::string::npos) {
+            const std::size_t colon = json.find(':', pos + needle.size());
+            if (colon == std::string::npos) {
+                break;
+            }
+
+            const std::size_t value_start = json.find('"', colon + 1);
+            if (value_start == std::string::npos) {
+                pos = colon + 1;
+                continue;
+            }
+
+            const std::size_t value_end = json.find('"', value_start + 1);
+            if (value_end == std::string::npos) {
+                break;
+            }
+
+            std::string value = json.substr(value_start + 1, value_end - value_start - 1);
+            if (!value.empty() && std::find(values.begin(), values.end(), value) == values.end()) {
+                values.push_back(value);
+            }
+
+            pos = value_end + 1;
+        }
+    }
+
+    return values;
+}
+
+bool model_name_matches(const std::string& configured_model,
+                        const std::string& available_model) {
+    if (configured_model.empty()) {
+        return true;
+    }
+
+    if (configured_model == available_model) {
+        return true;
+    }
+
+    return available_model == configured_model + ":latest" ||
+           available_model.rfind(configured_model + ":", 0) == 0;
+}
+
+bool model_list_contains(const std::vector<std::string>& models,
+                         const std::string& configured_model) {
+    if (models.empty()) {
+        return false;
+    }
+
+    return std::any_of(models.begin(), models.end(), [&](const std::string& model) {
+        return model_name_matches(configured_model, model);
+    });
+}
+
+
+bool parse_json_string_at(const std::string& json,
+                          std::size_t quote_pos,
+                          std::string& value,
+                          std::size_t* end_pos = nullptr) {
+    if (quote_pos >= json.size() || json[quote_pos] != '"') {
+        return false;
+    }
+
+    value.clear();
+    value.reserve(64);
+
+    for (std::size_t i = quote_pos + 1; i < json.size(); ++i) {
+        const char c = json[i];
+
+        if (c == '"') {
+            if (end_pos) {
+                *end_pos = i;
+            }
+            return true;
+        }
+
+        if (c != '\\') {
+            value += c;
+            continue;
+        }
+
+        if (i + 1 >= json.size()) {
+            return false;
+        }
+
+        const char esc = json[++i];
+        switch (esc) {
+            case '"': value += '"'; break;
+            case '\\': value += '\\'; break;
+            case '/': value += '/'; break;
+            case 'b': value += '\b'; break;
+            case 'f': value += '\f'; break;
+            case 'n': value += '\n'; break;
+            case 'r': value += '\r'; break;
+            case 't': value += '\t'; break;
+            case 'u': {
+                // Keep unicode escapes intact. Ollama/OpenAI usually return UTF-8
+                // directly for Cyrillic text, while preserving the escape avoids
+                // corrupting non-ASCII code points without adding a JSON library.
+                if (i + 4 >= json.size()) {
+                    return false;
+                }
+                value += "\\u";
+                value.append(json, i + 1, 4);
+                i += 4;
+                break;
+            }
+            default:
+                // Be permissive: preserve unknown escapes instead of truncating.
+                value += esc;
+                break;
+        }
+    }
+
+    return false;
+}
+
+std::vector<std::string> extract_json_string_field_values(const std::string& json,
+                                                          const std::string& key) {
+    std::vector<std::string> values;
+    const std::string needle = "\"" + key + "\"";
+    std::size_t pos = 0;
+
+    while ((pos = json.find(needle, pos)) != std::string::npos) {
+        const std::size_t colon = json.find(':', pos + needle.size());
+        if (colon == std::string::npos) {
+            break;
+        }
+
+        std::size_t value_pos = colon + 1;
+        while (value_pos < json.size() &&
+               (json[value_pos] == ' ' || json[value_pos] == '\t' ||
+                json[value_pos] == '\r' || json[value_pos] == '\n')) {
+            ++value_pos;
+        }
+
+        if (value_pos >= json.size()) {
+            break;
+        }
+
+        if (json[value_pos] != '"') {
+            // The field may be null or an object; skip this occurrence.
+            pos = value_pos + 1;
+            continue;
+        }
+
+        std::string value;
+        std::size_t value_end = value_pos;
+        if (!parse_json_string_at(json, value_pos, value, &value_end)) {
+            break;
+        }
+
+        if (!value.empty()) {
+            values.push_back(std::move(value));
+        }
+
+        pos = value_end + 1;
+    }
+
+    return values;
+}
+
+std::string join_json_chunks(const std::vector<std::string>& chunks) {
+    std::string result;
+    for (const auto& chunk : chunks) {
+        result += chunk;
+    }
+    return result;
+}
+
+} // namespace
 
 // ============================================================================
 // JSON helpers
@@ -283,6 +540,13 @@ LLMClient::LLMClient(const std::string& config_path) {
     }
 }
 
+LLMClient::LLMClient(const LLMConfig& config)
+    : config_(config) {
+#if QORNIX_HAS_CURL
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+#endif
+}
+
 // ============================================================================
 // Prompt building
 // ============================================================================
@@ -302,6 +566,28 @@ std::string LLMClient::build_prompt(const std::string& context,
 
 std::string LLMClient::build_request_json(const std::string& prompt) const {
     std::ostringstream json;
+
+    if (is_ollama_url(config_.api_url)) {
+        json << "{\"model\":\"" << json_escape(config_.model) << "\","
+             << "\"stream\":false,"
+             << "\"messages\":[";
+
+        json << "{\"role\":\"system\",\"content\":\""
+             << json_escape(config_.system_prompt) << "\"},";
+
+        json << "{\"role\":\"user\",\"content\":\""
+             << json_escape(prompt) << "\"}],";
+
+        json << "\"options\":{"
+             << "\"temperature\":" << std::fixed << std::setprecision(1)
+             << config_.temperature << ","
+             << "\"top_p\":" << std::fixed << std::setprecision(1)
+             << config_.top_p << ","
+             << "\"num_predict\":" << config_.max_tokens
+             << "}}";
+        return json.str();
+    }
+
     json << "{\"model\":\"" << json_escape(config_.model) << "\","
          << "\"max_tokens\":" << config_.max_tokens << ","
          << "\"temperature\":" << std::fixed << std::setprecision(1)
@@ -329,52 +615,35 @@ std::string LLMClient::parse_response(const std::string& json_response) const {
         return "Ошибка: пустой ответ от LLM";
     }
 
-    // Try Ollama format: {"message": {"content": "..."}}
-    {
-        std::string key = "\"content\"";
-        size_t content_pos = json_response.find(key);
-        if (content_pos != std::string::npos) {
-            // Find the value after "content":
-            size_t colon_pos = json_response.find(':', content_pos + key.size());
-            if (colon_pos != std::string::npos) {
-                size_t value_start = json_response.find('"', colon_pos + 1);
-                if (value_start != std::string::npos) {
-                    size_t value_end = json_response.find('"', value_start + 1);
-                    if (value_end != std::string::npos) {
-                        std::string answer = json_response.substr(value_start + 1,
-                                                                  value_end - value_start - 1);
-                        if (!answer.empty()) {
-                            return answer;
-                        }
-                    }
-                }
-            }
-        }
+    // Ollama /api/chat and OpenAI-compatible chat completions both expose the
+    // generated text as a JSON string field named "content". The response may
+    // contain escaped quotes, backslashes, or newlines in code snippets, so this
+    // must not be parsed with a plain find('"') after the field start.
+    const auto content_chunks = extract_json_string_field_values(json_response, "content");
+    if (!content_chunks.empty()) {
+        return join_json_chunks(content_chunks);
     }
 
-    // Try OpenAI format: {"choices": [{"message": {"content": "..."}}]}
-    {
-        std::string key = "\"content\"";
-        size_t content_pos = json_response.find(key);
-        if (content_pos != std::string::npos) {
-            size_t colon_pos = json_response.find(':', content_pos + key.size());
-            if (colon_pos != std::string::npos) {
-                size_t value_start = json_response.find('"', colon_pos + 1);
-                if (value_start != std::string::npos) {
-                    size_t value_end = json_response.find('"', value_start + 1);
-                    if (value_end != std::string::npos) {
-                        std::string answer = json_response.substr(value_start + 1,
-                                                                  value_end - value_start - 1);
-                        if (!answer.empty()) {
-                            return answer;
-                        }
-                    }
-                }
-            }
-        }
+    // Ollama /api/generate uses the top-level "response" string. If streaming
+    // accidentally remains enabled, several JSON objects can be returned as
+    // newline-delimited chunks; joining all response fields preserves the answer.
+    const auto response_chunks = extract_json_string_field_values(json_response, "response");
+    if (!response_chunks.empty()) {
+        return join_json_chunks(response_chunks);
     }
 
-    // Could not parse
+    // Provider error payloads are not standardized. Surface the message when it
+    // is a JSON string instead of hiding the useful diagnostic from the user.
+    const auto error_messages = extract_json_string_field_values(json_response, "error");
+    if (!error_messages.empty()) {
+        return "Ошибка LLM: " + error_messages.front();
+    }
+
+    const auto message_values = extract_json_string_field_values(json_response, "message");
+    if (!message_values.empty()) {
+        return "Ошибка LLM: " + message_values.front();
+    }
+
     return "Ошибка: не удалось распознать формат ответа LLM";
 }
 
@@ -412,7 +681,7 @@ std::string LLMClient::make_request(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long)timeout_ms);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, (long)std::min(timeout_ms, 5000L));
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, std::min(static_cast<long>(timeout_ms), 5000L));
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
 
@@ -429,7 +698,53 @@ std::string LLMClient::make_request(const std::string& url,
 #else
     (void)url;
     (void)request_body;
-    return "Ошибка: CURL не доступен (сборка без libcurl)";
+    return "error: CURL is not available (built without libcurl)";
+#endif
+}
+
+std::string LLMClient::make_get_request(const std::string& url,
+                                        int timeout_ms) const {
+    (void)url;
+    (void)timeout_ms;
+
+#if QORNIX_HAS_CURL
+    std::string response_body;
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        return "Ошибка: не удалось инициализировать CURL";
+    }
+
+    curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    if (!config_.api_key.empty()) {
+        std::string auth_header = "Authorization: Bearer " + config_.api_key;
+        headers = curl_slist_append(headers, auth_header.c_str());
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(timeout_ms));
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, std::min(static_cast<long>(timeout_ms), 5000L));
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+    CURLcode res = curl_easy_perform(curl);
+
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+
+    if (res != CURLE_OK) {
+        return "Ошибка подключения к LLM: " + std::string(curl_easy_strerror(res));
+    }
+
+    return response_body;
+#else
+    return "error: CURL is not available (built without libcurl)";
 #endif
 }
 
@@ -442,6 +757,12 @@ std::string LLMClient::ask(const std::string& question,
     if (!config_.enabled) {
         return "LLM не настроен. Используйте /api/health для проверки.";
     }
+
+#if !QORNIX_HAS_CURL
+    (void)question;
+    return "LLM недоступен: qornix_rag собран без libcurl. "
+           "Установите libcurl development package и пересоберите проект.\n\n" + context;
+#endif
 
     std::string prompt = build_prompt(context, question);
     std::string request_body = build_request_json(prompt);
@@ -463,7 +784,7 @@ std::string LLMClient::ask(const std::string& question,
 
     std::string raw_response = make_request(url, request_body, config_.request_timeout_ms);
 
-    if (raw_response.empty() || raw_response.find("error") != std::string::npos) {
+    if (response_has_error(raw_response)) {
         // Try failover endpoints
         if (config_.failover_enabled && !config_.failover_endpoints.empty()) {
             for (const auto& endpoint : config_.failover_endpoints) {
@@ -493,13 +814,13 @@ std::string LLMClient::ask(const std::string& question,
 
                 raw_response = make_request(failover_url, failover_json.str(),
                                             config_.request_timeout_ms);
-                if (!raw_response.empty() && raw_response.find("error") == std::string::npos) {
+                if (!response_has_error(raw_response)) {
                     break; // Success with failover
                 }
             }
         }
 
-        if (raw_response.empty() || raw_response.find("error") != std::string::npos) {
+        if (response_has_error(raw_response)) {
             return "LLM недоступен. Вот релевантные фрагменты из кода:\n" + context;
         }
     }
@@ -512,39 +833,97 @@ std::string LLMClient::ask(const std::string& question,
 // ============================================================================
 
 bool LLMClient::is_available() const {
+#if !QORNIX_HAS_CURL
+    return false;
+#else
     return health_check() >= 0;
+#endif
 }
 
 int LLMClient::health_check() const {
+#if !QORNIX_HAS_CURL
+    return -1;
+#endif
+
     if (!config_.enabled) {
         return -1;
     }
 
     std::string url = config_.api_url;
-    if (url.find("/chat/completions") == std::string::npos &&
-        url.find("/api/chat") == std::string::npos) {
-        if (url.find("11434") != std::string::npos) {
-            url += "/api/tags"; // Ollama health check
-        } else {
-            url += "/v1/models"; // OpenAI health check
-        }
-    }
-
     auto start = std::chrono::steady_clock::now();
 
-    std::string dummy_request = "{\"model\":\"" + json_escape(config_.model) +
-                                "\",\"max_tokens\":1,\"messages\":[]}";
-    std::string response = make_request(url, dummy_request, 3000);
+    if (is_ollama_url(url)) {
+        url = ollama_base_url(url) + "/api/tags";
+        const std::string response = make_get_request(url, 3000);
+
+        auto end = std::chrono::steady_clock::now();
+        const long long duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            end - start).count();
+
+        if (response_has_error(response) ||
+            !ollama_tags_contain_model(response, config_.model)) {
+            return -1;
+        }
+
+        return static_cast<int>(duration);
+    }
+
+    url = openai_models_url(url);
+
+    const std::string response = make_get_request(url, 3000);
 
     auto end = std::chrono::steady_clock::now();
-    long long duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+    const long long duration = std::chrono::duration_cast<std::chrono::milliseconds>(
         end - start).count();
 
-    if (response.empty() || response.find("error") != std::string::npos) {
+    if (response_has_error(response)) {
+        return -1;
+    }
+
+    const auto models = extract_json_string_values(response, {"id", "name", "model"});
+    if (!models.empty() && !model_list_contains(models, config_.model)) {
         return -1;
     }
 
     return static_cast<int>(duration);
+}
+
+std::string LLMClient::provider_name() const {
+    if (is_ollama_url(config_.api_url)) {
+        return "ollama";
+    }
+
+    return "openai-compatible";
+}
+
+std::vector<std::string> LLMClient::list_available_models() const {
+#if !QORNIX_HAS_CURL
+    return {};
+#else
+    if (!config_.enabled) {
+        return {};
+    }
+
+    const std::string url = is_ollama_url(config_.api_url)
+        ? ollama_base_url(config_.api_url) + "/api/tags"
+        : openai_models_url(config_.api_url);
+
+    const std::string response = make_get_request(url, 3000);
+    if (response_has_error(response)) {
+        return {};
+    }
+
+    return extract_json_string_values(response, {"name", "model", "id"});
+#endif
+}
+
+bool LLMClient::configured_model_available() const {
+    if (!config_.enabled) {
+        return false;
+    }
+
+    const auto models = list_available_models();
+    return model_list_contains(models, config_.model);
 }
 
 // ============================================================================
@@ -745,8 +1124,9 @@ size_t LLMClient::estimate_tokens(const std::string& text) const {
 
     for (char c : text) {
         total_chars++;
-        // Simple heuristic: Cyrillic characters
-        if ((unsigned char)c >= 0xc0 && (unsigned char)c <= 0xff) {
+        // Simple heuristic: non-ASCII high-byte characters.
+        const auto byte = static_cast<unsigned char>(c);
+        if (byte >= 0xc0) {
             russian_chars++;
         }
     }
@@ -915,6 +1295,10 @@ std::string LLMClient::ask(const std::string& question,
     if (!config_.enabled) {
         answer = "LLM не настроен. Используйте /api/health для проверки.";
     } else {
+#if !QORNIX_HAS_CURL
+        answer = "LLM недоступен: qornix_rag собран без libcurl. "
+                 "Установите libcurl development package и пересоберите проект.\n\n" + context;
+#else
         std::string prompt = build_prompt(context, question);
         std::string request_body = build_request_json(prompt);
 
@@ -932,7 +1316,7 @@ std::string LLMClient::ask(const std::string& question,
 
         std::string raw_response = make_request(url, request_body, config_.request_timeout_ms);
 
-        if (raw_response.empty() || raw_response.find("error") != std::string::npos) {
+        if (response_has_error(raw_response)) {
             // Try failover endpoints
             if (config_.failover_enabled && !config_.failover_endpoints.empty()) {
                 for (const auto& endpoint : config_.failover_endpoints) {
@@ -961,13 +1345,13 @@ std::string LLMClient::ask(const std::string& question,
 
                     raw_response = make_request(failover_url, failover_json.str(),
                                                 config_.request_timeout_ms);
-                    if (!raw_response.empty() && raw_response.find("error") == std::string::npos) {
+                    if (!response_has_error(raw_response)) {
                         break;
                     }
                 }
             }
 
-            if (raw_response.empty() || raw_response.find("error") != std::string::npos) {
+            if (response_has_error(raw_response)) {
                 answer = "LLM недоступен. Вот релевантные фрагменты из кода:\n" + context;
             } else {
                 answer = parse_response(raw_response);
@@ -975,6 +1359,7 @@ std::string LLMClient::ask(const std::string& question,
         } else {
             answer = parse_response(raw_response);
         }
+#endif
     }
 
     // Phase 3: Store in cache

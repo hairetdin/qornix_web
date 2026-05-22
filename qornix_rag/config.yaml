@@ -1,9 +1,15 @@
-# Configuration Qornix RAG
+# Configuration Qornix RAG standalone mode
+#
+# Defaults are intentionally local-first. Standalone qornix_rag is a
+# single-user local wiki/RAG tool; expose it to the network only when you
+# explicitly know why you need that.
 
 server:
-  host: 0.0.0.0
-  port: 8082
-  project_path: ../..
+  # Canonical bind key. The legacy key server.host is still accepted by
+  # main.cpp for compatibility, but new configs should use server.address.
+  address: 127.0.0.1
+  port: 8081
+  project_path: .
 
 search:
   use_hybrid: true
@@ -13,6 +19,9 @@ search:
   min_score_threshold: 0.1
 
 indexing:
+  # Keep startup predictable for local wiki usage. Set to false to start the
+  # web UI first and trigger indexing manually through the UI/API.
+  auto_index_on_startup: true
   embedding_dim: 256
   max_file_size_kb: 512
   skip_directories:
@@ -21,15 +30,22 @@ indexing:
     - build
     - __pycache__
     - node_modules
+    - qornix_rag/models
 
 embedding:
-  backend: onnx
-  model_path: models/semantic_model.onnx
-  tokenizer_path: models/tokenizer.json
-  max_seq_len: 256
-  onnx_threads: 2
-  normalize_embeddings: true
+  # Safe default for a fresh git clone. Works without bundled model files.
+  backend: tfidf
   enable_fallback: true
+
+  # Optional ONNX semantic retrieval. Model files are not committed to GitHub
+  # because they are large and may have separate licenses.
+  #
+  # backend: onnx
+  # model_path: qornix_rag/models/semantic_model.onnx
+  # tokenizer_path: qornix_rag/models/tokenizer.json
+  # max_seq_len: 256
+  # onnx_threads: 2
+  # normalize_embeddings: true
 
 # LLM Configuration (optional)
 # Uncomment and configure to enable AI-powered Q&A
@@ -38,6 +54,7 @@ llm:
   api_url: "http://localhost:11434"      # Ollama по умолчанию
   api_key: ""                            # Если требуется
   model: "llama3"                        # Модель
+#  model: "qwen3.6:35b"
 
   # Request settings
   max_tokens: 1024                       # Максимальная длина ответа
@@ -129,14 +146,14 @@ prompt_cache:
 rag:
   sqlite:
     enabled: true                         # Persistent QA storage for Phase 5 endpoints
-    db_path: "rag_kb.db"                  # Created relative to qornix_rag/ when using run.sh
+    db_path: "qornix_rag/data/rag_kb.db"     # Created under the local standalone data directory
     source_id: "sqlite_kb"
     name: "SQLite Knowledge Base"
     auto_migrate: true
 
   markdown:
     enabled: true                         # Enables /api/import/markdown endpoints
-    directory_path: "knowledge_base"      # Optional local Markdown knowledge base
+    directory_path: "qornix_rag/knowledge_base" # Optional local Markdown knowledge base
     recursive: true
 
   analytics:

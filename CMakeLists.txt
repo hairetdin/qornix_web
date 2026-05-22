@@ -80,6 +80,10 @@ add_library(qornix_web_core
 
 add_library(qornix::web_core ALIAS qornix_web_core)
 
+set_target_properties(qornix_web_core PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
+
 target_include_directories(qornix_web_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -159,8 +163,11 @@ endif()
 if(QORNIX_BUILD_RAG)
     add_subdirectory(qornix_rag)
 
-    # Link RAG library into qornix_web_core for optional RAG integration
-    target_link_libraries(qornix_web_core PUBLIC qornix_rag_lib)
+    # Link the optional RAG extension into the demo app, not the framework core.
+    # qornix_web_core remains independent from qornix_rag.
+    if(QORNIX_BUILD_APP)
+        target_link_libraries(qornix_web PRIVATE qornix_rag_extension)
+    endif()
 endif()
 
 # Unit tests.

@@ -12,6 +12,9 @@
 #include <ctime>
 #include <algorithm>
 #include <iostream>
+#include <cstdlib>
+#include <filesystem>
+#include <vector>
 
 namespace http = boost::beast::http;
 namespace urls = boost::urls;
@@ -20,9 +23,145 @@ using qornix::rag::QASource;
 using qornix::rag::MemorySource;
 // DataSource and DataSourceType are in global namespace (defined in core.h)
 
+namespace {
+
+std::string normalizeRoutePrefix(std::string prefix, const std::string& fallback) {
+    if (prefix.empty()) {
+        prefix = fallback;
+    }
+    if (prefix.front() != '/') {
+        prefix.insert(prefix.begin(), '/');
+    }
+    while (prefix.size() > 1 && prefix.back() == '/') {
+        prefix.pop_back();
+    }
+    return prefix;
+}
+
+std::string joinRoute(const std::string& prefix, const std::string& suffix) {
+    if (prefix == "/") {
+        return suffix.empty() ? "/" : suffix;
+    }
+    if (suffix.empty() || suffix == "/") {
+        return prefix;
+    }
+    if (suffix.front() == '/') {
+        return prefix + suffix;
+    }
+    return prefix + "/" + suffix;
+}
+
+bool endsWith(const std::string& value, const std::string& suffix) {
+    return value.size() >= suffix.size()
+        && value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+bool apiPathMatches(const std::string& path, const std::string& legacy_path) {
+    if (path == legacy_path) {
+        return true;
+    }
+    constexpr const char* legacy_prefix = "/api/";
+    if (legacy_path.rfind(legacy_prefix, 0) != 0 || path.rfind(legacy_prefix, 0) != 0) {
+        return false;
+    }
+    const std::string suffix = "/" + legacy_path.substr(std::char_traits<char>::length(legacy_prefix));
+    return endsWith(path, suffix);
+}
+
+std::string makeQaPairId(const std::string& source_id) {
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+    return source_id + "_qa_" + std::to_string(millis);
+}
+
+std::string qaContextPath(const QASource::QAPair& pair) {
+    return "qa://" + (pair.category.empty() ? std::string("general") : pair.category) + "/" + pair.id;
+}
+
+std::string qaContextSnippet(const QASource::QAPair& pair) {
+    return "Q: " + pair.question + "\nA: " + pair.answer;
+}
+
+boost::json::object qaContextObject(const QASource::QAPair& pair, double score) {
+    boost::json::object obj;
+    obj["path"] = qaContextPath(pair);
+    obj["score"] = score;
+    obj["snippet"] = qaContextSnippet(pair);
+    obj["source_type"] = "qa";
+    obj["category"] = pair.category;
+    obj["pair_id"] = pair.id;
+    return obj;
+}
+
+boost::json::object qaSearchResultObject(const QASource::QAPair& pair, double score) {
+    boost::json::object obj;
+    obj["path"] = qaContextPath(pair);
+    obj["type"] = "QA";
+    obj["language"] = "knowledge_base";
+    obj["score"] = score;
+    obj["vector_score"] = 0.0;
+    obj["text_score"] = score;
+    obj["fused_score"] = score;
+    obj["snippet"] = qaContextSnippet(pair);
+    obj["lines"] = static_cast<std::int64_t>(2);
+    obj["size"] = static_cast<std::int64_t>(pair.question.size() + pair.answer.size());
+    obj["source_type"] = "qa";
+    obj["category"] = pair.category;
+    obj["pair_id"] = pair.id;
+    return obj;
+}
+
+} // namespace
+
+namespace {
+
+bool hasRagInterfaceTemplate(const std::filesystem::path &dir) {
+    std::error_code ec;
+    return std::filesystem::is_regular_file(dir / "rag_interface.html", ec);
+}
+
+std::string resolveRagTemplatesDir() {
+    std::vector<std::filesystem::path> candidates;
+
+    if (const char *env_dir = std::getenv("QORNIX_RAG_TEMPLATES_DIR")) {
+        if (*env_dir != '\0') {
+            candidates.emplace_back(env_dir);
+        }
+    }
+
+    std::error_code ec;
+    auto cwd = std::filesystem::current_path(ec);
+    if (!ec) {
+        candidates.emplace_back(cwd / "qornix_rag" / "templates");
+        candidates.emplace_back(cwd / "templates");
+    }
+
+    for (const auto &candidate : candidates) {
+        if (hasRagInterfaceTemplate(candidate)) {
+            return candidate.string();
+        }
+    }
+
+    if (!candidates.empty()) {
+        std::cerr << "Warning: RAG UI template directory was not resolved from candidates:" << std::endl;
+        for (const auto &candidate : candidates) {
+            std::cerr << "  - " << candidate.string() << std::endl;
+        }
+    }
+
+    return "templates";
+}
+
+} // namespace
+
 // ============================================================================
 // RagApiHandler constructor
 // ============================================================================
+
+RagApiHandler::RagApiHandler(std::shared_ptr<RagService> service)
+    : rag_service_(std::move(service)),
+      rag_engine_(rag_service_ ? rag_service_->engine() : nullptr),
+      llm_client_(rag_service_ ? rag_service_->llm() : nullptr) {}
 
 RagApiHandler::RagApiHandler(
     std::shared_ptr<RagEngine> engine,
@@ -50,7 +189,9 @@ RagApiHandler::RagApiHandler(
       analytics_service_(std::move(analytics)),
       markdown_source_(std::move(markdown)),
       dedup_service_(std::move(dedup)),
-      sqlite_source_(std::move(sqlite)) {}
+      sqlite_source_(std::move(sqlite)) {
+        rag_service_ = std::make_shared<RagService>(rag_engine_, llm_client_, sqlite_source_);
+      }
 #else
     : rag_engine_(std::move(engine)),
       llm_client_(std::move(llm)),
@@ -61,18 +202,24 @@ RagApiHandler::RagApiHandler(
       metrics_(std::move(metrics)),
       analytics_service_(std::move(analytics)),
       markdown_source_(std::move(markdown)),
-      dedup_service_(std::move(dedup)) {}
+      dedup_service_(std::move(dedup)) {
+        rag_service_ = std::make_shared<RagService>(rag_engine_, llm_client_);
+      }
 #endif
 
 RagApiHandler::RagApiHandler(std::shared_ptr<RagEngine> engine)
-    : rag_engine_(std::move(engine)) {}
+    : rag_engine_(std::move(engine)) {
+    rag_service_ = std::make_shared<RagService>(rag_engine_);
+}
 
 // ============================================================================
 // RagWebHandler constructor
 // ============================================================================
 
-RagWebHandler::RagWebHandler(const std::string &templates_dir)
-    : templates_dir_(templates_dir) {}
+RagWebHandler::RagWebHandler(const std::string &templates_dir,
+                             const std::string &api_base)
+    : templates_dir_(templates_dir),
+      api_base_(api_base) {}
 
 // ============================================================================
 // RagApiHandler::handlePost
@@ -87,13 +234,10 @@ void RagApiHandler::handlePost(
         // Determine request type by URL
         std::string path = url_view.path();
 
-        if (path == "/api/index" || path.find("/api/index") != std::string::npos) {
+        if (apiPathMatches(path, "/api/index")) {
             // Project indexing
             boost::json::value json_req = boost::json::parse(req.body());
-            std::string project_path = rag_engine_->get_indexed_project_root();
-            if (project_path.empty()) {
-                project_path = ".";
-            }
+            std::optional<std::string> project_path;
 
             if (json_req.if_object()) {
                 auto obj = json_req.as_object();
@@ -105,27 +249,23 @@ void RagApiHandler::handlePost(
                 }
             }
 
-            // Index the project
-            rag_engine_->index_project(project_path);
-
-            // Get statistics
-            auto stats = rag_engine_->get_statistics();
+            auto indexed = rag_service_->indexProject(project_path);
 
             // Build response
             boost::json::object response;
-            response["success"] = true;
-            response["message"] = "Project indexed successfully";
+            response["success"] = indexed.success;
+            response["message"] = indexed.message;
             response["stats"] = {
-                {"total_files", stats.total_files},
-                {"total_lines", stats.total_lines},
-                {"total_size_kb", stats.total_size_bytes / 1024},
-                {"index_duration_ms", static_cast<std::int64_t>(stats.index_duration_ms)}
+                {"total_files", indexed.stats.total_files},
+                {"total_lines", indexed.stats.total_lines},
+                {"total_size_kb", indexed.stats.total_size_bytes / 1024},
+                {"index_duration_ms", static_cast<std::int64_t>(indexed.stats.index_duration_ms)}
             };
 
             buildJsonResponse(res, http::status::ok,
                               boost::json::serialize(response));
 
-        } else if (path == "/api/search" || path.find("/api/search") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/search")) {
             // Project search
             boost::json::value json_req = boost::json::parse(req.body());
             std::string query;
@@ -150,21 +290,16 @@ void RagApiHandler::handlePost(
                 return;
             }
 
-            // Search
-            auto search_start = std::chrono::steady_clock::now();
-            auto results = rag_engine_->search(query, top_k);
-            auto search_end = std::chrono::steady_clock::now();
-            long long search_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                search_end - search_start).count();
+            auto search_response = rag_service_->search(query, top_k);
 
             // Phase 5: Log search to analytics
             if (analytics_service_) {
                 AnalyticsService::SearchQuery log_entry;
                 log_entry.query = query;
                 log_entry.timestamp = std::chrono::system_clock::now();
-                log_entry.result_count = results.size();
-                log_entry.has_answer = results.size() > 0;
-                log_entry.response_time_ms = static_cast<int>(search_time);
+                log_entry.result_count = search_response.results.size();
+                log_entry.has_answer = !search_response.results.empty();
+                log_entry.response_time_ms = static_cast<int>(search_response.response_time_ms);
 
                 // Extract client IP
                 auto it_ip = req.find("X-Forwarded-For");
@@ -177,8 +312,8 @@ void RagApiHandler::handlePost(
                     }
                 }
 
-                if (!results.empty()) {
-                    log_entry.top_result_path = results[0].document.relative_path;
+                if (!search_response.results.empty()) {
+                    log_entry.top_result_path = search_response.results[0].path;
                 }
 
                 analytics_service_->logSearch(log_entry);
@@ -186,32 +321,35 @@ void RagApiHandler::handlePost(
 
             // Build response
             boost::json::array results_array;
-            for (const auto &result: results) {
+            for (const auto &result: search_response.results) {
                 boost::json::object result_obj{
-                    {"path", result.document.relative_path},
-                    {"type", result.document.type},
-                    {"language", result.document.language},
+                    {"path", result.path},
+                    {"type", result.type},
+                    {"language", result.language},
                     {"score", result.score},
                     {"vector_score", result.vector_score},
                     {"text_score", result.text_score},
                     {"fused_score", result.fused_score},
                     {"snippet", result.snippet},
-                    {"lines", result.document.lines_count},
-                    {"size", result.document.size_bytes}
+                    {"lines", static_cast<std::int64_t>(result.lines)},
+                    {"size", static_cast<std::int64_t>(result.size)},
+                    {"source_type", result.source_type}
                 };
+                if (!result.category.empty()) result_obj["category"] = result.category;
+                if (!result.pair_id.empty()) result_obj["pair_id"] = result.pair_id;
                 results_array.emplace_back(result_obj);
             }
 
             boost::json::object response;
-            response["success"] = true;
+            response["success"] = search_response.success;
             response["query"] = query;
             response["results"] = results_array;
-            response["count"] = results.size();
+            response["count"] = static_cast<std::int64_t>(results_array.size());
 
             buildJsonResponse(res, http::status::ok,
                               boost::json::serialize(response));
 
-        } else if (path == "/api/ask" || path.find("/api/ask") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/ask")) {
             // LLM-powered Q&A with RAG context
             boost::json::value json_req = boost::json::parse(req.body());
             std::string question;
@@ -232,13 +370,104 @@ void RagApiHandler::handlePost(
                 return;
             }
 
+            bool do_stream = false;
+            if (json_req.if_object()) {
+                auto obj = json_req.as_object();
+                if (obj.contains("stream")) {
+                    do_stream = obj.at("stream").as_bool();
+                }
+            }
+
+            if (!do_stream) {
+                std::string client_ip;
+                auto it_ip = req.find("X-Forwarded-For");
+                if (it_ip != req.end()) {
+                    client_ip = std::string(it_ip->value().data(), it_ip->value().size());
+                } else {
+                    it_ip = req.find("X-Real-IP");
+                    if (it_ip != req.end()) {
+                        client_ip = std::string(it_ip->value().data(), it_ip->value().size());
+                    }
+                }
+
+                auto ask_response = rag_service_->ask(question, top_k, client_ip);
+                boost::json::array context_array;
+                boost::json::array sources_array;
+
+                for (const auto& item : ask_response.context) {
+                    boost::json::object ctx_obj{
+                        {"path", item.path},
+                        {"score", item.score},
+                        {"snippet", item.snippet},
+                        {"source_type", item.source_type}
+                    };
+                    if (!item.category.empty()) ctx_obj["category"] = item.category;
+                    if (!item.pair_id.empty()) ctx_obj["pair_id"] = item.pair_id;
+                    context_array.emplace_back(ctx_obj);
+                }
+                for (const auto& source : ask_response.sources) {
+                    sources_array.emplace_back(source);
+                }
+
+                boost::json::object response;
+                response["success"] = ask_response.success;
+                response["question"] = ask_response.question;
+                response["context"] = context_array;
+                response["sources"] = sources_array;
+                response["answer"] = ask_response.answer;
+                response["llm_status"] = ask_response.llm_status;
+                response["response_time_ms"] = static_cast<std::int64_t>(ask_response.response_time_ms);
+
+                if (cache_) {
+                    auto stats = llm_client_->get_cache_stats();
+                    boost::json::object cache_obj;
+                    cache_obj["enabled"] = true;
+                    cache_obj["hits"] = static_cast<std::int64_t>(stats.hits);
+                    cache_obj["misses"] = static_cast<std::int64_t>(stats.misses);
+                    cache_obj["size"] = static_cast<std::int64_t>(stats.size);
+                    cache_obj["max_size"] = static_cast<std::int64_t>(stats.max_size);
+                    cache_obj["hit_rate_percent"] = static_cast<double>(stats.hit_rate());
+                    response["cache"] = cache_obj;
+                }
+
+                if (rate_limiter_) {
+                    auto rl_stats = llm_client_->get_rate_limiter_stats();
+                    boost::json::object rl_obj;
+                    rl_obj["enabled"] = true;
+                    rl_obj["allowed"] = static_cast<std::int64_t>(rl_stats.allowed);
+                    rl_obj["rejected"] = static_cast<std::int64_t>(rl_stats.rejected);
+                    rl_obj["rejection_rate_percent"] = static_cast<double>(rl_stats.rejection_rate());
+                    response["rate_limiter"] = rl_obj;
+                }
+
+                buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+                return;
+            }
+
             // Search for context
             auto results = rag_engine_->search(question, top_k);
 
-            // Build context string
+            // Build context string. User-maintained QA pairs are added first
+            // so local wiki knowledge has priority over generic project snippets.
             std::string context;
             boost::json::array context_array;
             boost::json::array sources_array;
+
+#if QORNIX_HAS_SQLITE
+            if (sqlite_source_) {
+                const auto qa_pairs = sqlite_source_->searchByQuestion(question);
+                const size_t qa_limit = std::min<size_t>(qa_pairs.size(), std::min<size_t>(top_k, 5));
+                for (size_t i = 0; i < qa_limit; ++i) {
+                    const auto& pair = qa_pairs[i];
+                    if (!context.empty()) {
+                        context += "\n---\n";
+                    }
+                    context += "[QA Knowledge Base] " + qaContextPath(pair) + "\n" + qaContextSnippet(pair);
+                    context_array.emplace_back(qaContextObject(pair, 1.0 - (static_cast<double>(i) * 0.01)));
+                    sources_array.emplace_back(qaContextPath(pair));
+                }
+            }
+#endif
 
             for (const auto &result: results) {
                 std::ostringstream ctx;
@@ -251,7 +480,8 @@ void RagApiHandler::handlePost(
                 boost::json::object ctx_obj{
                     {"path", result.document.relative_path},
                     {"score", result.fused_score},
-                    {"snippet", result.snippet}
+                    {"snippet", result.snippet},
+                    {"source_type", "project"}
                 };
                 context_array.emplace_back(ctx_obj);
                 sources_array.emplace_back(result.document.relative_path);
@@ -264,15 +494,6 @@ void RagApiHandler::handlePost(
             response["sources"] = sources_array;
 
             if (llm_client_ && llm_client_->is_enabled()) {
-                // Check if streaming requested
-                bool do_stream = false;
-                if (json_req.if_object()) {
-                    auto obj = json_req.as_object();
-                    if (obj.contains("stream")) {
-                        do_stream = obj.at("stream").as_bool();
-                    }
-                }
-
                 if (do_stream) {
                     // SSE Streaming response
                     res.set("Content-Type", "text/event-stream; charset=utf-8");
@@ -323,8 +544,15 @@ void RagApiHandler::handlePost(
                 long long response_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                     end_time - start_time).count();
 
+                const bool llm_fallback_answer =
+                    answer.rfind("LLM недоступен", 0) == 0 ||
+                    answer.rfind("LLM не настроен", 0) == 0 ||
+                    answer.rfind("Ошибка:", 0) == 0;
+
                 response["answer"] = answer;
-                response["llm_status"] = llm_client_->is_available() ? "ok" : "unavailable";
+                response["llm_status"] = llm_fallback_answer
+                    ? "fallback"
+                    : (llm_client_->is_available() ? "ok" : "unavailable");
                 response["response_time_ms"] = static_cast<std::int64_t>(response_time);
 
                 // Phase 3: Add cache stats
@@ -359,7 +587,7 @@ void RagApiHandler::handlePost(
 
             buildJsonResponse(res, http::status::ok,
                               boost::json::serialize(response));
-        } else if (path == "/api/batch" || path.find("/api/batch") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/batch")) {
             // Batch processing of multiple questions
             boost::json::value json_req = boost::json::parse(req.body());
             std::vector<BatchQuestion> questions;
@@ -466,7 +694,7 @@ void RagApiHandler::handlePost(
 
             buildJsonResponse(res, http::status::ok,
                               boost::json::serialize(response));
-        } else if (path == "/api/metrics" || path.find("/api/metrics") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/metrics")) {
             // Prometheus metrics endpoint
             if (metrics_) {
                 std::string metrics_text = metrics_->render_all();
@@ -476,7 +704,7 @@ void RagApiHandler::handlePost(
             } else {
                 buildErrorResponse(res, http::status::service_unavailable, "Metrics not enabled");
             }
-        } else if (path == "/api/sources" || path.find("/api/sources") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/sources")) {
             // GET /api/sources - list data sources
             {
                 auto sources = rag_engine_->getDataSources();
@@ -499,7 +727,7 @@ void RagApiHandler::handlePost(
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
-        } else if (path == "/api/sources/add" || path.find("/api/sources/add") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/sources/add")) {
             // POST /api/sources/add - add a data source
             {
                 boost::json::value json_req = boost::json::parse(req.body());
@@ -583,7 +811,7 @@ void RagApiHandler::handlePost(
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
-        } else if (path == "/api/sources/remove" || path.find("/api/sources/remove") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/sources/remove")) {
             // POST /api/sources/remove - remove a data source by ID
             {
                 boost::json::value json_req = boost::json::parse(req.body());
@@ -610,7 +838,38 @@ void RagApiHandler::handlePost(
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
-        } else if (path == "/api/qa/add" || path.find("/api/qa/add") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/qa")) {
+            boost::json::value json_req = boost::json::parse(req.body());
+            std::string question;
+            std::string answer;
+            std::string category = "general";
+
+            if (json_req.if_object()) {
+                auto obj = json_req.as_object();
+                if (obj.contains("question")) {
+                    question = obj.at("question").as_string().c_str();
+                }
+                if (obj.contains("answer")) {
+                    answer = obj.at("answer").as_string().c_str();
+                }
+                if (obj.contains("category")) {
+                    category = obj.at("category").as_string().c_str();
+                }
+            }
+
+            std::string pair_id;
+            const bool added = rag_service_ && rag_service_->addQaPair(question, answer, category, &pair_id);
+            if (!added) {
+                buildErrorResponse(res, http::status::bad_request, "question and answer are required");
+                return;
+            }
+
+            boost::json::object response;
+            response["success"] = true;
+            response["message"] = "QA pair added";
+            response["pair_id"] = pair_id;
+            buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+        } else if (apiPathMatches(path, "/api/qa/add")) {
             // POST /api/qa/add - add a QA pair
             {
                 boost::json::value json_req = boost::json::parse(req.body());
@@ -640,6 +899,26 @@ void RagApiHandler::handlePost(
                     return;
                 }
 
+#if QORNIX_HAS_SQLITE
+                if (sqlite_source_ &&
+                    (source_id.empty() || source_id == sqlite_source_->getId() || source_id == sqlite_source_->getSourceId())) {
+                    std::string pair_id = makeQaPairId(sqlite_source_->getId());
+                    if (!sqlite_source_->addQAPair(pair_id, question, answer, category)) {
+                        buildErrorResponse(res, http::status::internal_server_error, "Failed to add QA pair to SQLite source");
+                        return;
+                    }
+
+                    boost::json::object response;
+                    response["success"] = true;
+                    response["message"] = "QA pair added";
+                    response["pair_id"] = pair_id;
+                    response["source_id"] = sqlite_source_->getId();
+
+                    buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+                    return;
+                }
+#endif
+
                 // Find QASource by ID
                 auto sources = rag_engine_->getDataSources();
                 std::shared_ptr<QASource> qa_source = nullptr;
@@ -660,7 +939,7 @@ void RagApiHandler::handlePost(
                 }
 
                 // Generate ID if not provided
-                std::string pair_id = source_id + "_" + std::to_string(std::time(nullptr));
+                std::string pair_id = makeQaPairId(source_id.empty() ? qa_source->getId() : source_id);
 
                 QASource::QAPair new_pair;
                 new_pair.id = pair_id;
@@ -678,7 +957,7 @@ void RagApiHandler::handlePost(
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
-        } else if (path == "/api/qa/update" || path.find("/api/qa/update") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/qa/update")) {
             // POST /api/qa/update - update a QA pair
             {
                 boost::json::value json_req = boost::json::parse(req.body());
@@ -707,6 +986,30 @@ void RagApiHandler::handlePost(
                     buildErrorResponse(res, http::status::bad_request, "pair_id is required");
                     return;
                 }
+
+#if QORNIX_HAS_SQLITE
+                if (sqlite_source_) {
+                    auto opt_pair = sqlite_source_->findQAPair(pair_id);
+                    if (opt_pair) {
+                        std::string updated_question = question.empty() ? opt_pair->question : question;
+                        std::string updated_answer = answer.empty() ? opt_pair->answer : answer;
+                        std::string updated_category = category.empty() ? opt_pair->category : category;
+                        if (!sqlite_source_->updateQAPair(pair_id, updated_answer, updated_category, "", updated_question)) {
+                            buildErrorResponse(res, http::status::internal_server_error, "Failed to update QA pair in SQLite source");
+                            return;
+                        }
+
+                        boost::json::object response;
+                        response["success"] = true;
+                        response["message"] = "QA pair updated";
+                        response["pair_id"] = pair_id;
+                        response["source_id"] = sqlite_source_->getId();
+
+                        buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+                        return;
+                    }
+                }
+#endif
 
                 // Find QASource containing this pair
                 auto sources = rag_engine_->getDataSources();
@@ -747,7 +1050,7 @@ void RagApiHandler::handlePost(
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
-        } else if (path == "/api/qa/delete" || path.find("/api/qa/delete") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/qa/delete")) {
             // POST /api/qa/delete - delete a QA pair
             {
                 boost::json::value json_req = boost::json::parse(req.body());
@@ -764,6 +1067,24 @@ void RagApiHandler::handlePost(
                     buildErrorResponse(res, http::status::bad_request, "pair_id is required");
                     return;
                 }
+
+#if QORNIX_HAS_SQLITE
+                if (sqlite_source_ && sqlite_source_->findQAPair(pair_id)) {
+                    if (!sqlite_source_->deleteQAPair(pair_id)) {
+                        buildErrorResponse(res, http::status::internal_server_error, "Failed to delete QA pair from SQLite source");
+                        return;
+                    }
+
+                    boost::json::object response;
+                    response["success"] = true;
+                    response["message"] = "QA pair deleted";
+                    response["pair_id"] = pair_id;
+                    response["source_id"] = sqlite_source_->getId();
+
+                    buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+                    return;
+                }
+#endif
 
                 // Find QASource containing this pair
                 auto sources = rag_engine_->getDataSources();
@@ -793,7 +1114,7 @@ void RagApiHandler::handlePost(
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
-        } else if (path == "/api/qa/list" || path.find("/api/qa/list") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/qa") || apiPathMatches(path, "/api/qa/list")) {
             // GET /api/qa/list - list QA pairs with pagination
             {
                 std::string source_id;
@@ -880,7 +1201,7 @@ void RagApiHandler::handlePost(
         // Phase 5: New API Endpoints
         // ============================================
 
-        } else if (path == "/api/analytics" || path.find("/api/analytics") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/analytics")) {
             // GET /api/analytics - Get analytics report
             {
                 if (!analytics_service_) {
@@ -897,7 +1218,7 @@ void RagApiHandler::handlePost(
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
-        } else if (path == "/api/analytics/gaps" || path.find("/api/analytics/gaps") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/analytics/gaps")) {
             // GET /api/analytics/gaps - Get knowledge gaps
             {
                 if (!analytics_service_) {
@@ -931,7 +1252,7 @@ void RagApiHandler::handlePost(
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
-        } else if (path == "/api/analytics/export" || path.find("/api/analytics/export") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/analytics/export")) {
             // POST /api/analytics/export - Export report to JSON
             {
                 if (!analytics_service_) {
@@ -946,7 +1267,7 @@ void RagApiHandler::handlePost(
                 res.body() = json_report;
                 res.result(http::status::ok);
             }
-        } else if (path == "/api/qa/dedup" || path.find("/api/qa/dedup") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/qa/dedup")) {
             // POST /api/qa/dedup - Find duplicate QA pairs (semantic deduplication)
             {
                 if (!dedup_service_) {
@@ -1040,7 +1361,7 @@ void RagApiHandler::handlePost(
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
-        } else if (path == "/api/qa/dedup/remove" || path.find("/api/qa/dedup/remove") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/qa/dedup/remove")) {
             // POST /api/qa/dedup/remove - Remove duplicates
             {
                 if (!dedup_service_) {
@@ -1086,7 +1407,7 @@ void RagApiHandler::handlePost(
                 buildErrorResponse(res, http::status::service_unavailable, "SQLiteSource not available");
 #endif
             }
-        } else if (path == "/api/import/markdown" || path.find("/api/import/markdown") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/import/markdown")) {
             // POST /api/import/markdown - Import Markdown files
             {
                 if (!markdown_source_) {
@@ -1126,7 +1447,7 @@ void RagApiHandler::handlePost(
 
                 buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
             }
-        } else if (path == "/api/import/history" || path.find("/api/import/history") != std::string::npos) {
+        } else if (apiPathMatches(path, "/api/import/history")) {
             // GET /api/import/history - Get import history
             {
                 if (!markdown_source_) {
@@ -1157,6 +1478,84 @@ void RagApiHandler::handlePost(
 }
 
 // ============================================================================
+// RagApiHandler::handlePut / handleDelete
+// ============================================================================
+
+void RagApiHandler::handlePut(
+    const http::request<http::string_body> &req,
+    http::response<http::string_body> &res,
+    const urls::url_view &url_view,
+    const std::map<std::string, std::string> &path_params) {
+    try {
+        const std::string path = url_view.path();
+        if (!path_params.count("id") || path.find("/qa/") == std::string::npos) {
+            buildErrorResponse(res, http::status::not_found, "Endpoint not found");
+            return;
+        }
+
+        boost::json::value json_req = boost::json::parse(req.body());
+        std::string question;
+        std::string answer;
+        std::string category;
+
+        if (json_req.if_object()) {
+            auto obj = json_req.as_object();
+            if (obj.contains("question")) {
+                question = obj.at("question").as_string().c_str();
+            }
+            if (obj.contains("answer")) {
+                answer = obj.at("answer").as_string().c_str();
+            }
+            if (obj.contains("category")) {
+                category = obj.at("category").as_string().c_str();
+            }
+        }
+
+        const std::string pair_id = path_params.at("id");
+        if (!rag_service_ || !rag_service_->updateQaPair(pair_id, question, answer, category)) {
+            buildErrorResponse(res, http::status::not_found, "QA pair not found: " + pair_id);
+            return;
+        }
+
+        boost::json::object response;
+        response["success"] = true;
+        response["message"] = "QA pair updated";
+        response["pair_id"] = pair_id;
+        buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+    } catch (const std::exception &e) {
+        buildErrorResponse(res, http::status::internal_server_error, e.what());
+    }
+}
+
+void RagApiHandler::handleDelete(
+    const http::request<http::string_body> &,
+    http::response<http::string_body> &res,
+    const urls::url_view &url_view,
+    const std::map<std::string, std::string> &path_params) {
+    try {
+        const std::string path = url_view.path();
+        if (!path_params.count("id") || path.find("/qa/") == std::string::npos) {
+            buildErrorResponse(res, http::status::not_found, "Endpoint not found");
+            return;
+        }
+
+        const std::string pair_id = path_params.at("id");
+        if (!rag_service_ || !rag_service_->deleteQaPair(pair_id)) {
+            buildErrorResponse(res, http::status::not_found, "QA pair not found: " + pair_id);
+            return;
+        }
+
+        boost::json::object response;
+        response["success"] = true;
+        response["message"] = "QA pair deleted";
+        response["pair_id"] = pair_id;
+        buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+    } catch (const std::exception &e) {
+        buildErrorResponse(res, http::status::internal_server_error, e.what());
+    }
+}
+
+// ============================================================================
 // RagApiHandler::handleGet
 // ============================================================================
 
@@ -1165,10 +1564,150 @@ void RagApiHandler::handleGet(
     http::response<http::string_body> &res,
     const urls::url_view &url_view,
     const std::map<std::string, std::string> &) {
+    (void)req;
+
     try {
         std::string path = url_view.path();
 
-        if (path == "/api/health" || path.find("/api/health") != std::string::npos) {
+        if (apiPathMatches(path, "/api/sources")) {
+            auto sources = rag_engine_->getDataSources();
+            boost::json::array sources_array;
+
+            for (const auto& source : sources) {
+                boost::json::object source_obj{
+                    {"id", source->getId()},
+                    {"type", data_source_type_to_string(source->getType())},
+                    {"name", source->getName()},
+                    {"document_count", static_cast<std::int64_t>(source->count())}
+                };
+                sources_array.emplace_back(source_obj);
+            }
+
+            boost::json::object response;
+            response["success"] = true;
+            response["sources"] = sources_array;
+            response["count"] = static_cast<std::int64_t>(sources.size());
+
+            buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+
+        } else if (apiPathMatches(path, "/api/qa") || apiPathMatches(path, "/api/qa/list")) {
+            std::string source_id;
+            size_t page = 1;
+            size_t per_page = 20;
+
+            std::string query = url_view.query();
+            if (!query.empty() && query[0] == '?') {
+                query = query.substr(1);
+            }
+            if (!query.empty()) {
+                std::stringstream ss(query);
+                std::string param;
+                while (std::getline(ss, param, '&')) {
+                    auto eq_pos = param.find('=');
+                    if (eq_pos != std::string::npos) {
+                        std::string key = param.substr(0, eq_pos);
+                        std::string value = param.substr(eq_pos + 1);
+                        if (key == "source_id") {
+                            source_id = value;
+                        } else if (key == "page") {
+                            page = static_cast<size_t>(std::stoi(value));
+                        } else if (key == "per_page") {
+                            per_page = static_cast<size_t>(std::stoi(value));
+                        }
+                    }
+                }
+            }
+
+#if QORNIX_HAS_SQLITE
+            if (sqlite_source_ &&
+                (source_id.empty() || source_id == sqlite_source_->getId() || source_id == sqlite_source_->getSourceId())) {
+                auto pairs = sqlite_source_->getAllPairs(page, per_page);
+                boost::json::array pairs_array;
+                for (const auto& pair : pairs) {
+                    boost::json::object pair_obj;
+                    pair_obj["id"] = pair.id;
+                    pair_obj["question"] = pair.question;
+                    pair_obj["answer"] = pair.answer;
+                    pair_obj["category"] = pair.category;
+
+                    boost::json::array aliases_array;
+                    for (const auto& alias : pair.aliases) {
+                        aliases_array.emplace_back(alias);
+                    }
+                    pair_obj["aliases"] = std::move(aliases_array);
+                    pairs_array.emplace_back(pair_obj);
+                }
+
+                boost::json::object response;
+                response["success"] = true;
+                response["source_id"] = sqlite_source_->getId();
+                response["total"] = static_cast<std::int64_t>(sqlite_source_->count());
+                response["page"] = static_cast<std::int64_t>(page);
+                response["per_page"] = static_cast<std::int64_t>(per_page);
+                response["pairs"] = pairs_array;
+
+                buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+                return;
+            }
+#endif
+
+            auto sources = rag_engine_->getDataSources();
+            std::shared_ptr<QASource> qa_source = nullptr;
+
+            for (const auto& source : sources) {
+                if (auto qa = std::dynamic_pointer_cast<QASource>(source)) {
+                    if (source_id.empty() || qa->getId() == source_id) {
+                        qa_source = qa;
+                        break;
+                    }
+                }
+            }
+
+            if (!qa_source) {
+                boost::json::object response;
+                response["success"] = true;
+                response["source_id"] = source_id;
+                response["total"] = static_cast<std::int64_t>(0);
+                response["page"] = static_cast<std::int64_t>(page);
+                response["per_page"] = static_cast<std::int64_t>(per_page);
+                response["pairs"] = boost::json::array{};
+                buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+                return;
+            }
+
+            auto all_pairs = qa_source->getAllPairs();
+            size_t total = all_pairs.size();
+            size_t start = (page - 1) * per_page;
+            size_t end = std::min(start + per_page, total);
+
+            boost::json::array pairs_array;
+            for (size_t i = start; i < end && i < total; i++) {
+                const auto& pair = all_pairs[i];
+                boost::json::object pair_obj;
+                pair_obj["id"] = pair.id;
+                pair_obj["question"] = pair.question;
+                pair_obj["answer"] = pair.answer;
+                pair_obj["category"] = pair.category;
+
+                boost::json::array aliases_array;
+                for (const auto& alias : pair.aliases) {
+                    aliases_array.emplace_back(alias);
+                }
+                pair_obj["aliases"] = std::move(aliases_array);
+                pairs_array.emplace_back(pair_obj);
+            }
+
+            boost::json::object response;
+            response["success"] = true;
+            response["source_id"] = qa_source->getId();
+            response["total"] = static_cast<std::int64_t>(total);
+            response["page"] = static_cast<std::int64_t>(page);
+            response["per_page"] = static_cast<std::int64_t>(per_page);
+            response["pairs"] = pairs_array;
+
+            buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+
+        } else if (apiPathMatches(path, "/api/health")) {
             // Health check endpoint
             auto stats = rag_engine_->get_statistics();
 
@@ -1182,16 +1721,33 @@ void RagApiHandler::handleGet(
             boost::json::object llm_obj;
             if (llm_client_ && llm_client_->is_enabled()) {
                 int response_time = llm_client_->health_check();
+                const auto models = llm_client_->list_available_models();
+                const bool configured_model_available =
+                    llm_client_->configured_model_available();
+
+                boost::json::array models_array;
+                for (const auto& model : models) {
+                    models_array.emplace_back(model);
+                }
+
                 llm_obj["available"] = response_time >= 0;
+                llm_obj["provider"] = llm_client_->provider_name();
                 llm_obj["model"] = llm_client_->get_model();
+                llm_obj["configured_model_available"] = configured_model_available;
+                llm_obj["available_models"] = std::move(models_array);
                 llm_obj["api_url"] = llm_client_->get_api_url();
-                llm_obj["status"] = response_time >= 0 ? "ok" : "error";
+                llm_obj["status"] = response_time >= 0
+                    ? "ok"
+                    : (models.empty() ? "provider_unavailable" : "model_not_found");
                 llm_obj["response_time_ms"] = response_time >= 0
                                               ? static_cast<std::int64_t>(response_time)
                                               : static_cast<std::int64_t>(-1);
             } else {
                 llm_obj["available"] = false;
+                llm_obj["provider"] = "not_configured";
                 llm_obj["model"] = "not_configured";
+                llm_obj["configured_model_available"] = false;
+                llm_obj["available_models"] = boost::json::array{};
                 llm_obj["api_url"] = "N/A";
                 llm_obj["status"] = "not_configured";
             }
@@ -1256,6 +1812,12 @@ void RagWebHandler::handleGet(
     const std::map<std::string, std::string> &) {
     try {
         std::string html = TemplateLoader::loadFile("rag_interface.html", templates_dir_);
+        const std::string placeholder = "{{QORNIX_RAG_API_BASE}}";
+        size_t pos = 0;
+        while ((pos = html.find(placeholder, pos)) != std::string::npos) {
+            html.replace(pos, placeholder.size(), api_base_);
+            pos += api_base_.size();
+        }
         buildHtmlResponse(res, http::status::ok, html);
     } catch (const std::exception &e) {
         std::string error_html = TemplateLoader::load500Template(templates_dir_);
@@ -1281,57 +1843,134 @@ void setupRagRoutes(HttpServer& server,
 #if QORNIX_HAS_SQLITE
                     , std::shared_ptr<SQLiteSource> sqlite
 #endif
+                    , RagRouteOptions options
+                    ) {
+    auto rag_service = std::make_shared<RagService>(
+        rag_engine,
+        llm_client
+#if QORNIX_HAS_SQLITE
+        , sqlite
+#endif
+    );
+
+    setupRagRoutes(
+        server,
+        rag_service,
+        cache,
+        limiter,
+        batch,
+        pcache,
+        metrics,
+        analytics,
+        markdown,
+        dedup
+#if QORNIX_HAS_SQLITE
+        , sqlite
+#endif
+        , std::move(options)
+    );
+}
+
+void setupRagRoutes(HttpServer& server,
+                    std::shared_ptr<RagService> rag_service,
+                    std::shared_ptr<ICache> cache,
+                    std::shared_ptr<RateLimiter> limiter,
+                    std::shared_ptr<BatchProcessor> batch,
+                    std::shared_ptr<IPromptCache> pcache,
+                    std::shared_ptr<LLMRAGMetrics> metrics,
+                    std::shared_ptr<AnalyticsService> analytics,
+                    std::shared_ptr<MarkdownSource> markdown,
+                    std::shared_ptr<DeduplicationService> dedup
+#if QORNIX_HAS_SQLITE
+                    , std::shared_ptr<SQLiteSource> sqlite
+#endif
+                    , RagRouteOptions options
                     ) {
     std::cout << "\U0001f527\U0001f4dd\u0414\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0438\u0435 RAG \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u043e\u0432..." << std::endl;
+    auto rag_engine = rag_service ? rag_service->engine() : nullptr;
+    auto llm_client = rag_service ? rag_service->llm() : nullptr;
+
+    options.api_prefix = normalizeRoutePrefix(options.api_prefix, "/api");
+    options.ui_path = normalizeRoutePrefix(options.ui_path, "/");
 
     // Main page
-    server.add_route("/", std::make_shared<RagWebHandler>("templates"));
-    std::cout << "  \u2713 GET  / - Web \u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441" << std::endl;
+    const std::string templates_dir = resolveRagTemplatesDir();
+    if (options.expose_root_ui || options.ui_path != "/") {
+        const std::string api_base = options.api_prefix == "/api" ? "" : options.api_prefix;
+        server.add_route(options.ui_path, std::make_shared<RagWebHandler>(templates_dir, api_base));
+        std::cout << "  \u2713 GET  " << options.ui_path << " - Web \u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441"
+                  << " (templates: " << templates_dir << ")" << std::endl;
+    }
 
-    // API endpoints
-    server.add_route("/api/index", std::make_shared<RagApiHandler>(rag_engine, llm_client, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
-    std::cout << "  \u2713 POST /api/index - \u0418\u043d\u0434\u0435\u043a\u0441\u0430\u0446\u0438\u044f \u043f\u0440\u043e\u0435\u043a\u0442\u0430" << std::endl;
+    // API endpoints. Keep one full handler for routes that need optional
+    // runtime services such as SQLite-backed QA wiki. Without the same handler,
+    // /api/qa/add can store pairs successfully while /api/ask and /api/search
+    // cannot see them.
+#if QORNIX_HAS_SQLITE
+    auto full_handler = std::make_shared<RagApiHandler>(
+        rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics,
+        markdown, dedup, sqlite);
+#else
+    auto full_handler = std::make_shared<RagApiHandler>(
+        rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics,
+        markdown, dedup);
+#endif
 
-    server.add_route("/api/search", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, nullptr));
-    std::cout << "  \u2713 POST /api/search - \u041f\u043e\u0438\u0441\u043a" << std::endl;
+    const auto api_route = [&](const std::string& suffix) {
+        return joinRoute(options.api_prefix, suffix);
+    };
 
-    server.add_route("/api/stats", std::make_shared<RagApiHandler>(rag_engine, llm_client, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
-    std::cout << "  \u2713 GET  /api/stats - \u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430" << std::endl;
+    server.add_route(api_route("/index"), full_handler);
+    std::cout << "  \u2713 POST " << api_route("/index") << " - \u0418\u043d\u0434\u0435\u043a\u0441\u0430\u0446\u0438\u044f \u043f\u0440\u043e\u0435\u043a\u0442\u0430" << std::endl;
 
-    server.add_route("/api/ask", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, nullptr, nullptr));
-    std::cout << "  \u2713 POST /api/ask - \u0412\u043e\u043f\u0440\u043e\u0441 \u0441 LLM" << std::endl;
+    server.add_route(api_route("/search"), full_handler);
+    std::cout << "  \u2713 POST " << api_route("/search") << " - \u041f\u043e\u0438\u0441\u043a" << std::endl;
 
-    server.add_route("/api/batch", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, nullptr, nullptr));
-    std::cout << "  \u2713 POST /api/batch - Batch \u0432\u043e\u043f\u0440\u043e\u0441\u043e\u0432" << std::endl;
+    server.add_route(api_route("/stats"), full_handler);
+    std::cout << "  \u2713 GET  " << api_route("/stats") << " - \u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430" << std::endl;
 
-    server.add_route("/api/health", std::make_shared<RagApiHandler>(rag_engine, llm_client, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
-    std::cout << "  \u2713 GET  /api/health - \u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u044f" << std::endl;
+    server.add_route(api_route("/ask"), full_handler);
+    std::cout << "  \u2713 POST " << api_route("/ask") << " - \u0412\u043e\u043f\u0440\u043e\u0441 \u0441 LLM" << std::endl;
 
-    server.add_route("/api/metrics", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, nullptr, nullptr));
-    std::cout << "  \u2713 GET  /api/metrics - Prometheus metrics" << std::endl;
+    server.add_route(api_route("/batch"), full_handler);
+    std::cout << "  \u2713 POST " << api_route("/batch") << " - Batch \u0432\u043e\u043f\u0440\u043e\u0441\u043e\u0432" << std::endl;
+
+    server.add_route(api_route("/health"), full_handler);
+    std::cout << "  \u2713 GET  " << api_route("/health") << " - \u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u044f" << std::endl;
+
+    server.add_route(api_route("/metrics"), full_handler);
+    std::cout << "  \u2713 GET  " << api_route("/metrics") << " - Prometheus metrics" << std::endl;
 
     // Phase 4: Data sources management endpoints
-    server.add_route("/api/sources", std::make_shared<RagApiHandler>(rag_engine));
-    std::cout << "  \u2713 GET  /api/sources - \u0421\u043f\u0438\u0441\u043e\u043a \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u043e\u0432 \u0434\u0430\u043d\u043d\u044b\u0445" << std::endl;
+    server.add_route(api_route("/sources"), full_handler);
+    std::cout << "  \u2713 GET  " << api_route("/sources") << " - \u0421\u043f\u0438\u0441\u043e\u043a \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u043e\u0432 \u0434\u0430\u043d\u043d\u044b\u0445" << std::endl;
 
-    server.add_route("/api/sources/add", std::make_shared<RagApiHandler>(rag_engine));
-    std::cout << "  \u2713 POST /api/sources/add - \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0434\u0430\u043d\u043d\u044b\u0445" << std::endl;
+    server.add_route(api_route("/sources/add"), full_handler);
+    std::cout << "  \u2713 POST " << api_route("/sources/add") << " - \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0434\u0430\u043d\u043d\u044b\u0445" << std::endl;
 
-    server.add_route("/api/sources/remove", std::make_shared<RagApiHandler>(rag_engine));
-    std::cout << "  \u2713 POST /api/sources/remove - \u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0434\u0430\u043d\u043d\u044b\u0445" << std::endl;
+    server.add_route(api_route("/sources/remove"), full_handler);
+    std::cout << "  \u2713 POST " << api_route("/sources/remove") << " - \u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0434\u0430\u043d\u043d\u044b\u0445" << std::endl;
 
     // Phase 4: QA knowledge base endpoints
-    server.add_route("/api/qa/add", std::make_shared<RagApiHandler>(rag_engine));
-    std::cout << "  \u2713 POST /api/qa/add - \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c QA-\u043f\u0430\u0440\u0443" << std::endl;
+    auto qa_handler = full_handler;
 
-    server.add_route("/api/qa/update", std::make_shared<RagApiHandler>(rag_engine));
-    std::cout << "  \u2713 POST /api/qa/update - \u041e\u0431\u043d\u043e\u0432\u0438\u0442\u044c QA-\u043f\u0430\u0440\u0443" << std::endl;
+    server.add_route(api_route("/qa/add"), qa_handler);
+    std::cout << "  ✓ POST " << api_route("/qa/add") << " - Добавить QA-пару" << std::endl;
 
-    server.add_route("/api/qa/delete", std::make_shared<RagApiHandler>(rag_engine));
-    std::cout << "  \u2713 POST /api/qa/delete - \u0423\u0434\u0430\u043b\u0438\u0442\u044c QA-\u043f\u0430\u0440\u0443" << std::endl;
+    server.add_route(api_route("/qa/update"), qa_handler);
+    std::cout << "  ✓ POST " << api_route("/qa/update") << " - Обновить QA-пару" << std::endl;
 
-    server.add_route("/api/qa/list", std::make_shared<RagApiHandler>(rag_engine));
-    std::cout << "  \u2713 GET  /api/qa/list - \u0421\u043f\u0438\u0441\u043e\u043a QA-\u043f\u0430\u0440" << std::endl;
+    server.add_route(api_route("/qa/delete"), qa_handler);
+    std::cout << "  ✓ POST " << api_route("/qa/delete") << " - Удалить QA-пару" << std::endl;
+
+    server.add_route(api_route("/qa/list"), qa_handler);
+    std::cout << "  ✓ GET  " << api_route("/qa/list") << " - Список QA-пар" << std::endl;
+
+    server.add_route(api_route("/qa"), qa_handler);
+    std::cout << "  ✓ GET/POST " << api_route("/qa") << " - QA REST collection" << std::endl;
+
+    server.add_route(api_route("/qa/{id}"), qa_handler);
+    std::cout << "  ✓ PUT/DELETE " << api_route("/qa/{id}") << " - QA REST item" << std::endl;
 
     if (llm_client && llm_client->is_enabled()) {
         std::cout << "  \u2139\ufe0f  LLM: " << llm_client->get_model()
@@ -1358,40 +1997,32 @@ void setupRagRoutes(HttpServer& server,
 
     // Phase 5: Analytics endpoints
     if (analytics) {
-        server.add_route("/api/analytics", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, nullptr));
-        std::cout << "  \U0001f4c8 GET  /api/analytics - Analytics report" << std::endl;
+        server.add_route(api_route("/analytics"), full_handler);
+        std::cout << "  \U0001f4c8 GET  " << api_route("/analytics") << " - Analytics report" << std::endl;
 
-        server.add_route("/api/analytics/gaps", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, nullptr));
-        std::cout << "  \U0001f4c8 GET  /api/analytics/gaps - Knowledge gaps" << std::endl;
+        server.add_route(api_route("/analytics/gaps"), full_handler);
+        std::cout << "  \U0001f4c8 GET  " << api_route("/analytics/gaps") << " - Knowledge gaps" << std::endl;
 
-        server.add_route("/api/analytics/export", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, nullptr));
-        std::cout << "  \U0001f4c8 POST /api/analytics/export - Export report" << std::endl;
+        server.add_route(api_route("/analytics/export"), full_handler);
+        std::cout << "  \U0001f4c8 POST " << api_route("/analytics/export") << " - Export report" << std::endl;
     }
 
     // Phase 5: QA dedup endpoints (semantic deduplication)
     if (dedup) {
-#if QORNIX_HAS_SQLITE
-        server.add_route("/api/qa/dedup", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, markdown, dedup, sqlite));
-        std::cout << "  \U0001f504 POST /api/qa/dedup - Find duplicates (semantic)" << std::endl;
+        server.add_route(api_route("/qa/dedup"), full_handler);
+        std::cout << "  \U0001f504 POST " << api_route("/qa/dedup") << " - Find duplicates (semantic)" << std::endl;
 
-        server.add_route("/api/qa/dedup/remove", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, markdown, dedup, sqlite));
-        std::cout << "  \U0001f504 POST /api/qa/dedup/remove - Remove duplicates" << std::endl;
-#else
-        server.add_route("/api/qa/dedup", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, markdown, dedup));
-        std::cout << "  \U0001f504 POST /api/qa/dedup - Find duplicates (semantic)" << std::endl;
-
-        server.add_route("/api/qa/dedup/remove", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, markdown, dedup));
-        std::cout << "  \U0001f504 POST /api/qa/dedup/remove - Remove duplicates" << std::endl;
-#endif
+        server.add_route(api_route("/qa/dedup/remove"), full_handler);
+        std::cout << "  \U0001f504 POST " << api_route("/qa/dedup/remove") << " - Remove duplicates" << std::endl;
     }
 
     // Phase 5: Markdown import endpoints
     if (markdown) {
-        server.add_route("/api/import/markdown", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, markdown));
-        std::cout << "  \U0001f4dd POST /api/import/markdown - Import Markdown" << std::endl;
+        server.add_route(api_route("/import/markdown"), full_handler);
+        std::cout << "  \U0001f4dd POST " << api_route("/import/markdown") << " - Import Markdown" << std::endl;
 
-        server.add_route("/api/import/history", std::make_shared<RagApiHandler>(rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics, markdown));
-        std::cout << "  \U0001f4dd GET  /api/import/history - Import history" << std::endl;
+        server.add_route(api_route("/import/history"), full_handler);
+        std::cout << "  \U0001f4dd GET  " << api_route("/import/history") << " - Import history" << std::endl;
     }
 
     std::cout << "\u2705 \u0412\u0441\u0435 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u044b \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u044b" << std::endl;
