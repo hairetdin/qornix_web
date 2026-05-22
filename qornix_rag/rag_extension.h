@@ -32,6 +32,7 @@
 #include "batch_processor.h"
 #include "prompt_cache.h"
 #include "prometheus_metrics.h"
+#include "rag_config.h"
 
 /**
  * RAG module extension for qornix_web.
@@ -47,7 +48,7 @@
  */
 class RagExtension : public ExtensionInterface {
 public:
-    RagExtension() = default;
+    RagExtension();
     ~RagExtension() override = default;
 
     // ExtensionInterface
@@ -58,9 +59,12 @@ public:
 
     // RAG-specific initialization
     /**
-     * Configure from flattened config map (keys like "rag.enabled", "rag.llm.api_url", etc.)
+     * Configure from host application config. Keys may be either rag.* or
+     * stripped RAG keys; they are adapted into the RagConfig runtime contract.
      */
     bool configure(const std::map<std::string, std::string>& config);
+
+    bool configure(const RagConfig& config);
 
     /**
      * Add a data source to the RAG engine.
@@ -107,6 +111,7 @@ private:
 
     RagEngineConfig rag_config_;
     LLMConfig llm_config_;
+    RagConfig runtime_config_;
     std::map<std::string, std::string> config_;  // Phase 5: Store full config
     bool initialized_ = false;
 };

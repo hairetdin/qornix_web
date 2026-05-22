@@ -7,5 +7,11 @@
 qornix_rag/xapian_index/
 qornix_rag/hnsw_index/
 qornix_rag/models/semantic_model.onnx
+qornix_rag/models/tokenizer.json
+qornix_rag/models/downloaded/
+qornix_rag/models/exported/
 local/
 /doc/project_doc/
+/build-portable/
+/dist/
+/xapian_index/

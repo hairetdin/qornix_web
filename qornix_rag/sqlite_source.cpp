@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <ctime>
 #include <algorithm>
+#include <cctype>
 
 // Simple join implementation (replacement for boost::algorithm::join)
 template<typename T>
@@ -300,7 +301,8 @@ bool SQLiteSource::addQAPair(const std::string& id, const std::string& question,
 }
 
 bool SQLiteSource::updateQAPair(const std::string& id, const std::string& answer,
-                                 const std::string& category, const std::string& aliases) {
+                                 const std::string& category, const std::string& aliases,
+                                 const std::string& question) {
     std::lock_guard<std::mutex> lock(mutex_);
 
 #if !QORNIX_HAS_SQLITE
@@ -311,10 +313,40 @@ bool SQLiteSource::updateQAPair(const std::string& id, const std::string& answer
         return false;
     }
 
+    std::string current_question;
+    std::string current_answer;
+    {
+        std::string select_sql = "SELECT question, answer FROM qa_pairs WHERE id = ? AND source_id = ?";
+        sqlite3_stmt* stmt = nullptr;
+        int rc = sqlite3_prepare_v2(db_, select_sql.c_str(), -1, &stmt, nullptr);
+        if (rc != SQLITE_OK) {
+            return false;
+        }
+
+        sqlite3_bind_text(stmt, 1, id.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, config_.source_id.c_str(), -1, SQLITE_STATIC);
+
+        rc = sqlite3_step(stmt);
+        if (rc != SQLITE_ROW) {
+            sqlite3_finalize(stmt);
+            return false;
+        }
+
+        const unsigned char* q = sqlite3_column_text(stmt, 0);
+        const unsigned char* a = sqlite3_column_text(stmt, 1);
+        current_question = q ? reinterpret_cast<const char*>(q) : "";
+        current_answer = a ? reinterpret_cast<const char*>(a) : "";
+        sqlite3_finalize(stmt);
+    }
+
     std::string update_sql = "UPDATE qa_pairs SET ";
     std::vector<std::string> set_clauses;
     std::vector<std::string> bind_values;
 
+    if (!question.empty()) {
+        set_clauses.push_back("question = ?");
+        bind_values.push_back(question);
+    }
     if (!answer.empty()) {
         set_clauses.push_back("answer = ?");
         bind_values.push_back(answer);
@@ -326,6 +358,13 @@ bool SQLiteSource::updateQAPair(const std::string& id, const std::string& answer
     if (!aliases.empty()) {
         set_clauses.push_back("aliases = ?");
         bind_values.push_back(aliases);
+    }
+
+    if (!question.empty() || !answer.empty()) {
+        const std::string final_question = question.empty() ? current_question : question;
+        const std::string final_answer = answer.empty() ? current_answer : answer;
+        set_clauses.push_back("hash = ?");
+        bind_values.push_back(computeHash(id, final_question, final_answer));
     }
 
     if (set_clauses.empty()) {
@@ -440,11 +479,43 @@ std::vector<QASource::QAPair> SQLiteSource::searchByQuestion(const std::string& 
         return pairs;
     }
 
-    // Use SQLite FTS-like search with LIKE
+    std::vector<std::string> terms;
+    std::string current;
+    for (unsigned char ch : query) {
+        if (std::isalnum(ch) || ch == '_' || ch >= 0x80) {
+            current.push_back(static_cast<char>(ch));
+        } else if (!current.empty()) {
+            if (current.size() >= 3) {
+                terms.push_back(current);
+            }
+            current.clear();
+        }
+    }
+    if (!current.empty() && current.size() >= 3) {
+        terms.push_back(current);
+    }
+
+    if (terms.empty() && !query.empty()) {
+        terms.push_back(query);
+    }
+    if (terms.size() > 8) {
+        terms.resize(8);
+    }
+
     std::string sql = "SELECT id, question, answer, category, aliases, metadata "
-                      "FROM qa_pairs WHERE source_id = ? AND "
-                      "(question LIKE ? OR answer LIKE ?) "
-                      "ORDER BY updated_at DESC LIMIT 50";
+                      "FROM qa_pairs WHERE source_id = ?";
+
+    if (!terms.empty()) {
+        sql += " AND (";
+        for (size_t i = 0; i < terms.size(); ++i) {
+            if (i > 0) {
+                sql += " OR ";
+            }
+            sql += "question LIKE ? OR answer LIKE ? OR category LIKE ?";
+        }
+        sql += ")";
+    }
+    sql += " ORDER BY updated_at DESC LIMIT 50";
 
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
@@ -452,10 +523,14 @@ std::vector<QASource::QAPair> SQLiteSource::searchByQuestion(const std::string& 
         return pairs;
     }
 
-    std::string like_query = "%" + query + "%";
-    sqlite3_bind_text(stmt, 1, config_.source_id.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, like_query.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, like_query.c_str(), -1, SQLITE_STATIC);
+    int bind_index = 1;
+    sqlite3_bind_text(stmt, bind_index++, config_.source_id.c_str(), -1, SQLITE_STATIC);
+    for (const auto& term : terms) {
+        std::string like_query = "%" + term + "%";
+        sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+    }
 
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         pairs.push_back(rowToQAPair(stmt));

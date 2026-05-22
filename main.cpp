@@ -41,7 +41,7 @@ int main(int argc, char* argv[]) {
             ragExtension->initialize(server_manager->getDIContainer());
 
             // Register RAG routes
-            server_manager->addRouteFunction([ragExtension](HttpServer& srv) {
+            server_manager->addRouteFunction([ragExtension, &server_manager](HttpServer& srv) {
                 ragExtension->registerRoutes(srv, server_manager->getDIContainer());
             });
 

@@ -12,6 +12,7 @@ Usage:
   ./create_new_project.sh <project_name_or_path> [--with-dynamic-api-vue]
   ./create_new_project.sh <project_name_or_path> [--with-dynamic-api-react]
   ./create_new_project.sh <project_name_or_path> [--with-dynamic-api-angular]
+  ./create_new_project.sh <project_name_or_path> --template rag_app
   ./create_new_project.sh <project_name_or_path> --template dynamic-api
   ./create_new_project.sh <project_name_or_path> --template dynamic-api-vue
   ./create_new_project.sh <project_name_or_path> --template dynamic-api-react
@@ -29,6 +30,7 @@ Use --with-dynamic-api to generate a Schema-driven Dynamic API application.
 Use --with-dynamic-api-vue to generate a Schema-driven Dynamic API application with a Vue/Vite frontend scaffold.
 Use --with-dynamic-api-react to generate a Schema-driven Dynamic API application with a React/Vite frontend scaffold.
 Use --with-dynamic-api-angular to generate a Schema-driven Dynamic API application with an Angular frontend scaffold.
+Use --template rag_app to generate a Qornix Web application with embedded qornix_rag routes.
 USAGE
 }
 
@@ -103,6 +105,7 @@ while [ $# -gt 0 ]; do
                 dynamic-api-vue|dynamic_api_vue|dynamic_api_vue_app) template_name="dynamic_api_vue_app" ;;
                 dynamic-api-react|dynamic_api_react|dynamic_api_react_app) template_name="dynamic_api_react_app" ;;
                 dynamic-api-angular|dynamic_api_angular|dynamic_api_angular_app|angular-dynamic-api) template_name="dynamic_api_angular_app" ;;
+                rag-app|rag_app|rag) template_name="rag_app" ;;
                 app|default) template_name="app" ;;
                 *) fail "Unknown template: $1" ;;
             esac
@@ -111,6 +114,7 @@ while [ $# -gt 0 ]; do
         --template=dynamic-api-vue|--template=dynamic_api_vue|--template=dynamic_api_vue_app) template_name="dynamic_api_vue_app" ;;
         --template=dynamic-api-react|--template=dynamic_api_react|--template=dynamic_api_react_app) template_name="dynamic_api_react_app" ;;
         --template=dynamic-api-angular|--template=dynamic_api_angular|--template=dynamic_api_angular_app|--template=angular-dynamic-api) template_name="dynamic_api_angular_app" ;;
+        --template=rag-app|--template=rag_app|--template=rag) template_name="rag_app" ;;
         --template=app|--template=default) template_name="app" ;;
         *) fail "Unknown option: $1" ;;
     esac
@@ -204,8 +208,11 @@ echo "  docker build -f runtime-Dockerfile -t $(basename "$project_name"):runtim
 echo "  docker run --rm -p 8008:8008 $(basename "$project_name"):runtime"
 echo ""
 echo "Open in browser:"
-echo "  http://127.0.0.1:8008/"
-if [ "$template_name" = "dynamic_api_vue_app" ] || [ "$template_name" = "dynamic_api_react_app" ] || [ "$template_name" = "dynamic_api_angular_app" ]; then
+if [ "$template_name" = "rag_app" ]; then
+    echo "  http://127.0.0.1:8008/rag"
+    echo "  http://127.0.0.1:8008/api/rag/health"
+elif [ "$template_name" = "dynamic_api_vue_app" ] || [ "$template_name" = "dynamic_api_react_app" ] || [ "$template_name" = "dynamic_api_angular_app" ]; then
+    echo "  http://127.0.0.1:8008/"
     echo "  http://127.0.0.1:8008/backend-admin"
     if [ "$template_name" = "dynamic_api_react_app" ] || [ "$template_name" = "dynamic_api_angular_app" ]; then
         echo "  http://127.0.0.1:8008/project-structure"
@@ -213,8 +220,10 @@ if [ "$template_name" = "dynamic_api_vue_app" ] || [ "$template_name" = "dynamic
     echo "  http://127.0.0.1:8008/backend/schema-manager"
     echo "  http://127.0.0.1:8008/api/dynamic/openapi.json"
 elif [ "$template_name" = "dynamic_api_app" ]; then
+    echo "  http://127.0.0.1:8008/"
     echo "  http://127.0.0.1:8008/schema-manager"
     echo "  http://127.0.0.1:8008/docs"
 else
+    echo "  http://127.0.0.1:8008/"
     echo "  http://127.0.0.1:8008/docs"
 fi

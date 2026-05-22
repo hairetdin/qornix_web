@@ -59,7 +59,8 @@ public:
                    const std::string& answer, const std::string& category = "general",
                    const std::string& aliases = "[]", const std::string& metadata = "{}");
     bool updateQAPair(const std::string& id, const std::string& answer = "",
-                      const std::string& category = "", const std::string& aliases = "");
+                      const std::string& category = "", const std::string& aliases = "",
+                      const std::string& question = "");
     bool deleteQAPair(const std::string& id);
     std::optional<QASource::QAPair> findQAPair(const std::string& id) const;
     std::vector<QASource::QAPair> searchByCategory(const std::string& category) const;

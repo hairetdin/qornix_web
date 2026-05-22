@@ -1,0 +1,8 @@
+build/
+data/
+logs/
+models/semantic_model.onnx
+models/tokenizer.json
+models/downloaded/
+models/exported/
+config.yaml.bak

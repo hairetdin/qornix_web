@@ -13,6 +13,7 @@
 
 #include "core.h"
 #include "llm_client.h"
+#include "rag_service.h"
 #include "batch_processor.h"
 #include "prompt_cache.h"
 #include "prometheus_metrics.h"
@@ -32,6 +33,7 @@
 #include <boost/json.hpp>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 namespace http = boost::beast::http;
 namespace urls = boost::urls;
@@ -41,6 +43,7 @@ namespace urls = boost::urls;
  */
 class RagApiHandler : public HandlerBase {
 protected:
+    std::shared_ptr<RagService> rag_service_;
     std::shared_ptr<RagEngine> rag_engine_;
     std::shared_ptr<LLMClient> llm_client_;
     std::shared_ptr<ICache> cache_;
@@ -56,6 +59,8 @@ protected:
 #endif
 
 public:
+   explicit RagApiHandler(std::shared_ptr<RagService> service);
+
    RagApiHandler(std::shared_ptr<RagEngine> engine,
                  std::shared_ptr<LLMClient> llm,
                  std::shared_ptr<ICache> cache,
@@ -95,6 +100,26 @@ public:
         const urls::url_view &url_view,
         const std::map<std::string, std::string> &
     ) override;
+
+    void handlePut(
+        const http::request<http::string_body> &req,
+        http::response<http::string_body> &res,
+        const urls::url_view &url_view,
+        const std::map<std::string, std::string> &path_params
+    ) override;
+
+    void handleDelete(
+        const http::request<http::string_body> &req,
+        http::response<http::string_body> &res,
+        const urls::url_view &url_view,
+        const std::map<std::string, std::string> &path_params
+    ) override;
+};
+
+struct RagRouteOptions {
+    bool expose_root_ui = true;
+    std::string ui_path = "/";
+    std::string api_prefix = "/api";
 };
 
 /**
@@ -103,9 +128,11 @@ public:
 class RagWebHandler : public HandlerBase {
 private:
     std::string templates_dir_;
+    std::string api_base_;
 
 public:
-    explicit RagWebHandler(const std::string &templates_dir = "templates");
+    explicit RagWebHandler(const std::string &templates_dir = "templates",
+                           const std::string &api_base = "");
 
     void handleGet(
         const http::request<http::string_body> &,
@@ -132,4 +159,21 @@ void setupRagRoutes(HttpServer& server,
 #if QORNIX_HAS_SQLITE
                     , std::shared_ptr<SQLiteSource> sqlite = nullptr
 #endif
+                    , RagRouteOptions options = RagRouteOptions()
+                    );
+
+void setupRagRoutes(HttpServer& server,
+                    std::shared_ptr<RagService> rag_service,
+                    std::shared_ptr<ICache> cache = nullptr,
+                    std::shared_ptr<RateLimiter> limiter = nullptr,
+                    std::shared_ptr<BatchProcessor> batch = nullptr,
+                    std::shared_ptr<IPromptCache> pcache = nullptr,
+                    std::shared_ptr<LLMRAGMetrics> metrics = nullptr,
+                    std::shared_ptr<AnalyticsService> analytics = nullptr,
+                    std::shared_ptr<MarkdownSource> markdown = nullptr,
+                    std::shared_ptr<DeduplicationService> dedup = nullptr
+#if QORNIX_HAS_SQLITE
+                    , std::shared_ptr<SQLiteSource> sqlite = nullptr
+#endif
+                    , RagRouteOptions options = RagRouteOptions()
                     );
