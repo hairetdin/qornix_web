@@ -74,6 +74,28 @@ struct RagServiceIndexResponse {
     ProjectStats stats;
 };
 
+struct RagServiceIngestionJob {
+    std::string id;
+    std::string source_id;
+    std::string root_path;
+    std::string status;
+    size_t files_seen = 0;
+    size_t documents_imported = 0;
+    size_t duplicates_found = 0;
+    size_t skipped = 0;
+    size_t errors = 0;
+    std::string error_message;
+    std::string started_at;
+    std::string finished_at;
+};
+
+struct RagServiceIngestResponse {
+    bool success = false;
+    std::string message;
+    RagServiceIngestionJob job;
+    ProjectStats stats;
+};
+
 struct RagServiceHealth {
     std::string status = "ok";
     bool indexed = false;
@@ -104,6 +126,11 @@ public:
     std::shared_ptr<LLMClient> llm() const { return llm_client_; }
 
     RagServiceIndexResponse indexProject(const std::optional<std::string>& project_path = std::nullopt);
+    RagServiceIngestResponse ingestProject(const std::optional<std::string>& project_path = std::nullopt);
+    std::optional<RagServiceIngestionJob> findIngestionJob(const std::string& job_id) const;
+    std::vector<RagServiceIngestionJob> listIngestionJobs(size_t limit = 20) const;
+    bool deletePersistedDocument(const std::string& relative_path,
+                                 const std::string& source_id = "");
     RagServiceSearchResponse search(const std::string& query, size_t top_k = 10);
     RagServiceAskResponse ask(const std::string& question, size_t top_k = 5, const std::string& client_ip = "");
     RagServiceHealth health() const;
@@ -131,4 +158,3 @@ private:
 
     std::vector<qornix::rag::QASource::QAPair> searchQa(const std::string& query, size_t limit) const;
 };
-

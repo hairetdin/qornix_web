@@ -37,6 +37,8 @@
 #include <xapian.h>
 #include <boost/json.hpp>
 
+#include "ingestion_pipeline.h"
+
 #ifdef QORNIX_HAS_ONNX
 #include <onnxruntime_cxx_api.h>
 #endif
@@ -398,6 +400,7 @@ private:
     std::string indexed_project_root_ = ".";
     const std::atomic<bool>* stop_flag_ = nullptr;
     size_t last_index_duration_ms_ = 0;
+    qornix::rag::IngestionJobResult last_ingestion_result_;
 
     // ============================================
     // Phase 4: Data Source Support
@@ -699,90 +702,77 @@ public:
 
         documents_.clear();
         path_to_index_.clear();
+        vectorizer_ = TfidfVectorizer();
 
         std::cout << "🔍 Сканирование проекта: " << project_root << std::endl;
 
-        try {
-            for (const auto &entry: std::filesystem::recursive_directory_iterator(project_root)) {
-                if (stop_flag_ && !stop_flag_->load()) {
-                    std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
-                    is_indexed_ = false;
-                    auto index_end = std::chrono::steady_clock::now();
-                    last_index_duration_ms_ = static_cast<size_t>(
-                        std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
-                    );
-                    return;
+        qornix::rag::IngestionPipeline::Config ingestion_config;
+        ingestion_config.root_path = project_root;
+        ingestion_config.max_file_size_kb = max_file_size_bytes_ / 1024;
+        qornix::rag::IngestionPipeline pipeline(std::move(ingestion_config));
+        auto ingestion = pipeline.ingestRoot();
+        last_ingestion_result_ = ingestion;
+
+        if (!ingestion.issues.empty()) {
+            size_t reported = 0;
+            for (const auto& issue : ingestion.issues) {
+                if (reported++ >= 5) {
+                    break;
                 }
-                if (!entry.is_regular_file()) {
-                    continue;
+                if (issue.severity == qornix::rag::IngestionIssueSeverity::ERROR) {
+                    std::cerr << "⚠️  Ingestion " << issue.code << ": " << issue.path
+                              << " (" << issue.message << ")" << std::endl;
                 }
-
-                std::string path = entry.path().string();
-                std::string ext = entry.path().extension().string();
-
-                if (should_skip_directory(entry.path().parent_path().string())) {
-                    continue;
-                }
-
-                std::string type;
-                std::string language;
-
-                if (is_source_file(ext)) {
-                    type = "source";
-                    language = get_language_from_extension(ext);
-                } else if (is_config_file(ext)) {
-                    type = "config";
-                    language = "text";
-                } else {
-                    continue;
-                }
-
-                try {
-                    if (entry.file_size() > max_file_size_bytes_) {
-                        continue;
-                    }
-                } catch (...) {
-                    continue;
-                }
-
-                Document doc = read_file(path, type, language);
-                if (doc.content.empty()) {
-                    continue;
-                }
-                if (stop_flag_ && !stop_flag_->load()) {
-                    std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
-                    is_indexed_ = false;
-                    auto index_end = std::chrono::steady_clock::now();
-                    last_index_duration_ms_ = static_cast<size_t>(
-                        std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
-                    );
-                    return;
-                }
-
-                doc.embedding = generate_embedding(doc.content);
-                if (stop_flag_ && !stop_flag_->load()) {
-                    std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
-                    is_indexed_ = false;
-                    auto index_end = std::chrono::steady_clock::now();
-                    last_index_duration_ms_ = static_cast<size_t>(
-                        std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
-                    );
-                    return;
-                }
-
-                documents_.push_back(doc);
-                path_to_index_[doc.relative_path] = documents_.size() - 1;
-
-                vectorizer_.index_document(doc.relative_path, doc.content);
             }
-        } catch (const std::exception &e) {
-            std::cerr << "Error scanning project: " << e.what() << std::endl;
+        }
+
+        for (const auto& ingested : ingestion.documents) {
+            if (stop_flag_ && !stop_flag_->load()) {
+                std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
+                is_indexed_ = false;
+                auto index_end = std::chrono::steady_clock::now();
+                last_index_duration_ms_ = static_cast<size_t>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
+                );
+                return;
+            }
+
+            Document doc;
+            doc.path = ingested.path;
+            doc.relative_path = ingested.relative_path;
+            doc.content = ingested.content;
+            doc.type = ingested.document_type;
+            doc.language = ingested.language;
+            doc.size_bytes = ingested.size_bytes;
+            doc.lines_count = ingested.lines_count;
+            doc.hash = ingested.hash;
+            doc.last_modified = ingested.last_modified;
+            doc.metadata = ingested.metadata;
+            doc.embedding = generate_embedding(doc.content);
+
+            if (stop_flag_ && !stop_flag_->load()) {
+                std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
+                is_indexed_ = false;
+                auto index_end = std::chrono::steady_clock::now();
+                last_index_duration_ms_ = static_cast<size_t>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
+                );
+                return;
+            }
+
+            documents_.push_back(std::move(doc));
+            path_to_index_[documents_.back().relative_path] = documents_.size() - 1;
+            vectorizer_.index_document(documents_.back().relative_path, documents_.back().content);
         }
 
         is_indexed_ = true;
 
         auto stats = get_statistics();
         std::cout << "✅ Проиндексировано файлов: " << stats.total_files << std::endl;
+        std::cout << "   Просмотрено файлов: " << ingestion.files_seen
+                  << ", пропущено: " << ingestion.skipped
+                  << ", дубликатов: " << ingestion.duplicates_found
+                  << ", ошибок: " << ingestion.errors << std::endl;
         std::cout << "   Всего строк: " << stats.total_lines << std::endl;
         std::cout << "   Размер: " << (stats.total_size_bytes / 1024) << " KB" << std::endl;
 
@@ -1491,6 +1481,16 @@ public:
             return &documents_[it->second];
         }
         return nullptr;
+    }
+
+    std::vector<Document> get_documents_snapshot() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return documents_;
+    }
+
+    qornix::rag::IngestionJobResult get_last_ingestion_result() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return last_ingestion_result_;
     }
 
     // ============================================

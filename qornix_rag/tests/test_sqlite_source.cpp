@@ -439,6 +439,117 @@ TEST(sqlite_source_get_documents) {
 #endif
 }
 
+TEST(sqlite_source_persist_index_snapshot) {
+#if QORNIX_HAS_SQLITE
+    std::string db_path = "/tmp/test_sqlite_source_index_snapshot.db";
+    cleanup_test_db(db_path);
+
+    SQLiteSource::Config config;
+    config.db_path = db_path;
+    config.source_id = "test_index";
+    config.auto_migrate = true;
+
+    auto source = std::make_shared<SQLiteSource>(config);
+    source->initialize();
+
+    Document doc;
+    doc.path = "/tmp/project/doc/guide.md";
+    doc.relative_path = "doc/guide.md";
+    doc.content = "# Guide\nPersistent RAG storage keeps document chunks and embeddings.";
+    doc.type = "config";
+    doc.language = "text";
+    doc.size_bytes = doc.content.size();
+    doc.lines_count = 2;
+    doc.hash = HashCalculator::compute_md5(doc.content);
+    doc.last_modified = std::chrono::system_clock::now();
+    doc.embedding = {0.1f, 0.2f, 0.3f};
+    doc.metadata["source"] = "unit_test";
+
+    Document stale = doc;
+    stale.path = "/tmp/project/doc/stale.md";
+    stale.relative_path = "doc/stale.md";
+    stale.content = "# Stale\nThis document should be removed on the next snapshot.";
+    stale.hash = HashCalculator::compute_md5(stale.content);
+
+    auto persisted = source->persistIndexedDocuments({doc, stale}, "project:test", "tfidf:3", "tfidf");
+    ASSERT_EQ(2, persisted.documents, "Persisted two documents");
+    ASSERT_EQ(2, persisted.chunks, "Persisted two chunks");
+    ASSERT_EQ(2, persisted.embeddings, "Persisted two embeddings");
+    ASSERT_EQ(0, persisted.deleted_documents, "No stale delete on first snapshot");
+    ASSERT_EQ(2, source->countPersistedDocuments("project:test"), "Document table count");
+    ASSERT_EQ(2, source->countPersistedChunks("project:test"), "Chunk table count");
+    ASSERT_EQ(2, source->countPersistedEmbeddings("project:test"), "Embedding table count");
+
+    auto found = source->findPersistedDocument("doc/guide.md", "project:test");
+    ASSERT_TRUE(found.has_value(), "Persisted document found");
+    ASSERT_STR_EQ("doc/guide.md", found->relative_path, "Persisted relative path");
+    ASSERT_STR_EQ("unit_test", found->metadata["source"], "Persisted metadata");
+
+    doc.content = "# Guide\nUpdated content replaces the previous chunk.";
+    doc.hash = HashCalculator::compute_md5(doc.content);
+    doc.embedding = {0.4f, 0.5f, 0.6f};
+
+    persisted = source->persistIndexedDocuments({doc}, "project:test", "tfidf:3", "tfidf");
+    ASSERT_EQ(1, persisted.documents, "Re-persisted one document");
+    ASSERT_EQ(1, persisted.deleted_documents, "Removed one stale document");
+    ASSERT_EQ(1, source->countPersistedDocuments("project:test"), "Document count replaced, not duplicated");
+    ASSERT_EQ(1, source->countPersistedChunks("project:test"), "Chunk count replaced, not duplicated");
+    ASSERT_EQ(1, source->countPersistedEmbeddings("project:test"), "Embedding count replaced, not duplicated");
+    auto stale_found = source->findPersistedDocument("doc/stale.md", "project:test");
+    ASSERT_TRUE(!stale_found.has_value(), "Stale document removed");
+    ASSERT_TRUE(source->deletePersistedDocument("doc/guide.md", "project:test"), "Persisted document delete succeeds");
+    ASSERT_EQ(0, source->countPersistedDocuments("project:test"), "Document delete cascades from persisted index");
+
+    source->cleanup();
+    cleanup_test_db(db_path);
+#else
+    std::cout << "SKIPPED (SQLite not available)";
+#endif
+}
+
+TEST(sqlite_source_ingestion_jobs) {
+#if QORNIX_HAS_SQLITE
+    std::string db_path = "/tmp/test_sqlite_source_ingestion_jobs.db";
+    cleanup_test_db(db_path);
+
+    SQLiteSource::Config config;
+    config.db_path = db_path;
+    config.source_id = "test_jobs";
+    config.auto_migrate = true;
+
+    auto source = std::make_shared<SQLiteSource>(config);
+    source->initialize();
+
+    const std::string job_id = "job_001";
+    ASSERT_TRUE(source->recordIngestionJobStarted(job_id, "project:/tmp/project", "/tmp/project"),
+                "Job start recorded");
+
+    qornix::rag::IngestionJobResult result;
+    result.files_seen = 3;
+    result.documents_imported = 2;
+    result.duplicates_found = 1;
+    result.skipped = 0;
+    result.errors = 0;
+    ASSERT_TRUE(source->recordIngestionJobFinished(job_id, "completed", result),
+                "Job finish recorded");
+
+    auto found = source->findIngestionJob(job_id);
+    ASSERT_TRUE(found.has_value(), "Job found");
+    ASSERT_STR_EQ("completed", found->status, "Job status persisted");
+    ASSERT_EQ(3, found->files_seen, "Job files_seen persisted");
+    ASSERT_EQ(2, found->documents_imported, "Job documents_imported persisted");
+
+    auto jobs = source->listIngestionJobs();
+    ASSERT_EQ(1, jobs.size(), "Job history list contains record");
+    ASSERT_STR_EQ(job_id, jobs.front().id, "Job history returns job id");
+
+    source->cleanup();
+    cleanup_test_db(db_path);
+#else
+    std::cout << "SKIPPED (SQLite not available)";
+#endif
+}
+
 // ============================================
 // Main
 // ============================================
@@ -458,6 +569,8 @@ int main() {
     RUN_TEST(sqlite_source_hash_uniqueness);
     RUN_TEST(sqlite_source_persistence);
     RUN_TEST(sqlite_source_get_documents);
+    RUN_TEST(sqlite_source_persist_index_snapshot);
+    RUN_TEST(sqlite_source_ingestion_jobs);
 #else
     std::cout << "SKIPPED: SQLite3 not available" << std::endl;
 #endif

@@ -107,6 +107,31 @@ std::string FileSource::getLanguageFromExtension(const std::string& ext) const {
     return it != lang_map.end() ? it->second : "text";
 }
 
+IngestionPipeline::Config FileSource::makeIngestionConfig() const {
+    IngestionPipeline::Config config;
+    config.root_path = config_.root_path;
+    config.include_extensions = config_.include_extensions;
+    config.exclude_directories = config_.exclude_directories;
+    config.max_file_size_kb = config_.max_file_size_kb;
+    config.recursive = config_.recursive;
+    return config;
+}
+
+Document FileSource::fromIngestedDocument(const IngestedDocument& ingested) const {
+    Document doc;
+    doc.path = ingested.path;
+    doc.relative_path = ingested.relative_path;
+    doc.content = ingested.content;
+    doc.type = ingested.document_type;
+    doc.language = ingested.language;
+    doc.size_bytes = ingested.size_bytes;
+    doc.lines_count = ingested.lines_count;
+    doc.hash = ingested.hash;
+    doc.last_modified = ingested.last_modified;
+    doc.metadata = ingested.metadata;
+    return doc;
+}
+
 Document FileSource::readFile(const std::string& path, const std::string& type,
                               const std::string& language) const {
     Document doc;
@@ -167,114 +192,24 @@ std::vector<Document> FileSource::getDocuments() {
     }
 
     cached_docs_.clear();
-    const size_t max_bytes = config_.max_file_size_kb * 1024;
 
     std::cout << "📄 FileSource: Scanning directory: " << config_.root_path << std::endl;
 
     try {
-        if (config_.recursive) {
-            for (const auto& entry : std::filesystem::recursive_directory_iterator(config_.root_path)) {
-                if (!entry.is_regular_file()) {
-                    continue;
-                }
-
-                std::string path = entry.path().string();
-                std::string ext = entry.path().extension().string();
-
-                // Skip excluded directories
-                if (shouldSkipDirectory(entry.path().parent_path().string())) {
-                    continue;
-                }
-
-                // Check extension
-                if (!isAllowedExtension(ext)) {
-                    continue;
-                }
-
-                // Check file size
-                try {
-                    if (entry.file_size() > max_bytes) {
-                        continue;
-                    }
-                } catch (...) {
-                    continue;
-                }
-
-                // Determine type and language
-                std::string type = "config";
-                std::string language = "text";
-
-                // Check if it's a source file (common programming languages)
-                static const std::set<std::string> source_exts = {
-                    ".cpp", ".c", ".cc", ".cxx", ".c++",
-                    ".h", ".hpp", ".hxx", ".h++",
-                    ".java", ".cs", ".py", ".js", ".ts",
-                    ".go", ".rs", ".swift", ".kt", ".scala"
-                };
-
-                if (source_exts.count(ext) > 0) {
-                    type = "source";
-                    language = getLanguageFromExtension(ext);
-                } else {
-                    language = getLanguageFromExtension(ext);
-                }
-
-                // Read file
-                Document doc = readFile(path, type, language);
-                if (doc.content.empty()) {
-                    continue;
-                }
-
-                // Call progress callback if set
-                if (progress_callback_) {
-                    progress_callback_(cached_docs_.size() + 1, 0);
-                }
-
-                cached_docs_.push_back(std::move(doc));
+        IngestionPipeline pipeline(makeIngestionConfig());
+        auto result = pipeline.ingestRoot();
+        cached_docs_.reserve(result.documents.size());
+        for (const auto& ingested : result.documents) {
+            if (progress_callback_) {
+                progress_callback_(cached_docs_.size() + 1, result.documents.size());
             }
-        } else {
-            // Non-recursive: only files in root directory
-            for (const auto& entry : std::filesystem::directory_iterator(config_.root_path)) {
-                if (!entry.is_regular_file()) {
-                    continue;
-                }
-
-                std::string path = entry.path().string();
-                std::string ext = entry.path().extension().string();
-
-                if (!isAllowedExtension(ext)) {
-                    continue;
-                }
-
-                try {
-                    if (entry.file_size() > max_bytes) {
-                        continue;
-                    }
-                } catch (...) {
-                    continue;
-                }
-
-                std::string type = "config";
-                std::string language = getLanguageFromExtension(ext);
-
-                static const std::set<std::string> source_exts = {
-                    ".cpp", ".c", ".cc", ".cxx", ".c++",
-                    ".h", ".hpp", ".hxx", ".h++",
-                    ".java", ".cs", ".py", ".js", ".ts",
-                    ".go", ".rs", ".swift", ".kt", ".scala"
-                };
-
-                if (source_exts.count(ext) > 0) {
-                    type = "source";
-                }
-
-                Document doc = readFile(path, type, language);
-                if (doc.content.empty()) {
-                    continue;
-                }
-
-                cached_docs_.push_back(std::move(doc));
-            }
+            cached_docs_.push_back(fromIngestedDocument(ingested));
+        }
+        if (result.errors > 0 || result.skipped > 0) {
+            std::cout << "ℹ️ FileSource ingestion: seen=" << result.files_seen
+                      << ", skipped=" << result.skipped
+                      << ", duplicates=" << result.duplicates_found
+                      << ", errors=" << result.errors << std::endl;
         }
     } catch (const std::exception& e) {
         std::cerr << "FileSource: Error scanning directory: " << e.what() << std::endl;

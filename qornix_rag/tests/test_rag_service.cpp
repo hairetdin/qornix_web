@@ -34,11 +34,42 @@ int main() {
     config.embedding.enable_fallback = true;
 
     auto engine = std::make_shared<RagEngine>(config);
+#if QORNIX_HAS_SQLITE
+    auto db_path = fs::temp_directory_path() / ("qornix_rag_service_test_" + std::to_string(::getpid()) + ".db");
+    fs::remove(db_path);
+    SQLiteSource::Config sqlite_config;
+    sqlite_config.db_path = db_path.string();
+    sqlite_config.source_id = "service_sqlite";
+    sqlite_config.auto_migrate = true;
+    auto sqlite = std::make_shared<SQLiteSource>(sqlite_config);
+    assert(sqlite->initialize());
+    auto service = std::make_shared<RagService>(engine, nullptr, sqlite);
+#else
     auto service = std::make_shared<RagService>(engine);
+#endif
 
     auto index = service->indexProject(fixture.string());
     assert(index.success);
     assert(index.stats.total_files >= 1);
+#if QORNIX_HAS_SQLITE
+    assert(sqlite->countPersistedDocuments("project:" + fixture.string()) >= 1);
+    assert(sqlite->countPersistedChunks("project:" + fixture.string()) >= 1);
+    assert(sqlite->countPersistedEmbeddings("project:" + fixture.string()) >= 1);
+#endif
+
+    auto ingest = service->ingestProject(fixture.string());
+    assert(ingest.success);
+    assert(!ingest.job.id.empty());
+    assert(ingest.job.status == "completed");
+    assert(ingest.job.files_seen >= 1);
+    assert(ingest.job.documents_imported >= 1);
+#if QORNIX_HAS_SQLITE
+    auto persisted_job = service->findIngestionJob(ingest.job.id);
+    assert(persisted_job.has_value());
+    assert(persisted_job->status == "completed");
+    auto jobs = service->listIngestionJobs();
+    assert(!jobs.empty());
+#endif
 
     auto search = service->search("configurable API prefix", 5);
     assert(search.success);
@@ -60,6 +91,10 @@ int main() {
     assert(sources.empty());
 
     fs::remove_all(fixture);
+#if QORNIX_HAS_SQLITE
+    sqlite->cleanup();
+    fs::remove(db_path);
+#endif
     std::cout << "RagService reusable core tests passed\n";
     return 0;
 }
