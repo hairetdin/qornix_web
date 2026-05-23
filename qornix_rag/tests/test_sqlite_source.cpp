@@ -20,6 +20,7 @@
 #include "../qa_source.h"
 #include "../data_source.h"
 #include "../core.h"
+#include "../document_chunker.h"
 #include <iostream>
 #include <cassert>
 #include <string>
@@ -550,6 +551,58 @@ TEST(sqlite_source_ingestion_jobs) {
 #endif
 }
 
+TEST(sqlite_source_persist_chunked_document_snapshot) {
+#if QORNIX_HAS_SQLITE
+    std::string db_path = "/tmp/test_sqlite_source_chunked_snapshot.db";
+    cleanup_test_db(db_path);
+
+    SQLiteSource::Config config;
+    config.db_path = db_path;
+    config.source_id = "test_chunked_index";
+    config.auto_migrate = true;
+
+    auto source = std::make_shared<SQLiteSource>(config);
+    source->initialize();
+
+    Document doc;
+    doc.path = "/tmp/project/doc/large.md";
+    doc.relative_path = "doc/large.md";
+    doc.type = "markdown";
+    doc.language = "text";
+    doc.content = "# Large\n";
+    for (size_t i = 0; i < 75; ++i) {
+        doc.content += "chunkword" + std::to_string(i) + " ";
+    }
+    doc.size_bytes = doc.content.size();
+    doc.lines_count = 2;
+    doc.hash = HashCalculator::compute_md5(doc.content);
+    doc.last_modified = std::chrono::system_clock::now();
+
+    DocumentChunker chunker({20, 5, 3});
+    auto chunks = chunker.chunkDocument(doc);
+    ASSERT_TRUE(chunks.size() > 1, "Document chunker creates multiple chunks");
+    for (auto& chunk : chunks) {
+        chunk.embedding = {0.1f, 0.2f, 0.3f};
+    }
+
+    auto persisted = source->persistIndexedDocuments(chunks, "project:chunked", "tfidf:3", "tfidf");
+    ASSERT_EQ(1, persisted.documents, "Chunked snapshot keeps one source document");
+    ASSERT_EQ(chunks.size(), persisted.chunks, "Chunked snapshot persists all chunks");
+    ASSERT_EQ(chunks.size(), persisted.embeddings, "Chunked snapshot persists one embedding per chunk");
+    ASSERT_EQ(1, source->countPersistedDocuments("project:chunked"), "One persisted source document");
+    ASSERT_EQ(chunks.size(), source->countPersistedChunks("project:chunked"), "All chunks persisted");
+    ASSERT_EQ(chunks.size(), source->countPersistedEmbeddings("project:chunked"), "All chunk embeddings persisted");
+
+    auto found = source->findPersistedDocument("doc/large.md", "project:chunked");
+    ASSERT_TRUE(found.has_value(), "Source document lookup works after chunked persistence");
+
+    source->cleanup();
+    cleanup_test_db(db_path);
+#else
+    std::cout << "SKIPPED (SQLite not available)";
+#endif
+}
+
 // ============================================
 // Main
 // ============================================
@@ -571,6 +624,7 @@ int main() {
     RUN_TEST(sqlite_source_get_documents);
     RUN_TEST(sqlite_source_persist_index_snapshot);
     RUN_TEST(sqlite_source_ingestion_jobs);
+    RUN_TEST(sqlite_source_persist_chunked_document_snapshot);
 #else
     std::cout << "SKIPPED: SQLite3 not available" << std::endl;
 #endif

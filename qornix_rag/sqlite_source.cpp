@@ -6,6 +6,7 @@
 #include <ctime>
 #include <algorithm>
 #include <cctype>
+#include <set>
 #include <boost/json.hpp>
 
 // Simple join implementation (replacement for boost::algorithm::join)
@@ -699,17 +700,56 @@ PersistedIndexStats SQLiteSource::persistIndexedDocuments(
         fail();
         return stats;
     }
+    {
+        sqlite3_stmt* stmt = nullptr;
+        const std::string sql = "DELETE FROM rag_chunks WHERE source_id = ?";
+        if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+            fail();
+            return stats;
+        }
+        bindText(stmt, 1, effective_source);
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            sqlite3_finalize(stmt);
+            fail();
+            return stats;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    std::set<std::string> persisted_document_ids;
+    const auto metadataValue = [](const Document& doc, const std::string& key) -> std::string {
+        auto it = doc.metadata.find(key);
+        return it == doc.metadata.end() ? "" : it->second;
+    };
+    const auto metadataSize = [&](const Document& doc, const std::string& key, size_t fallback) -> size_t {
+        const std::string value = metadataValue(doc, key);
+        if (value.empty()) {
+            return fallback;
+        }
+        try {
+            return static_cast<size_t>(std::stoull(value));
+        } catch (...) {
+            return fallback;
+        }
+    };
 
     for (const auto& doc : documents) {
         if (!ok) {
             break;
         }
 
-        const std::string relative_path = doc.relative_path.empty() ? doc.path : doc.relative_path;
-        const std::string document_id = computeDocumentId(effective_source, relative_path);
-        const std::string chunk_id = document_id + "#0";
+        const std::string chunk_relative_path = doc.relative_path.empty() ? doc.path : doc.relative_path;
+        const std::string source_relative_path = metadataValue(doc, "chunk_of").empty()
+            ? chunk_relative_path
+            : metadataValue(doc, "chunk_of");
+        const std::string document_id = computeDocumentId(effective_source, source_relative_path);
+        const size_t chunk_index = metadataSize(doc, "chunk_index", 0);
+        const std::string chunk_id = document_id + "#" + std::to_string(chunk_index);
         const std::string content_hash = doc.hash.empty() ? HashCalculator::compute_md5(doc.content) : doc.hash;
         const std::string metadata_json = metadataToJson(doc.metadata);
+        const size_t char_start = metadataSize(doc, "chunk_char_start", 0);
+        const size_t char_end = metadataSize(doc, "chunk_char_end", doc.content.size());
+        const size_t token_count = metadataSize(doc, "chunk_token_count", 0);
         const auto modified_seconds = std::chrono::duration_cast<std::chrono::seconds>(
             doc.last_modified.time_since_epoch()
         ).count();
@@ -730,7 +770,7 @@ PersistedIndexStats SQLiteSource::persistIndexedDocuments(
             sqlite3_finalize(stmt);
         }
 
-        {
+        if (persisted_document_ids.insert(document_id).second) {
             sqlite3_stmt* stmt = nullptr;
             const std::string sql =
                 "INSERT INTO rag_documents "
@@ -752,7 +792,7 @@ PersistedIndexStats SQLiteSource::persistIndexedDocuments(
             bindText(stmt, 1, document_id);
             bindText(stmt, 2, effective_source);
             bindText(stmt, 3, doc.path);
-            bindText(stmt, 4, relative_path);
+            bindText(stmt, 4, source_relative_path);
             bindText(stmt, 5, doc.type);
             bindText(stmt, 6, doc.language);
             bindText(stmt, 7, content_hash);
@@ -776,8 +816,9 @@ PersistedIndexStats SQLiteSource::persistIndexedDocuments(
                 "INSERT INTO rag_chunks "
                 "(id, document_id, source_id, chunk_index, content, content_hash, "
                 "char_start, char_end, token_count, metadata, updated_at) "
-                "VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(id) DO UPDATE SET "
+                "chunk_index = excluded.chunk_index, "
                 "content = excluded.content, content_hash = excluded.content_hash, "
                 "char_start = excluded.char_start, char_end = excluded.char_end, "
                 "token_count = excluded.token_count, metadata = excluded.metadata, "
@@ -791,11 +832,13 @@ PersistedIndexStats SQLiteSource::persistIndexedDocuments(
             bindText(stmt, 1, chunk_id);
             bindText(stmt, 2, document_id);
             bindText(stmt, 3, effective_source);
-            bindText(stmt, 4, doc.content);
-            bindText(stmt, 5, content_hash);
-            bindInt64(stmt, 6, static_cast<std::int64_t>(doc.content.size()));
-            bindInt64(stmt, 7, static_cast<std::int64_t>(doc.content.empty() ? 0 : doc.content.size()));
-            bindText(stmt, 8, metadata_json);
+            bindInt64(stmt, 4, static_cast<std::int64_t>(chunk_index));
+            bindText(stmt, 5, doc.content);
+            bindText(stmt, 6, content_hash);
+            bindInt64(stmt, 7, static_cast<std::int64_t>(char_start));
+            bindInt64(stmt, 8, static_cast<std::int64_t>(char_end));
+            bindInt64(stmt, 9, static_cast<std::int64_t>(token_count));
+            bindText(stmt, 10, metadata_json);
 
             if (sqlite3_step(stmt) != SQLITE_DONE) {
                 sqlite3_finalize(stmt);

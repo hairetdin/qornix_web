@@ -240,6 +240,7 @@ if [ "$with_rag" = "true" ]; then
     cp "${rag_template_dir}/templates/rag_interface.html" "$project_abs_path/templates/rag_interface.html"
     cp "${rag_template_dir}/static/rag_app.css" "$project_abs_path/static/rag_app.css"
     cp "${rag_template_dir}/doc/rag_app.md" "$project_abs_path/doc/rag_app.md"
+    cp "${rag_template_dir}/doc/operations.md" "$project_abs_path/doc/operations.md"
     cp "${rag_template_dir}/knowledge_base/README.md" "$project_abs_path/knowledge_base/README.md"
     cp "${rag_template_dir}/models/README.md" "$project_abs_path/models/README.md"
     cp "${rag_template_dir}/download_onnx_model.sh" "$project_abs_path/download_onnx_model.sh"

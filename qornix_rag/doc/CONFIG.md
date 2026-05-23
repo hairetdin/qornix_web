@@ -75,17 +75,28 @@ Then configure:
 ```yaml
 embedding:
   backend: onnx
+  model_id: local-semantic-v1
+  model_name: local semantic ONNX
+  model_version: v1
   model_path: qornix_rag/models/semantic_model.onnx
   tokenizer_path: qornix_rag/models/tokenizer.json
+  tokenizer_type: WordPiece
+  pooling: mean
+  dimension: 0
   max_seq_len: 256
   onnx_threads: 2
   normalize_embeddings: true
   enable_fallback: true
+  lowercase_tokens: true
 ```
 
 For portable bundles, paths are rewritten to `models/semantic_model.onnx` and `models/tokenizer.json`.
 
-If ONNX Runtime is not available or the model cannot be loaded, the build uses TF-IDF fallback when `enable_fallback` is true. See `qornix_rag/models/README.md` for where to get model files and the current compatibility limits.
+`model_id` is optional. If omitted, Qornix derives a stable id from the effective backend, model path, tokenizer path, sequence length, pooling mode, version, and discovered dimension. Persisted embeddings use this id, so changing model metadata creates a new embedding namespace instead of silently reusing stale vectors.
+
+`dimension: 0` means discover the output dimension from the backend. Set a positive dimension to require a specific ONNX output size.
+
+If ONNX Runtime is not available or the model cannot be loaded, the build uses TF-IDF fallback when `enable_fallback` is true. In fallback mode, persisted embeddings use the TF-IDF model id rather than the requested ONNX id. See `qornix_rag/models/README.md` for where to get model files and the current compatibility limits.
 
 ## LLM
 

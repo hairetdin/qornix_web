@@ -28,9 +28,12 @@ struct RagServiceSourceInfo {
 
 struct RagServiceSearchItem {
     std::string path;
+    std::string source_path;
+    std::string citation_id;
     std::string type;
     std::string language;
     double score = 0.0;
+    double confidence = 0.0;
     double vector_score = 0.0;
     double text_score = 0.0;
     double fused_score = 0.0;
@@ -51,7 +54,10 @@ struct RagServiceSearchResponse {
 
 struct RagServiceAskContextItem {
     std::string path;
+    std::string source_path;
+    std::string citation_id;
     double score = 0.0;
+    double confidence = 0.0;
     std::string snippet;
     std::string source_type = "project";
     std::string category;
@@ -64,6 +70,9 @@ struct RagServiceAskResponse {
     std::string answer;
     std::vector<RagServiceAskContextItem> context;
     std::vector<std::string> sources;
+    std::vector<std::string> citations;
+    double retrieval_confidence = 0.0;
+    std::string grounding_status = "no_context";
     std::string llm_status = "not_configured";
     long long response_time_ms = 0;
 };
@@ -102,6 +111,9 @@ struct RagServiceHealth {
     size_t files = 0;
     size_t lines = 0;
     std::string embedding_backend;
+    std::string embedding_model_id;
+    std::string embedding_model_name;
+    size_t embedding_dim = 0;
     bool hybrid_search = true;
     bool llm_available = false;
     std::string llm_provider = "not_configured";

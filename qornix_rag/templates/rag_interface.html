@@ -849,7 +849,8 @@ Available models: ${escapeHtml(modelsText)}</div>
                 });
                 renderAnswer(data.answer || 'Пустой ответ.');
                 const statusType = data.llm_status === 'ok' ? 'ok' : 'warn';
-                showAskStatus(`LLM: ${data.llm_status || 'unknown'} | ${data.response_time_ms ?? 0} ms | sources: ${(data.context || []).length}`, statusType);
+                const confidence = formatScore(data.retrieval_confidence ?? 0);
+                showAskStatus(`LLM: ${data.llm_status || 'unknown'} | ${data.response_time_ms ?? 0} ms | sources: ${(data.context || []).length} | grounding: ${data.grounding_status || 'unknown'} | confidence: ${confidence}`, statusType);
                 renderAskSources(data.context || [], data.sources || []);
             } catch (error) {
                 renderAnswer(error.message);
@@ -967,9 +968,10 @@ Available models: ${escapeHtml(modelsText)}</div>
             }
             container.innerHTML = context.map((item, index) => `
                 <div class="item">
-                    <div class="item-title">${index + 1}. ${escapeHtml(item.path || sources[index] || 'source')}</div>
+                    <div class="item-title">${index + 1}. ${item.citation_id ? `[${escapeHtml(item.citation_id)}] ` : ''}${escapeHtml(item.source_path || item.path || sources[index] || 'source')}</div>
                     <div class="meta">
                         <span class="badge">score: ${formatScore(item.score)}</span>
+                        <span class="badge">confidence: ${formatScore(item.confidence)}</span>
                         <span>source: ${escapeHtml(item.source_type || 'project')}</span>
                         ${item.category ? `<span>category: ${escapeHtml(item.category)}</span>` : ''}
                     </div>
@@ -1012,9 +1014,10 @@ Available models: ${escapeHtml(modelsText)}</div>
                 }
                 container.innerHTML = results.map((result, index) => `
                     <div class="item">
-                        <div class="item-title">${index + 1}. ${escapeHtml(result.path || '-')}</div>
+                        <div class="item-title">${index + 1}. ${result.citation_id ? `[${escapeHtml(result.citation_id)}] ` : ''}${escapeHtml(result.source_path || result.path || '-')}</div>
                         <div class="meta">
                             <span class="badge">score: ${formatScore(result.score)}</span>
+                            <span class="badge">confidence: ${formatScore(result.confidence)}</span>
                             <span>source: ${escapeHtml(result.source_type || 'project')}</span>
                             <span>type: ${escapeHtml(result.type || '-')}</span>
                             <span>language: ${escapeHtml(result.language || '-')}</span>

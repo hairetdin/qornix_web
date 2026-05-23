@@ -406,9 +406,12 @@ void RagApiHandler::handlePost(
             for (const auto &result: search_response.results) {
                 boost::json::object result_obj{
                     {"path", result.path},
+                    {"source_path", result.source_path},
+                    {"citation_id", result.citation_id},
                     {"type", result.type},
                     {"language", result.language},
                     {"score", result.score},
+                    {"confidence", result.confidence},
                     {"vector_score", result.vector_score},
                     {"text_score", result.text_score},
                     {"fused_score", result.fused_score},
@@ -475,11 +478,15 @@ void RagApiHandler::handlePost(
                 auto ask_response = rag_service_->ask(question, top_k, client_ip);
                 boost::json::array context_array;
                 boost::json::array sources_array;
+                boost::json::array citations_array;
 
                 for (const auto& item : ask_response.context) {
                     boost::json::object ctx_obj{
                         {"path", item.path},
+                        {"source_path", item.source_path},
+                        {"citation_id", item.citation_id},
                         {"score", item.score},
+                        {"confidence", item.confidence},
                         {"snippet", item.snippet},
                         {"source_type", item.source_type}
                     };
@@ -490,12 +497,18 @@ void RagApiHandler::handlePost(
                 for (const auto& source : ask_response.sources) {
                     sources_array.emplace_back(source);
                 }
+                for (const auto& citation : ask_response.citations) {
+                    citations_array.emplace_back(citation);
+                }
 
                 boost::json::object response;
                 response["success"] = ask_response.success;
                 response["question"] = ask_response.question;
                 response["context"] = context_array;
                 response["sources"] = sources_array;
+                response["citations"] = citations_array;
+                response["retrieval_confidence"] = ask_response.retrieval_confidence;
+                response["grounding_status"] = ask_response.grounding_status;
                 response["answer"] = ask_response.answer;
                 response["llm_status"] = ask_response.llm_status;
                 response["response_time_ms"] = static_cast<std::int64_t>(ask_response.response_time_ms);
@@ -783,6 +796,7 @@ void RagApiHandler::handlePost(
                 res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
                 res.body() = metrics_text;
                 res.result(http::status::ok);
+                res.prepare_payload();
             } else {
                 buildErrorResponse(res, http::status::service_unavailable, "Metrics not enabled");
             }
@@ -1651,7 +1665,99 @@ void RagApiHandler::handleGet(
     try {
         std::string path = url_view.path();
 
-        if (apiPathMatches(path, "/api/ingest/jobs")) {
+        if (apiPathMatches(path, "/api/metrics")) {
+            if (!metrics_) {
+                buildErrorResponse(res, http::status::service_unavailable, "Metrics not enabled");
+                return;
+            }
+            res.result(http::status::ok);
+            res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+            res.body() = metrics_->render_all();
+            res.prepare_payload();
+
+        } else if (apiPathMatches(path, "/api/admin/diagnostics")) {
+            auto stats = rag_engine_ ? rag_engine_->get_statistics() : ProjectStats{};
+            auto health = rag_service_ ? rag_service_->health() : RagServiceHealth{};
+
+            boost::json::object rag_obj;
+            rag_obj["indexed"] = rag_engine_ && rag_engine_->is_indexed();
+            rag_obj["project_root"] = rag_engine_ ? rag_engine_->get_indexed_project_root() : "";
+            rag_obj["files"] = static_cast<std::int64_t>(stats.total_files);
+            rag_obj["lines"] = static_cast<std::int64_t>(stats.total_lines);
+            rag_obj["index_duration_ms"] = static_cast<std::int64_t>(stats.index_duration_ms);
+            rag_obj["embedding_backend"] = health.embedding_backend;
+            rag_obj["embedding_model_id"] = health.embedding_model_id;
+            rag_obj["embedding_dim"] = static_cast<std::int64_t>(health.embedding_dim);
+            rag_obj["grounding_api"] = true;
+
+            boost::json::object llm_obj;
+            llm_obj["status"] = health.llm_status;
+            llm_obj["provider"] = health.llm_provider;
+            llm_obj["model"] = health.llm_model;
+            llm_obj["available"] = health.llm_available;
+            llm_obj["configured_model_available"] = health.configured_model_available;
+            llm_obj["response_time_ms"] = static_cast<std::int64_t>(health.llm_response_time_ms);
+
+            boost::json::object cache_obj;
+            cache_obj["enabled"] = static_cast<bool>(cache_);
+            if (cache_) {
+                auto cache_stats = cache_->get_stats();
+                cache_obj["hits"] = static_cast<std::int64_t>(cache_stats.hits);
+                cache_obj["misses"] = static_cast<std::int64_t>(cache_stats.misses);
+                cache_obj["size"] = static_cast<std::int64_t>(cache_stats.size);
+                cache_obj["max_size"] = static_cast<std::int64_t>(cache_stats.max_size);
+                cache_obj["hit_rate_percent"] = cache_stats.hit_rate();
+            }
+
+            boost::json::object prompt_cache_obj;
+            prompt_cache_obj["enabled"] = static_cast<bool>(prompt_cache_);
+            if (prompt_cache_) {
+                auto prompt_stats = prompt_cache_->get_stats();
+                prompt_cache_obj["hits"] = static_cast<std::int64_t>(prompt_stats.hits);
+                prompt_cache_obj["misses"] = static_cast<std::int64_t>(prompt_stats.misses);
+                prompt_cache_obj["size"] = static_cast<std::int64_t>(prompt_stats.size);
+                prompt_cache_obj["max_size"] = static_cast<std::int64_t>(prompt_stats.max_size);
+                prompt_cache_obj["hit_rate_percent"] = prompt_stats.hit_rate();
+            }
+
+            boost::json::object rate_obj;
+            rate_obj["enabled"] = rate_limiter_ && rate_limiter_->is_available();
+            if (rate_limiter_) {
+                auto rate_stats = rate_limiter_->get_stats();
+                rate_obj["allowed"] = static_cast<std::int64_t>(rate_stats.allowed);
+                rate_obj["rejected"] = static_cast<std::int64_t>(rate_stats.rejected);
+                rate_obj["whitelisted"] = static_cast<std::int64_t>(rate_stats.whitelisted);
+                rate_obj["rejection_rate_percent"] = rate_stats.rejection_rate();
+            }
+
+            boost::json::object storage_obj;
+#if QORNIX_HAS_SQLITE
+            storage_obj["sqlite_enabled"] = static_cast<bool>(sqlite_source_);
+            if (sqlite_source_) {
+                storage_obj["qa_pairs"] = static_cast<std::int64_t>(sqlite_source_->count());
+                storage_obj["persisted_documents"] = static_cast<std::int64_t>(sqlite_source_->countPersistedDocuments());
+                storage_obj["persisted_chunks"] = static_cast<std::int64_t>(sqlite_source_->countPersistedChunks());
+                storage_obj["persisted_embeddings"] = static_cast<std::int64_t>(sqlite_source_->countPersistedEmbeddings());
+            }
+#else
+            storage_obj["sqlite_enabled"] = false;
+#endif
+
+            boost::json::object response;
+            response["success"] = true;
+            response["status"] = health.status;
+            response["rag"] = rag_obj;
+            response["llm"] = llm_obj;
+            response["cache"] = cache_obj;
+            response["prompt_cache"] = prompt_cache_obj;
+            response["rate_limit"] = rate_obj;
+            response["storage"] = storage_obj;
+            response["metrics_enabled"] = static_cast<bool>(metrics_);
+            response["auth_required_by_rag"] = false;
+            response["network_exposure_note"] = "Protect this endpoint with the host app auth/proxy layer before exposing it outside a trusted network.";
+            buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+
+        } else if (apiPathMatches(path, "/api/ingest/jobs")) {
             size_t limit = 20;
             std::string query = url_view.query();
             if (!query.empty() && query[0] == '?') {
@@ -1840,6 +1946,8 @@ void RagApiHandler::handleGet(
             rag_obj["files"] = stats.total_files;
             rag_obj["lines"] = stats.total_lines;
             rag_obj["embedding_backend"] = rag_engine_->get_embedding_backend();
+            rag_obj["embedding_model_id"] = rag_engine_->get_embedding_model_id();
+            rag_obj["embedding_dim"] = static_cast<std::int64_t>(rag_engine_->get_embedding_dim());
             rag_obj["hybrid_search"] = true; // Default to true
 
             boost::json::object llm_obj;
@@ -1892,6 +2000,7 @@ void RagApiHandler::handleGet(
             response["success"] = true;
             response["indexed"] = rag_engine_->is_indexed();
             response["embedding_backend"] = rag_engine_->get_embedding_backend();
+            response["embedding_model_id"] = rag_engine_->get_embedding_model_id();
             response["embedding_dim"] = static_cast<std::int64_t>(rag_engine_->get_embedding_dim());
             response["onnx_ready"] = rag_engine_->is_onnx_ready();
             response["onnx_status"] = rag_engine_->get_onnx_status_message();
@@ -2076,6 +2185,9 @@ void setupRagRoutes(HttpServer& server,
 
     server.add_route(api_route("/metrics"), full_handler);
     std::cout << "  \u2713 GET  " << api_route("/metrics") << " - Prometheus metrics" << std::endl;
+
+    server.add_route(api_route("/admin/diagnostics"), full_handler);
+    std::cout << "  ✓ GET  " << api_route("/admin/diagnostics") << " - Admin diagnostics" << std::endl;
 
     // Phase 4: Data sources management endpoints
     server.add_route(api_route("/sources"), full_handler);

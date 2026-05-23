@@ -250,6 +250,10 @@ int main(int argc, char* argv[]) {
         std::cout << "🔍 Инициализация RAG движка..." << std::endl;
         g_rag_engine = std::make_shared<RagEngine>(engine_config);
         g_rag_engine->set_stop_flag(&g_running);
+        auto embedding_info = g_rag_engine->get_embedding_model_info();
+        std::cout << "🧬 Embedding model id: " << embedding_info.id << std::endl;
+        std::cout << "📐 Embedding dimension: " << embedding_info.dimension << std::endl;
+        std::cout << "🧾 Embedding status: " << embedding_info.status << std::endl;
 
         if (auto_index_on_startup) {
             // Automatic indexing on startup is kept for the local standalone workflow.

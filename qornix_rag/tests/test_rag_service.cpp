@@ -75,12 +75,18 @@ int main() {
     assert(search.success);
     assert(!search.results.empty());
     assert(search.results.front().path.find("routing.md") != std::string::npos);
+    assert(search.results.front().confidence >= 0.0);
 
     auto ask = service->ask("How are RAG routes registered?", 5);
     assert(ask.success);
     assert(ask.llm_status == "unavailable");
     assert(ask.answer.find("LLM") != std::string::npos);
     assert(!ask.context.empty());
+    assert(!ask.citations.empty());
+    assert(!ask.context.front().citation_id.empty());
+    assert(!ask.context.front().source_path.empty());
+    assert(ask.retrieval_confidence >= 0.0);
+    assert(ask.grounding_status != "no_context");
 
     auto health = service->health();
     assert(health.status == "ok");

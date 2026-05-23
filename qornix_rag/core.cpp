@@ -6,6 +6,7 @@
  */
 
 #include "core.h"
+#include "document_chunker.h"
 #include <fstream>
 #include <algorithm>
 #include <regex>
@@ -404,6 +405,7 @@ void RagEngine::index_project(const std::string &project_root) {
 
     documents_.clear();
     path_to_index_.clear();
+    vectorizer_ = TfidfVectorizer();
 
     std::cout << "🔍 Сканирование проекта: " << project_root << std::endl;
 
@@ -464,21 +466,28 @@ void RagEngine::index_project(const std::string &project_root) {
                 return;
             }
 
-            doc.embedding = generate_embedding(doc.content);
-            if (stop_flag_ && !stop_flag_->load()) {
-                std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
-                is_indexed_ = false;
-                auto index_end = std::chrono::steady_clock::now();
-                last_index_duration_ms_ = static_cast<size_t>(
-                    std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
-                );
-                return;
+            DocumentChunker chunker;
+            auto chunks = chunker.chunkDocument(doc);
+            if (chunks.empty()) {
+                chunks.push_back(doc);
             }
 
-            documents_.push_back(doc);
-            path_to_index_[doc.relative_path] = documents_.size() - 1;
+            for (auto& chunk : chunks) {
+                chunk.embedding = generate_embedding(chunk.content);
+                if (stop_flag_ && !stop_flag_->load()) {
+                    std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
+                    is_indexed_ = false;
+                    auto index_end = std::chrono::steady_clock::now();
+                    last_index_duration_ms_ = static_cast<size_t>(
+                        std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
+                    );
+                    return;
+                }
 
-            vectorizer_.index_document(doc.relative_path, doc.content);
+                documents_.push_back(std::move(chunk));
+                path_to_index_[documents_.back().relative_path] = documents_.size() - 1;
+                vectorizer_.index_document(documents_.back().relative_path, documents_.back().content);
+            }
         }
     } catch (const std::exception &e) {
         std::cerr << "Error scanning project: " << e.what() << std::endl;
@@ -1126,7 +1135,15 @@ std::string RagEngine::build_context(const std::string &query, size_t max_length
 
     for (const auto &result: results) {
         std::string header = "\n" + std::string(60, '=') + "\n";
-        header += "ФАЙЛ: " + result.document.relative_path + "\n";
+        const auto chunk_of = result.document.metadata.find("chunk_of");
+        const std::string source_path = chunk_of != result.document.metadata.end()
+            ? chunk_of->second
+            : result.document.relative_path;
+        header += "ФАЙЛ: " + source_path + "\n";
+        const auto chunk_index = result.document.metadata.find("chunk_index");
+        if (chunk_index != result.document.metadata.end()) {
+            header += "Фрагмент: " + chunk_index->second + "\n";
+        }
         header += "Тип: " + result.document.type + ", Язык: " + result.document.language + "\n";
         std::ostringstream score_stream;
         score_stream << std::fixed << std::setprecision(2) << result.score;
@@ -1165,20 +1182,27 @@ void RagEngine::set_stop_flag(const std::atomic<bool>* stop_flag) {
 
 ProjectStats RagEngine::get_statistics() {
     ProjectStats stats;
-    stats.total_files = documents_.size();
+    std::set<std::string> unique_files;
     stats.total_lines = 0;
     stats.total_size_bytes = 0;
     stats.index_duration_ms = last_index_duration_ms_;
 
     for (const auto &doc: documents_) {
-        stats.total_lines += doc.lines_count;
-        stats.total_size_bytes += doc.size_bytes;
+        const auto chunk_of = doc.metadata.find("chunk_of");
+        const std::string source_path = chunk_of != doc.metadata.end()
+            ? chunk_of->second
+            : doc.relative_path;
+        if (unique_files.insert(source_path).second) {
+            stats.total_lines += doc.lines_count;
+            stats.total_size_bytes += doc.size_bytes;
+        }
         stats.files_by_type[doc.type]++;
 
-        std::string dir = std::filesystem::path(doc.relative_path).parent_path().string();
+        std::string dir = std::filesystem::path(source_path).parent_path().string();
         if (dir.empty()) dir = ".";
         stats.files_by_directory[dir]++;
     }
+    stats.total_files = unique_files.size();
 
     auto now = std::chrono::system_clock::now();
     auto time = std::chrono::system_clock::to_time_t(now);
@@ -1264,6 +1288,7 @@ void RagEngine::indexSources() {
         auto docs = source->getDocuments();
         std::cout << "📄 Loaded " << docs.size() << " documents from source: " << source->getId() << std::endl;
 
+        DocumentChunker chunker;
         for (auto& doc : docs) {
             if (stop_flag_ && !stop_flag_->load()) {
                 std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
@@ -1275,25 +1300,28 @@ void RagEngine::indexSources() {
                 return;
             }
 
-            // Generate embedding
-            doc.embedding = generate_embedding(doc.content);
-
-            if (stop_flag_ && !stop_flag_->load()) {
-                std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
-                is_indexed_ = false;
-                auto index_end = std::chrono::steady_clock::now();
-                last_index_duration_ms_ = static_cast<size_t>(
-                    std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
-                );
-                return;
+            auto chunks = chunker.chunkDocument(doc);
+            if (chunks.empty()) {
+                chunks.push_back(doc);
             }
 
-            // Store document
-            documents_.push_back(std::move(doc));
-            path_to_index_[documents_.back().relative_path] = documents_.size() - 1;
+            for (auto& chunk : chunks) {
+                chunk.embedding = generate_embedding(chunk.content);
 
-            // Update TF-IDF
-            vectorizer_.index_document(documents_.back().relative_path, documents_.back().content);
+                if (stop_flag_ && !stop_flag_->load()) {
+                    std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
+                    is_indexed_ = false;
+                    auto index_end = std::chrono::steady_clock::now();
+                    last_index_duration_ms_ = static_cast<size_t>(
+                        std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
+                    );
+                    return;
+                }
+
+                documents_.push_back(std::move(chunk));
+                path_to_index_[documents_.back().relative_path] = documents_.size() - 1;
+                vectorizer_.index_document(documents_.back().relative_path, documents_.back().content);
+            }
 
             total_docs++;
         }

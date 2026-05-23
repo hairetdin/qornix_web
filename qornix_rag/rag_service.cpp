@@ -55,12 +55,39 @@ std::string qaSnippet(const QASource::QAPair& pair) {
     return "Q: " + pair.question + "\nA: " + pair.answer;
 }
 
+double confidenceFromScore(double score) {
+    if (score <= 0.0) {
+        return 0.0;
+    }
+    if (score >= 1.0) {
+        return 1.0;
+    }
+    return score;
+}
+
+std::string sourcePathForDocument(const Document& doc) {
+    auto it = doc.metadata.find("chunk_of");
+    return it == doc.metadata.end() || it->second.empty()
+        ? doc.relative_path
+        : it->second;
+}
+
+std::string citationId(const std::string& prefix, size_t index) {
+    return prefix + std::to_string(index + 1);
+}
+
 RagServiceSearchItem projectSearchItem(const SearchResult& result) {
     RagServiceSearchItem item;
     item.path = result.document.relative_path;
+    item.source_path = sourcePathForDocument(result.document);
+    auto chunk_it = result.document.metadata.find("chunk_index");
+    item.citation_id = chunk_it == result.document.metadata.end()
+        ? "S"
+        : "S" + chunk_it->second;
     item.type = result.document.type;
     item.language = result.document.language;
     item.score = result.score;
+    item.confidence = confidenceFromScore(result.fused_score > 0.0 ? result.fused_score : result.score);
     item.vector_score = result.vector_score;
     item.text_score = result.text_score;
     item.fused_score = result.fused_score;
@@ -74,9 +101,11 @@ RagServiceSearchItem projectSearchItem(const SearchResult& result) {
 RagServiceSearchItem qaSearchItem(const QASource::QAPair& pair, double score) {
     RagServiceSearchItem item;
     item.path = qaPath(pair);
+    item.source_path = item.path;
     item.type = "QA";
     item.language = "knowledge_base";
     item.score = score;
+    item.confidence = confidenceFromScore(score);
     item.text_score = score;
     item.fused_score = score;
     item.snippet = qaSnippet(pair);
@@ -86,6 +115,19 @@ RagServiceSearchItem qaSearchItem(const QASource::QAPair& pair, double score) {
     item.category = pair.category;
     item.pair_id = pair.id;
     return item;
+}
+
+std::string groundingStatus(double confidence, size_t context_count) {
+    if (context_count == 0) {
+        return "no_context";
+    }
+    if (confidence >= 0.75) {
+        return "grounded";
+    }
+    if (confidence >= 0.35) {
+        return "partial";
+    }
+    return "weak";
 }
 
 bool isFallbackAnswer(const std::string& answer) {
@@ -126,7 +168,7 @@ RagServiceIndexResponse RagService::indexProject(const std::optional<std::string
         const auto persisted = sqlite_source_->persistIndexedDocuments(
             rag_engine_->get_documents_snapshot(),
             "project:" + path,
-            "",
+            rag_engine_->get_embedding_model_id(),
             rag_engine_->get_embedding_backend()
         );
         if (persisted.documents > 0) {
@@ -273,7 +315,9 @@ RagServiceSearchResponse RagService::search(const std::string& query, size_t top
 
     const auto qa_pairs = searchQa(query, std::min<size_t>(top_k, 5));
     for (size_t i = 0; i < qa_pairs.size(); ++i) {
-        response.results.push_back(qaSearchItem(qa_pairs[i], 1.0 - (static_cast<double>(i) * 0.01)));
+        auto item = qaSearchItem(qa_pairs[i], 1.0 - (static_cast<double>(i) * 0.01));
+        item.citation_id = citationId("Q", i);
+        response.results.push_back(std::move(item));
     }
 
     const auto finished = std::chrono::steady_clock::now();
@@ -294,26 +338,34 @@ RagServiceAskResponse RagService::ask(const std::string& question, size_t top_k,
     const auto qa_pairs = searchQa(question, std::min<size_t>(top_k, 5));
     for (size_t i = 0; i < qa_pairs.size(); ++i) {
         const auto& pair = qa_pairs[i];
+        const std::string citation = citationId("Q", i);
         if (!context_text.empty()) {
             context_text += "\n---\n";
         }
-        context_text += "[QA Knowledge Base] " + qaPath(pair) + "\n" + qaSnippet(pair);
+        context_text += "[" + citation + "] [QA Knowledge Base] " + qaPath(pair) + "\n" + qaSnippet(pair);
 
         RagServiceAskContextItem item;
         item.path = qaPath(pair);
+        item.source_path = item.path;
+        item.citation_id = citation;
         item.score = 1.0 - (static_cast<double>(i) * 0.01);
+        item.confidence = confidenceFromScore(item.score);
         item.snippet = qaSnippet(pair);
         item.source_type = "qa";
         item.category = pair.category;
         item.pair_id = pair.id;
         response.context.push_back(std::move(item));
         response.sources.push_back(qaPath(pair));
+        response.citations.push_back(citation);
     }
 
     auto results = rag_engine_->search(question, top_k);
-    for (const auto& result : results) {
+    for (size_t i = 0; i < results.size(); ++i) {
+        const auto& result = results[i];
+        const std::string citation = citationId("S", i);
+        const std::string source_path = sourcePathForDocument(result.document);
         std::ostringstream ctx;
-        ctx << result.document.relative_path << ": " << result.snippet;
+        ctx << "[" << citation << "] " << source_path << ": " << result.snippet;
         if (!context_text.empty()) {
             context_text += "\n---\n";
         }
@@ -321,11 +373,26 @@ RagServiceAskResponse RagService::ask(const std::string& question, size_t top_k,
 
         RagServiceAskContextItem item;
         item.path = result.document.relative_path;
+        item.source_path = source_path;
+        item.citation_id = citation;
         item.score = result.fused_score;
+        item.confidence = confidenceFromScore(result.fused_score > 0.0 ? result.fused_score : result.score);
         item.snippet = result.snippet;
         item.source_type = "project";
         response.context.push_back(std::move(item));
-        response.sources.push_back(result.document.relative_path);
+        response.sources.push_back(source_path);
+        response.citations.push_back(citation);
+    }
+
+    for (const auto& item : response.context) {
+        response.retrieval_confidence = std::max(response.retrieval_confidence, item.confidence);
+    }
+    response.grounding_status = groundingStatus(response.retrieval_confidence, response.context.size());
+
+    if (!context_text.empty()) {
+        context_text =
+            "Use the bracketed source ids such as [S1] or [Q1] when citing facts from context.\n"
+            "If the context is insufficient, say so explicitly.\n\n" + context_text;
     }
 
     if (llm_client_ && llm_client_->is_enabled()) {
@@ -357,6 +424,10 @@ RagServiceHealth RagService::health() const {
     health.files = stats.total_files;
     health.lines = stats.total_lines;
     health.embedding_backend = rag_engine_->get_embedding_backend();
+    const auto embedding_info = rag_engine_->get_embedding_model_info();
+    health.embedding_model_id = embedding_info.id;
+    health.embedding_model_name = embedding_info.name;
+    health.embedding_dim = embedding_info.dimension;
 
     if (llm_client_ && llm_client_->is_enabled()) {
         health.llm_response_time_ms = llm_client_->health_check();

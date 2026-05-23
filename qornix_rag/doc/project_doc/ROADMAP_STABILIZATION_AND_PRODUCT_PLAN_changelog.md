@@ -650,6 +650,194 @@ Built target qornix_web
 Built target qornix_rag_route_extension
 ```
 
+## 2026-05-23 - Milestone E3 chunking strategies completed
+
+Status: `done`
+
+Scope:
+
+- replace the E1 baseline of one whole-document chunk with chunk-level retrieval and persistence;
+- add reusable chunking strategies for currently supported text, Markdown, and code documents;
+- preserve source document metadata and chunk offsets for future citations and vector backend work.
+
+Implemented:
+
+- added `qornix_rag/document_chunker.h`;
+- added `qornix_rag/document_chunker.cpp`;
+- added `DocumentChunker` with configurable `max_tokens`, `overlap_tokens`, and `min_chunk_tokens`;
+- added plain text token-window chunking with overlap;
+- added Markdown heading-aware section splitting before token-window chunking;
+- added code symbol/function-aware section splitting before token-window chunking;
+- added chunk metadata:
+  - `chunk_of`;
+  - `chunk_index`;
+  - `chunk_count`;
+  - `chunk_strategy`;
+  - `chunk_char_start`;
+  - `chunk_char_end`;
+  - `chunk_token_count`;
+  - optional `chunk_heading`;
+  - optional `chunk_symbol`;
+- updated `RagEngine::index_project()` and `RagEngine::indexSources()` so chunk-level records receive embeddings and are indexed into HNSW/Xapian;
+- updated context building so the source file and chunk index are visible in generated context;
+- updated SQLite persistence so chunk-level records are grouped under one source document in `rag_documents` while all chunks and embeddings are stored in `rag_chunks` and `rag_embeddings`;
+- made snapshot replacement remove stale chunks/embeddings for the source before writing the new chunk set;
+- added `qornix_rag/tests/test_document_chunker.cpp`;
+- added SQLite regression coverage for persisting multiple chunks and embeddings under one source document.
+
+Verified:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_TESTS=ON
+cmake --build build --target qornix_rag qornix_web qornix_rag_route_extension test_document_chunker test_sqlite_source test_rag_service test_ingestion_pipeline -j2
+ctest --test-dir build -R "test_(document_chunker|ingestion_pipeline|sqlite_source|rag_service)$" --output-on-failure
+git diff --check
+```
+
+Observed result:
+
+```text
+100% tests passed, 0 tests failed out of 4
+Built target qornix_rag
+Built target qornix_web
+Built target qornix_rag_route_extension
+```
+
+## 2026-05-23 - Milestone E4 ONNX embedding expansion completed
+
+Status: `done`
+
+Scope:
+
+- add model metadata and stable model identity for embedding backends;
+- make persisted embedding namespaces change when embedding model/version/config changes;
+- improve ONNX output handling without requiring ONNX Runtime in every development environment.
+
+Implemented:
+
+- extended `EmbeddingConfig` with `model_id`, `model_name`, `model_version`, `tokenizer_type`, `pooling`, `dimension`, and `lowercase_tokens`;
+- added `EmbeddingModelInfo` runtime metadata;
+- added `RagEngine::get_embedding_model_id()`, `get_embedding_model_info()`, and `get_embedding_cache_namespace()`;
+- added deterministic model id generation for TF-IDF and ONNX backends;
+- changed `RagService::indexProject()` so SQLite persisted embeddings use the effective embedding model id;
+- made ONNX fallback report and persist the effective TF-IDF model id/dimension when fallback is active;
+- added `dimension: 0` autodiscovery and positive-dimension validation for ONNX outputs;
+- added `mean` and `cls` pooling modes for 3D ONNX outputs;
+- parsed tokenizer type from Hugging Face-style `tokenizer.json` when available;
+- added configurable tokenizer lowercasing;
+- exposed embedding model id and dimension through health/stats responses and startup diagnostics;
+- added expanded ONNX embedding config examples to standalone and generated RAG app configs;
+- documented model id/version/dimension behavior in `qornix_rag/doc/CONFIG.md`;
+- added `qornix_rag/tests/test_embedding_config.cpp`.
+
+Verified:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_TESTS=ON
+cmake --build build --target test_embedding_config test_rag_service test_sqlite_source qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R "test_(embedding_config|rag_service|sqlite_source)$" --output-on-failure
+```
+
+Observed result:
+
+```text
+100% tests passed, 0 tests failed out of 3
+Built target qornix_rag
+Built target qornix_web
+Built target qornix_rag_route_extension
+```
+
+## 2026-05-23 - Milestone E5 RAG quality baseline completed
+
+Status: `done`
+
+Scope:
+
+- add first-pass citation and confidence metadata to Ask/Search responses;
+- make chunked retrieval source paths readable in API/UI;
+- expose grounding status without attempting full answer verification yet.
+
+Implemented:
+
+- added `citation_id`, `source_path`, and normalized `confidence` fields to service search/ask context items;
+- added `retrieval_confidence`, `grounding_status`, and `citations` to `RagServiceAskResponse`;
+- added prompt context citation markers such as `[S1]` and `[Q1]`;
+- added prompt guidance asking the LLM to cite bracketed source ids and admit insufficient context;
+- exposed citation, confidence, source path, retrieval confidence, and grounding status fields through `/api/ask`;
+- exposed source path, citation id, and confidence through `/api/search`;
+- updated standalone UI Ask status to show grounding status and retrieval confidence;
+- updated Ask/Search source rendering to show citation ids and confidence;
+- added service-level regression coverage for Ask citations, source path, retrieval confidence, and grounding status.
+
+Verified:
+
+```bash
+cmake --build build --target test_rag_service qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R "test_rag_service$" --output-on-failure
+```
+
+Observed result:
+
+```text
+100% tests passed, 0 tests failed out of 1
+Built target qornix_rag
+Built target qornix_web
+Built target qornix_rag_route_extension
+```
+
+## 2026-05-23 - Milestone E6 operations and deployment baseline completed
+
+Status: `done`
+
+Scope:
+
+- add operational diagnostics and metrics endpoints for generated/full web applications;
+- document deployment volumes, logging, backup/restore, rate limits, and security ownership;
+- keep auth/RBAC as host-application responsibility instead of adding standalone auth.
+
+Implemented:
+
+- added `GET /api/rag/admin/diagnostics` through the configured RAG API prefix;
+- made `GET /api/rag/metrics` return Prometheus text metrics through the GET handler path;
+- diagnostics include:
+  - RAG index state;
+  - project root;
+  - embedding backend/model id/dimension;
+  - LLM provider/model/status;
+  - cache stats;
+  - prompt-cache stats;
+  - rate-limit counters;
+  - SQLite QA/persisted document/chunk/embedding counts;
+  - metrics availability;
+  - network exposure warning;
+- updated `templates/rag_app/docker-compose.yml` to persist `logs/` in addition to `data/` and `knowledge_base/`;
+- added `templates/rag_app/doc/operations.md`;
+- updated generated RAG app README and `doc/rag_app.md` to reference operations docs;
+- updated `create_new_project.sh` so default apps generated with `--with-rag` also receive `doc/operations.md`;
+- documented admin diagnostics and metrics endpoints in `qornix_rag/doc/API.md` and `qornix_rag/doc/INTEGRATION_QORNIX_WEB.md`.
+
+Verified:
+
+```bash
+cmake --build build --target qornix_rag qornix_web qornix_rag_route_extension test_rag_service -j2
+./build/qornix_rag/qornix_rag --port 8097 --project qornix_rag/doc/project_doc
+curl -fsS http://127.0.0.1:8097/api/admin/diagnostics
+curl -fsS http://127.0.0.1:8097/api/metrics
+ctest --test-dir build -R "test_(rag_service|document_chunker|embedding_config|sqlite_source)$" --output-on-failure
+git diff --check
+```
+
+Observed result:
+
+```text
+GET /api/admin/diagnostics returned metrics_enabled, rate_limit, and storage diagnostics.
+GET /api/metrics returned qornix_rag_* Prometheus metrics.
+100% tests passed, 0 tests failed out of 4
+Built target qornix_rag
+Built target qornix_web
+Built target qornix_rag_route_extension
+```
+
 ## Current milestone state
 
 - Milestone 0: `done`
@@ -664,13 +852,13 @@ Built target qornix_rag_route_extension
 - Milestone B - reusable RAG core: `done`
 - Milestone C - `qornix_web/templates/rag_app`: `done`
 - Milestone D - `--with-rag` for existing templates: `done`
-- Milestone E - production RAG expansion: `in progress`
+- Milestone E - production RAG expansion: `done`
   - E1 persistent knowledge and vector storage baseline: `done`
   - E2 document ingestion pipeline baseline: `done`
-  - E3 chunking strategies: `pending`
-  - E4 ONNX embedding expansion: `pending`
-  - E5 RAG quality improvements: `pending`
-  - E6 operations and deployment: `pending`
+  - E3 chunking strategies: `done`
+  - E4 ONNX embedding expansion: `done`
+  - E5 RAG quality improvements: `done`
+  - E6 operations and deployment: `done`
 
 ## Deferred / known follow-ups
 

@@ -34,11 +34,18 @@ rag:
     # 3. Change backend to onnx and uncomment the paths below.
     #
     # backend: onnx
+    # model_id: local-semantic-v1
+    # model_name: local semantic ONNX
+    # model_version: v1
     # model_path: models/semantic_model.onnx
     # tokenizer_path: models/tokenizer.json
+    # tokenizer_type: WordPiece
+    # pooling: mean
+    # dimension: 0
     # max_seq_len: 512
     # onnx_threads: 2
     # normalize_embeddings: true
+    # lowercase_tokens: true
 
   search:
     use_hybrid: true

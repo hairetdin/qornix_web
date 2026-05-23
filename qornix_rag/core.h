@@ -71,12 +71,34 @@ struct HybridSearchConfig {
 
 struct EmbeddingConfig {
     std::string backend = "tfidf"; // tfidf | onnx
+    std::string model_id;
+    std::string model_name;
+    std::string model_version;
     std::string model_path = "models/semantic_model.onnx";
     std::string tokenizer_path = "models/tokenizer.json";
+    std::string tokenizer_type = "basic_wordpiece";
+    std::string pooling = "mean"; // mean | cls
+    size_t dimension = 0; // 0 means discover from backend/output
     size_t max_seq_len = 256;
     size_t onnx_threads = 1;
     bool normalize_embeddings = true;
     bool enable_fallback = true;
+    bool lowercase_tokens = true;
+};
+
+struct EmbeddingModelInfo {
+    std::string id;
+    std::string name;
+    std::string version;
+    std::string backend;
+    std::string model_path;
+    std::string tokenizer_path;
+    std::string tokenizer_type;
+    std::string pooling;
+    size_t dimension = 0;
+    size_t max_seq_len = 0;
+    bool ready = false;
+    std::string status;
 };
 
 struct RagEngineConfig {
@@ -101,6 +123,8 @@ struct Document {
     Document() : size_bytes(0), lines_count(0) {
     }
 };
+
+#include "document_chunker.h"
 
 /**
  * Type of data source (Phase 4).
@@ -415,6 +439,7 @@ private:
     size_t embedding_dim_ = 256;
     bool onnx_ready_ = false;
     std::string onnx_status_message_ = "not initialized";
+    EmbeddingModelInfo embedding_model_;
 
 #ifdef QORNIX_HAS_ONNX
     std::unique_ptr<Ort::Env> ort_env_;
@@ -674,6 +699,20 @@ public:
         return embedding_dim_;
     }
 
+    std::string get_embedding_model_id() const {
+        return embedding_model_.id.empty()
+            ? build_embedding_model_id(embedding_config_, get_embedding_backend(), embedding_dim_)
+            : embedding_model_.id;
+    }
+
+    EmbeddingModelInfo get_embedding_model_info() const {
+        return embedding_model_;
+    }
+
+    std::string get_embedding_cache_namespace() const {
+        return get_embedding_model_id();
+    }
+
     bool is_onnx_ready() const {
         return onnx_ready_;
     }
@@ -748,21 +787,30 @@ public:
             doc.hash = ingested.hash;
             doc.last_modified = ingested.last_modified;
             doc.metadata = ingested.metadata;
-            doc.embedding = generate_embedding(doc.content);
 
-            if (stop_flag_ && !stop_flag_->load()) {
-                std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
-                is_indexed_ = false;
-                auto index_end = std::chrono::steady_clock::now();
-                last_index_duration_ms_ = static_cast<size_t>(
-                    std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
-                );
-                return;
+            DocumentChunker chunker;
+            auto chunks = chunker.chunkDocument(doc);
+            if (chunks.empty()) {
+                chunks.push_back(doc);
             }
 
-            documents_.push_back(std::move(doc));
-            path_to_index_[documents_.back().relative_path] = documents_.size() - 1;
-            vectorizer_.index_document(documents_.back().relative_path, documents_.back().content);
+            for (auto& chunk : chunks) {
+                chunk.embedding = generate_embedding(chunk.content);
+
+                if (stop_flag_ && !stop_flag_->load()) {
+                    std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
+                    is_indexed_ = false;
+                    auto index_end = std::chrono::steady_clock::now();
+                    last_index_duration_ms_ = static_cast<size_t>(
+                        std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
+                    );
+                    return;
+                }
+
+                documents_.push_back(std::move(chunk));
+                path_to_index_[documents_.back().relative_path] = documents_.size() - 1;
+                vectorizer_.index_document(documents_.back().relative_path, documents_.back().content);
+            }
         }
 
         is_indexed_ = true;
@@ -797,6 +845,63 @@ private:
         return value.substr(start, end - start);
     }
 
+    static std::string path_stem_or_value(const std::string &path) {
+        if (path.empty()) {
+            return "default";
+        }
+        try {
+            auto stem = std::filesystem::path(path).stem().string();
+            return stem.empty() ? path : stem;
+        } catch (...) {
+            return path;
+        }
+    }
+
+    static std::string build_embedding_model_id(const EmbeddingConfig &config,
+                                                const std::string &effective_backend,
+                                                size_t effective_dimension) {
+        if (!config.model_id.empty() && effective_backend == config.backend) {
+            return config.model_id;
+        }
+
+        std::string base = effective_backend;
+        if (effective_backend == "onnx") {
+            base += ":" + path_stem_or_value(config.model_path);
+            if (!config.model_version.empty()) {
+                base += ":" + config.model_version;
+            }
+            base += ":seq" + std::to_string(config.max_seq_len);
+            base += ":" + config.pooling;
+            if (effective_dimension > 0) {
+                base += ":d" + std::to_string(effective_dimension);
+            }
+            return base + ":" + HashCalculator::compute_md5(
+                config.model_path + "|" + config.tokenizer_path + "|" +
+                config.tokenizer_type + "|" + config.pooling + "|" +
+                config.model_version + "|" + std::to_string(config.max_seq_len)
+            );
+        }
+
+        return "tfidf:d" + std::to_string(effective_dimension > 0 ? effective_dimension : EMBEDDING_DIM);
+    }
+
+    void refresh_embedding_model_info(bool ready, const std::string &status) {
+        embedding_model_.backend = get_embedding_backend();
+        embedding_model_.id = build_embedding_model_id(embedding_config_, embedding_model_.backend, embedding_dim_);
+        embedding_model_.name = embedding_config_.model_name.empty()
+            ? path_stem_or_value(embedding_config_.model_path)
+            : embedding_config_.model_name;
+        embedding_model_.version = embedding_config_.model_version;
+        embedding_model_.model_path = embedding_config_.model_path;
+        embedding_model_.tokenizer_path = embedding_config_.tokenizer_path;
+        embedding_model_.tokenizer_type = embedding_config_.tokenizer_type;
+        embedding_model_.pooling = embedding_config_.pooling;
+        embedding_model_.dimension = embedding_dim_;
+        embedding_model_.max_seq_len = embedding_config_.max_seq_len;
+        embedding_model_.ready = ready;
+        embedding_model_.status = status;
+    }
+
     bool parse_tokenizer_vocab(const std::string &tokenizer_path) {
         tokenizer_vocab_.clear();
 
@@ -823,6 +928,9 @@ private:
             }
 
             auto &model = root["model"].as_object();
+            if (model.contains("type") && model["type"].is_string()) {
+                embedding_config_.tokenizer_type = std::string(model["type"].as_string().c_str());
+            }
             if (!model.contains("vocab")) {
                 onnx_status_message_ = "tokenizer.json does not contain model.vocab";
                 return false;
@@ -874,6 +982,16 @@ private:
             auto it_pad_alt = tokenizer_vocab_.find("<pad>");
             if (it_pad_alt != tokenizer_vocab_.end()) pad_token_id_ = it_pad_alt->second;
 
+            if (root.contains("truncation") && root["truncation"].is_object()) {
+                auto &truncation = root["truncation"].as_object();
+                if (truncation.contains("max_length") && truncation["max_length"].is_int64()) {
+                    const auto max_length = truncation["max_length"].as_int64();
+                    if (max_length > 0 && embedding_config_.max_seq_len == 0) {
+                        embedding_config_.max_seq_len = static_cast<size_t>(max_length);
+                    }
+                }
+            }
+
             return !tokenizer_vocab_.empty();
         } catch (const std::exception &e) {
             onnx_status_message_ = std::string("tokenizer parse failed: ") + e.what();
@@ -889,7 +1007,9 @@ private:
         for (char raw_ch: text) {
             unsigned char ch = static_cast<unsigned char>(raw_ch);
             if (std::isalnum(ch) || ch == '_') {
-                current.push_back(static_cast<char>(std::tolower(ch)));
+                current.push_back(embedding_config_.lowercase_tokens
+                    ? static_cast<char>(std::tolower(ch))
+                    : static_cast<char>(ch));
             } else if (!current.empty()) {
                 tokens.push_back(current);
                 current.clear();
@@ -948,20 +1068,49 @@ private:
         }
     }
 
+    bool accept_embedding_dimension(size_t actual_dimension) {
+        if (embedding_config_.dimension == 0 || actual_dimension == embedding_config_.dimension) {
+            embedding_dim_ = actual_dimension;
+            refresh_embedding_model_info(onnx_ready_, onnx_status_message_);
+            return true;
+        }
+        onnx_status_message_ = "onnx output dimension mismatch: configured " +
+            std::to_string(embedding_config_.dimension) + ", got " + std::to_string(actual_dimension);
+        onnx_ready_ = false;
+        if (embedding_config_.enable_fallback) {
+            embedding_dim_ = EMBEDDING_DIM;
+        }
+        refresh_embedding_model_info(false, onnx_status_message_);
+        return false;
+    }
+
     void initialize_embedding_backend() {
         onnx_ready_ = false;
+        if (embedding_config_.max_seq_len == 0) {
+            embedding_config_.max_seq_len = 256;
+        }
         embedding_dim_ = EMBEDDING_DIM;
         onnx_status_message_ = "tfidf backend active";
 
         if (embedding_config_.backend != "onnx") {
+            refresh_embedding_model_info(true, onnx_status_message_);
             return;
         }
+        embedding_dim_ = embedding_config_.dimension > 0 ? embedding_config_.dimension : EMBEDDING_DIM;
 
 #ifndef QORNIX_HAS_ONNX
         onnx_status_message_ = "onnx backend requested but binary was built without ONNX Runtime";
+        if (embedding_config_.enable_fallback) {
+            embedding_dim_ = EMBEDDING_DIM;
+        }
+        refresh_embedding_model_info(false, onnx_status_message_);
         return;
 #else
         if (!parse_tokenizer_vocab(embedding_config_.tokenizer_path)) {
+            if (embedding_config_.enable_fallback) {
+                embedding_dim_ = EMBEDDING_DIM;
+            }
+            refresh_embedding_model_info(false, onnx_status_message_);
             if (!embedding_config_.enable_fallback) {
                 throw std::runtime_error("Failed to load tokenizer for ONNX mode: " + onnx_status_message_);
             }
@@ -1005,8 +1154,13 @@ private:
 
             onnx_ready_ = true;
             onnx_status_message_ = "onnx model loaded: " + embedding_config_.model_path;
+            refresh_embedding_model_info(true, onnx_status_message_);
         } catch (const std::exception &e) {
             onnx_status_message_ = std::string("onnx init failed: ") + e.what();
+            if (embedding_config_.enable_fallback) {
+                embedding_dim_ = EMBEDDING_DIM;
+            }
+            refresh_embedding_model_info(false, onnx_status_message_);
             if (!embedding_config_.enable_fallback) {
                 throw;
             }
@@ -1068,25 +1222,33 @@ private:
                 return {};
             }
             std::vector<float> embedding(static_cast<size_t>(hidden_dim), 0.0f);
-            float token_count = 0.0f;
 
-            for (int64_t t = 0; t < seq_len; ++t) {
-                if (t >= static_cast<int64_t>(encoded.second.size()) || encoded.second[static_cast<size_t>(t)] == 0) {
-                    continue;
-                }
-                token_count += 1.0f;
+            if (embedding_config_.pooling == "cls") {
                 for (int64_t h = 0; h < hidden_dim; ++h) {
-                    embedding[static_cast<size_t>(h)] += raw[t * hidden_dim + h];
+                    embedding[static_cast<size_t>(h)] = raw[h];
                 }
-            }
+            } else {
+                float token_count = 0.0f;
+                for (int64_t t = 0; t < seq_len; ++t) {
+                    if (t >= static_cast<int64_t>(encoded.second.size()) || encoded.second[static_cast<size_t>(t)] == 0) {
+                        continue;
+                    }
+                    token_count += 1.0f;
+                    for (int64_t h = 0; h < hidden_dim; ++h) {
+                        embedding[static_cast<size_t>(h)] += raw[t * hidden_dim + h];
+                    }
+                }
 
-            if (token_count > 0.0f) {
-                for (float &v: embedding) {
-                    v /= token_count;
+                if (token_count > 0.0f) {
+                    for (float &v: embedding) {
+                        v /= token_count;
+                    }
                 }
             }
             normalize_l2(embedding);
-            embedding_dim_ = embedding.size();
+            if (!accept_embedding_dimension(embedding.size())) {
+                return {};
+            }
             return embedding;
         }
 
@@ -1097,7 +1259,9 @@ private:
             }
             std::vector<float> embedding(raw, raw + hidden_dim);
             normalize_l2(embedding);
-            embedding_dim_ = embedding.size();
+            if (!accept_embedding_dimension(embedding.size())) {
+                return {};
+            }
             return embedding;
         }
 
@@ -1406,7 +1570,15 @@ public:
 
         for (const auto &result: results) {
             std::string header = "\n" + std::string(60, '=') + "\n";
-            header += "ФАЙЛ: " + result.document.relative_path + "\n";
+            const auto chunk_of = result.document.metadata.find("chunk_of");
+            const std::string source_path = chunk_of != result.document.metadata.end()
+                ? chunk_of->second
+                : result.document.relative_path;
+            header += "ФАЙЛ: " + source_path + "\n";
+            const auto chunk_index = result.document.metadata.find("chunk_index");
+            if (chunk_index != result.document.metadata.end()) {
+                header += "Фрагмент: " + chunk_index->second + "\n";
+            }
             header += "Тип: " + result.document.type + ", Язык: " + result.document.language + "\n";
             std::ostringstream score_stream;
             score_stream << std::fixed << std::setprecision(2) << result.score;
@@ -1445,20 +1617,27 @@ public:
 
     ProjectStats get_statistics() {
         ProjectStats stats;
-        stats.total_files = documents_.size();
+        std::set<std::string> unique_files;
         stats.total_lines = 0;
         stats.total_size_bytes = 0;
         stats.index_duration_ms = last_index_duration_ms_;
 
         for (const auto &doc: documents_) {
-            stats.total_lines += doc.lines_count;
-            stats.total_size_bytes += doc.size_bytes;
+            const auto chunk_of = doc.metadata.find("chunk_of");
+            const std::string source_path = chunk_of != doc.metadata.end()
+                ? chunk_of->second
+                : doc.relative_path;
+            if (unique_files.insert(source_path).second) {
+                stats.total_lines += doc.lines_count;
+                stats.total_size_bytes += doc.size_bytes;
+            }
             stats.files_by_type[doc.type]++;
 
-            std::string dir = std::filesystem::path(doc.relative_path).parent_path().string();
+            std::string dir = std::filesystem::path(source_path).parent_path().string();
             if (dir.empty()) dir = ".";
             stats.files_by_directory[dir]++;
         }
+        stats.total_files = unique_files.size();
 
         auto now = std::chrono::system_clock::now();
         auto time = std::chrono::system_clock::to_time_t(now);
@@ -1575,6 +1754,7 @@ public:
             auto docs = source->getDocuments();
             std::cout << "📄 Loaded " << docs.size() << " documents from source: " << source->getId() << std::endl;
 
+            DocumentChunker chunker;
             for (auto& doc : docs) {
                 if (stop_flag_ && !stop_flag_->load()) {
                     std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
@@ -1586,25 +1766,28 @@ public:
                     return;
                 }
 
-                // Generate embedding
-                doc.embedding = generate_embedding(doc.content);
-
-                if (stop_flag_ && !stop_flag_->load()) {
-                    std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
-                    is_indexed_ = false;
-                    auto index_end = std::chrono::steady_clock::now();
-                    last_index_duration_ms_ = static_cast<size_t>(
-                        std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
-                    );
-                    return;
+                auto chunks = chunker.chunkDocument(doc);
+                if (chunks.empty()) {
+                    chunks.push_back(doc);
                 }
 
-                // Store document
-                documents_.push_back(std::move(doc));
-                path_to_index_[documents_.back().relative_path] = documents_.size() - 1;
+                for (auto& chunk : chunks) {
+                    chunk.embedding = generate_embedding(chunk.content);
 
-                // Update TF-IDF
-                vectorizer_.index_document(documents_.back().relative_path, documents_.back().content);
+                    if (stop_flag_ && !stop_flag_->load()) {
+                        std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
+                        is_indexed_ = false;
+                        auto index_end = std::chrono::steady_clock::now();
+                        last_index_duration_ms_ = static_cast<size_t>(
+                            std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
+                        );
+                        return;
+                    }
+
+                    documents_.push_back(std::move(chunk));
+                    path_to_index_[documents_.back().relative_path] = documents_.size() - 1;
+                    vectorizer_.index_document(documents_.back().relative_path, documents_.back().content);
+                }
 
                 total_docs++;
             }

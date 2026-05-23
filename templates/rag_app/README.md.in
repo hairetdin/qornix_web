@@ -39,6 +39,8 @@ http://127.0.0.1:8008/api/rag/health
 ```text
 GET  /rag
 GET  /api/rag/health
+GET  /api/rag/admin/diagnostics
+GET  /api/rag/metrics
 POST /api/rag/ask
 POST /api/rag/search
 GET  /api/rag/sources
@@ -118,6 +120,10 @@ Recommended one-command setup:
 ```
 
 The script downloads the default BERT-style ONNX text embedding model from Hugging Face, saves it under `models/`, and updates this app's `config.yaml` to `rag.embedding.backend: onnx`.
+
+## Operations
+
+See `doc/operations.md` for Docker Compose, persistent volumes, diagnostics, metrics, rate limits, backup/restore, and network exposure guidance.
 
 Useful options:
 
