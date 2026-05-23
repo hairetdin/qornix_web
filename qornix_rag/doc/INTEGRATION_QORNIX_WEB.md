@@ -53,9 +53,13 @@ GET  /rag
 POST /api/rag/ask
 POST /api/rag/search
 GET  /api/rag/health
+GET  /api/rag/admin/diagnostics
+GET  /api/rag/metrics
 GET  /api/rag/sources
 GET  /api/rag/qa/list
 ```
+
+Protect diagnostics, metrics, QA write, ingestion, and delete routes with the host application's auth/proxy layer before exposing a generated app outside a trusted network. See generated `doc/operations.md` for the deployment checklist.
 
 ## Dynamic Route Extension
 
@@ -89,4 +93,3 @@ This keeps `qornix_rag` reusable without forcing one global config file across p
 ## Security Notes
 
 Authentication, authorization, RBAC, multi-user workspaces, and tenant isolation are not part of standalone mode. They belong to generated full web applications or host applications when RAG is exposed beyond localhost.
-

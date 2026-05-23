@@ -29,8 +29,8 @@ Milestone A8: done
 Milestone B: done
 Milestone C: done
 Milestone D: done
-Milestone E: in progress
-Next: Milestone E3
+Milestone E: done
+Next: Stabilization review / commit current roadmap work
 ```
 
 ## 1. Product split
@@ -786,7 +786,7 @@ Remaining E2 follow-ups:
 
 ### E3. Chunking strategies
 
-Status: `pending`
+Status: `done` for the first text/Markdown/code chunking baseline.
 
 Needed strategies:
 
@@ -798,9 +798,28 @@ Needed strategies:
 - overlap policy;
 - metadata preservation.
 
+Completed baseline:
+
+- added `DocumentChunker` as the reusable chunking boundary;
+- added plain text token-window chunking with overlap;
+- added Markdown heading-aware section chunking before token-window splitting;
+- added code symbol/function-aware section chunking before token-window splitting;
+- indexed chunk-level documents in `RagEngine` so HNSW/Xapian retrieval targets chunks instead of whole files;
+- preserved source document metadata on chunks through `chunk_of`, `chunk_index`, `chunk_count`, `chunk_strategy`, character offsets, token count, heading, and symbol metadata;
+- updated context building so answers cite the source file and chunk index instead of only the synthetic chunk path;
+- updated SQLite persistence so one source document can own multiple persisted chunks and chunk embeddings;
+- added regression coverage for chunking strategies and chunked SQLite persistence.
+
+Remaining E3 follow-ups:
+
+- use tokenizer-specific token counts for ONNX models instead of whitespace-token estimates;
+- add richer language-specific code parsers for symbols/classes/functions beyond regex-based section detection;
+- add page-aware PDF chunking after PDF parsing exists;
+- add table-aware spreadsheet chunking after XLSX/CSV parser adapters exist.
+
 ### E4. ONNX embedding expansion
 
-Status: `pending`
+Status: `done` for the first model metadata, dimension, and cache-namespace baseline.
 
 Current limitation: ONNX embedding support is narrow: one model path, fixed output assumptions, and basic tokenization.
 
@@ -815,9 +834,34 @@ Needed:
 - embedding cache invalidation by model version;
 - fallback strategy.
 
+Completed baseline:
+
+- extended `EmbeddingConfig` with `model_id`, `model_name`, `model_version`, `tokenizer_type`, `pooling`, `dimension`, and `lowercase_tokens`;
+- added `EmbeddingModelInfo` as the runtime embedding model metadata record;
+- added stable embedding model id generation for TF-IDF and ONNX backends;
+- added embedding cache namespace exposure through the effective embedding model id;
+- made persisted embeddings use `RagEngine::get_embedding_model_id()` so model/version/config changes no longer silently reuse the old backend/dimension id;
+- added explicit ONNX output dimension validation when `embedding.dimension` is configured;
+- kept `dimension: 0` as automatic output-dimension discovery;
+- added `mean` and `cls` pooling modes for 3D ONNX outputs;
+- parsed tokenizer type from Hugging Face-style `tokenizer.json` metadata when available;
+- added configurable tokenizer lowercasing;
+- made ONNX fallback reset the effective model id/dimension to the TF-IDF backend when fallback is active;
+- exposed embedding model id and dimension through health/stats responses and startup diagnostics;
+- documented expanded ONNX embedding config keys in `qornix_rag/doc/CONFIG.md`.
+
+Remaining E4 follow-ups:
+
+- full model registry loading from a config file or directory rather than only the active configured model;
+- runtime model switching and reindex orchestration;
+- a first-class model install/download command with registry metadata validation;
+- tokenizer implementations beyond the current basic WordPiece-like tokenizer path;
+- embedding cache storage beyond model-id namespacing;
+- ONNX Runtime availability and real-model integration tests in an environment that has ONNX Runtime installed.
+
 ### E5. RAG quality improvements
 
-Status: `pending`
+Status: `done` for the first citation, confidence, and grounding metadata baseline.
 
 Needed:
 
@@ -832,9 +876,31 @@ Needed:
 - evaluation datasets;
 - regression tests for answer quality.
 
+Completed baseline:
+
+- added citation ids for Ask context entries such as `S1` and `Q1`;
+- prefixed retrieved context blocks with citation ids so LLM prompts can refer to sources explicitly;
+- added source path preservation for chunked project results so UI and API can show the original document path;
+- added normalized per-source confidence scores;
+- added response-level `retrieval_confidence`;
+- added response-level `grounding_status` with `grounded`, `partial`, `weak`, and `no_context` states;
+- exposed citation, confidence, and grounding metadata through `/api/ask` and `/api/search`;
+- updated the standalone UI to display citations, confidence, and grounding status;
+- added service regression coverage for Ask citations, source path, confidence, and grounding status.
+
+Remaining E5 follow-ups:
+
+- add an actual reranker after first-stage retrieval;
+- add query rewriting and multi-query retrieval with transparent diagnostics;
+- add conversation history with source carryover rules;
+- add answer grounding checks that inspect generated output against cited context;
+- add user feedback capture and analytics;
+- add evaluation datasets and quality regression tests beyond service-level metadata checks;
+- add citation rendering/post-processing that verifies generated answers cite known source ids.
+
 ### E6. Operations and deployment
 
-Status: `pending`
+Status: `done` for the first generated-app operations baseline.
 
 For full web applications, not local-only standalone baseline:
 
@@ -848,6 +914,28 @@ For full web applications, not local-only standalone baseline:
 - rate limits;
 - upload limits;
 - backup/restore.
+
+Completed baseline:
+
+- added `GET /api/rag/admin/diagnostics` for read-only operational diagnostics in integrated mode;
+- made `GET /api/rag/metrics` return Prometheus text metrics through the normal GET path;
+- diagnostics include RAG index state, embedding model identity, LLM status, cache stats, prompt-cache stats, rate-limit counters, SQLite persistence counts, and metrics availability;
+- diagnostics explicitly report that RAG does not require auth by itself and must be protected by the host application or proxy when exposed on a network;
+- updated generated `rag_app` Docker Compose volumes for `knowledge_base/`, `data/`, and `logs/`;
+- added generated `doc/operations.md` with persistent volume, health, diagnostics, metrics, rate limit, logging, Docker Compose, backup/restore, and security checklist guidance;
+- copied `doc/operations.md` into generated default apps when `--with-rag` is used;
+- documented diagnostics and metrics endpoints in RAG API and integration docs.
+
+Remaining E6 follow-ups:
+
+- host-application auth/RBAC integration for diagnostics, metrics, Ask, QA write, ingestion, and delete routes;
+- TLS/reverse-proxy examples;
+- structured tracing with request ids across host app, RAG retrieval, LLM calls, and persistence;
+- first-class backup/restore commands instead of file-based documentation only;
+- upload endpoints and upload-size enforcement beyond current indexing file-size limits;
+- admin UI for diagnostics and ingestion job management;
+- production container hardening, healthcheck directives, and non-root runtime user validation;
+- alerting examples for metrics and rate-limit rejection thresholds.
 
 ## 9. Suggested implementation order
 
@@ -1016,12 +1104,52 @@ E2 established the ingestion pipeline, parser interface, parser registry, durabl
 - Add parser plugins for PPTX documents.
 - Add image ingestion with OCR.
 - Add source-code repository structure-aware chunking beyond extension-based file parsing.
+- Add language-specific code chunkers/parsers for symbols, classes, methods, functions, and namespaces instead of relying only on regex-based section detection from the E3 baseline.
+- Add tokenizer-aware chunk sizing for configured embedding models, including ONNX tokenizer limits, instead of relying only on whitespace-token estimates.
+- Add page-aware PDF chunking after PDF parser plugins expose page numbers, page text, and page-level metadata.
+- Add table-aware spreadsheet chunking after XLSX/CSV parser plugins expose sheets, ranges, headers, and row/column metadata.
+- Add parser-to-chunker metadata contracts so headings, symbols, pages, tables, captions, and source offsets survive ingestion, retrieval, persistence, and citation rendering.
+- Add chunk quality tests for overlap boundaries, metadata preservation, duplicate/near-duplicate chunks, very small sections, very large sections, and mixed Markdown/code documents.
 - Add asynchronous/background ingestion with progress streaming or polling against in-flight jobs.
 - Add full incremental in-memory reindexing by modified time and content hash instead of rebuilding the current in-memory index.
 - Document dependency requirements, fallback behavior, and parser-specific error reporting.
 - Add parser adapter tests using small fixture files for each supported format.
 
-### 11.7 QA/wiki quality improvements
+### 11.7 Embedding model registry and ONNX runtime follow-ups
+
+Status: deferred after E4 embedding metadata baseline.
+
+E4 added active-model metadata, stable effective model ids, embedding namespaces, dimension validation, pooling selection, and fallback-safe persistence. The following embedding capabilities are intentionally not implemented by the E4 baseline and must not be considered closed:
+
+- Add a real embedding model registry loaded from config or a models directory, not only metadata for the active configured model.
+- Support multiple installed embedding models with validation of backend, model id, version, paths, tokenizer, dimension, max sequence length, pooling mode, and license/source metadata.
+- Add runtime model switching with explicit reindex/re-embed orchestration and stale index warnings.
+- Add a model install/download command that writes registry metadata and validates model/tokenizer compatibility after download.
+- Add tokenizer implementations beyond the current basic WordPiece-like path, including compatibility with common Hugging Face tokenizer JSON variants.
+- Add tokenizer-aware chunk sizing integration so E3 chunking can use the active embedding tokenizer and max sequence length.
+- Add persistent embedding cache storage keyed by model id/version/content hash, beyond the current model-id namespace boundary.
+- Add migration/rebuild flows when `model_id`, `model_version`, dimension, tokenizer, pooling mode, or normalization changes.
+- Add ONNX Runtime integration tests in an environment with ONNX Runtime installed and a small real model fixture.
+- Add user-facing diagnostics for ONNX output shape, selected pooling mode, discovered dimension, tokenizer type, and fallback reason.
+
+### 11.8 RAG quality, citations, and evaluation follow-ups
+
+Status: deferred after E5 citation/confidence/grounding metadata baseline.
+
+E5 added citation ids, source path preservation, normalized confidence fields, response-level retrieval confidence, grounding status, prompt citation hints, API metadata, UI rendering, and service-level regression coverage. The following quality capabilities are intentionally not implemented by the E5 baseline and must not be considered closed:
+
+- Add an actual reranker after first-stage retrieval, with configurable top-N input and top-K output.
+- Add query rewriting and multi-query retrieval, while exposing rewritten/expanded queries in diagnostics.
+- Add conversation history with rules for when previous sources can or cannot ground a new answer.
+- Add generated-answer grounding checks that validate claims against cited context.
+- Add citation post-processing that verifies generated answers cite only known source ids such as `S1` or `Q1`.
+- Add user feedback capture for answer helpfulness, citation usefulness, missing context, and wrong answers.
+- Add retrieval and answer-quality analytics tied to feedback and query metadata.
+- Add evaluation datasets for local docs, QA pairs, chunked documents, and generated template apps.
+- Add regression tests for retrieval quality, citation correctness, hallucination refusal, and answer completeness.
+- Add UI affordances for reporting bad answers, missing sources, and irrelevant sources.
+
+### 11.9 QA/wiki quality improvements
 
 Status: deferred after A4 baseline.
 
@@ -1033,7 +1161,23 @@ Future QA improvements:
 - Optional markdown rendering in stored answers.
 - Better QA search scoring and source attribution.
 
-### 11.8 Explicitly out of scope for standalone stabilization
+### 11.10 Operations, deployment, and security follow-ups
+
+Status: deferred after E6 generated-app operations baseline.
+
+E6 added diagnostics, metrics, generated operations docs, Docker Compose volume updates, and file-based backup/restore guidance. The following operations capabilities are intentionally not implemented by the E6 baseline and must not be considered closed:
+
+- Add host-application auth/RBAC integration for diagnostics, metrics, Ask, QA write, ingestion, and delete routes.
+- Add TLS and reverse-proxy examples for nginx, Caddy, or an equivalent edge proxy.
+- Add structured tracing with request ids across host app routing, RAG retrieval, LLM calls, SQLite persistence, and ingestion jobs.
+- Add first-class backup and restore commands instead of documentation-only file backup examples.
+- Add upload endpoints, upload allowlists, MIME checks, and upload-size enforcement beyond current indexing file-size limits.
+- Add an admin UI for diagnostics, ingestion job history/status, reindexing, delete flows, and backup/export.
+- Add production container hardening such as non-root runtime validation, healthcheck directives, read-only filesystem options, and secret mounting examples.
+- Add metrics alert examples for LLM failures, rate-limit rejections, stale indexes, failed ingestion jobs, and storage growth.
+- Add deploy smoke tests for generated `rag_app` and `--with-rag` Docker Compose flows.
+
+### 11.11 Explicitly out of scope for standalone stabilization
 
 The following remain out of scope for Milestone A unless the roadmap is explicitly changed:
 

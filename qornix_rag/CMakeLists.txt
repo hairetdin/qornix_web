@@ -18,6 +18,7 @@ set(QORNIX_RAG_CORE_SOURCES
     rag_config.cpp
     rag_service.cpp
     ingestion_pipeline.cpp
+    document_chunker.cpp
     llm_client.cpp
     llm_cache.cpp
     rate_limiter.cpp
@@ -39,6 +40,7 @@ set(QORNIX_RAG_CORE_HEADERS
     rag_config.h
     rag_service.h
     ingestion_pipeline.h
+    document_chunker.h
     llm_client.h
     llm_cache.h
     rate_limiter.h

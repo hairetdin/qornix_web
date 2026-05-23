@@ -8,6 +8,7 @@ services:
     volumes:
       - ./knowledge_base:/app/knowledge_base
       - ./data:/app/data
+      - ./logs:/app/logs
     environment:
       QORNIX_APP_ROOT: /app
       QORNIX_RAG_TEMPLATES_DIR: /app/templates

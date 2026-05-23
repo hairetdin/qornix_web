@@ -32,6 +32,22 @@ Important fields:
 - `llm.configured_model_available`
 - `llm.available_models`
 
+## Admin Diagnostics
+
+```http
+GET /api/admin/diagnostics
+```
+
+Integrated mode uses the configured prefix, for example:
+
+```http
+GET /api/rag/admin/diagnostics
+```
+
+Returns read-only operational diagnostics: RAG index state, embedding model id/dimension, LLM status, cache stats, prompt-cache stats, rate-limit counters, SQLite persistence counts, and whether metrics are enabled.
+
+Protect this endpoint with host-application auth, an internal network, or a reverse proxy rule before exposing it outside a trusted environment.
+
 ## Stats
 
 ```http
@@ -175,6 +191,7 @@ When the corresponding services are enabled:
 
 - `POST /api/batch`
 - `GET /api/metrics`
+- `GET /api/admin/diagnostics`
 - `GET /api/analytics`
 - `GET /api/analytics/gaps`
 - `POST /api/analytics/export`
@@ -182,4 +199,3 @@ When the corresponding services are enabled:
 - `POST /api/qa/dedup/remove`
 - `POST /api/import/markdown`
 - `GET /api/import/history`
-

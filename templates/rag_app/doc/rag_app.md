@@ -9,3 +9,5 @@ Runtime ownership:
 - Integrated routes default to `/rag` and `/api/rag/*`.
 
 The generated application should be configured through its own `config.yaml`, not through the standalone `qornix_rag/config.yaml`.
+
+Operational guidance for generated apps is in `doc/operations.md`.

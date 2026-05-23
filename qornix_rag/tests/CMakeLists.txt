@@ -141,6 +141,41 @@ if(NOT QORNIX_RAG_CORE_LINK_TARGET)
 endif()
 add_test(NAME test_ingestion_pipeline COMMAND test_ingestion_pipeline)
 
+add_executable(test_document_chunker
+    test_document_chunker.cpp
+)
+target_include_directories(test_document_chunker PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+target_link_libraries(test_document_chunker PRIVATE
+    ${QORNIX_RAG_CORE_LINK_TARGET}
+)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_document_chunker PRIVATE
+        ../document_chunker.cpp
+    )
+endif()
+add_test(NAME test_document_chunker COMMAND test_document_chunker)
+
+add_executable(test_embedding_config
+    test_embedding_config.cpp
+)
+target_include_directories(test_embedding_config PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+target_link_libraries(test_embedding_config PRIVATE
+    ${QORNIX_RAG_CORE_LINK_TARGET}
+)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_embedding_config PRIVATE
+        ../rag_config.cpp
+    )
+endif()
+find_yaml_cpp_for(test_embedding_config)
+add_test(NAME test_embedding_config COMMAND test_embedding_config)
+
 add_executable(test_rag_service
     test_rag_service.cpp
 )
@@ -446,6 +481,8 @@ message(STATUS "qornix_rag tests enabled")
 message(STATUS "  - test_llm_client")
 message(STATUS "  - test_rag_api")
 message(STATUS "  - test_ingestion_pipeline")
+message(STATUS "  - test_document_chunker")
+message(STATUS "  - test_embedding_config")
 message(STATUS "  - test_rag_service")
 message(STATUS "  - test_graceful_degradation")
 message(STATUS "  - test_health_check")

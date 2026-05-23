@@ -141,12 +141,19 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.engine.max_file_size_kb = getSize(values, {"indexing.max_file_size_kb", "rag.indexing.max_file_size_kb"}, config.engine.max_file_size_kb);
 
     config.engine.embedding.backend = getString(values, {"embedding.backend", "rag.embedding.backend"}, config.engine.embedding.backend);
+    config.engine.embedding.model_id = getString(values, {"embedding.model_id", "rag.embedding.model_id"}, config.engine.embedding.model_id);
+    config.engine.embedding.model_name = getString(values, {"embedding.model_name", "rag.embedding.model_name"}, config.engine.embedding.model_name);
+    config.engine.embedding.model_version = getString(values, {"embedding.model_version", "rag.embedding.model_version"}, config.engine.embedding.model_version);
     config.engine.embedding.model_path = getString(values, {"embedding.model_path", "rag.embedding.model_path"}, config.engine.embedding.model_path);
     config.engine.embedding.tokenizer_path = getString(values, {"embedding.tokenizer_path", "rag.embedding.tokenizer_path"}, config.engine.embedding.tokenizer_path);
+    config.engine.embedding.tokenizer_type = getString(values, {"embedding.tokenizer_type", "rag.embedding.tokenizer_type"}, config.engine.embedding.tokenizer_type);
+    config.engine.embedding.pooling = getString(values, {"embedding.pooling", "rag.embedding.pooling"}, config.engine.embedding.pooling);
+    config.engine.embedding.dimension = getSize(values, {"embedding.dimension", "rag.embedding.dimension"}, config.engine.embedding.dimension);
     config.engine.embedding.max_seq_len = getSize(values, {"embedding.max_seq_len", "rag.embedding.max_seq_len"}, config.engine.embedding.max_seq_len);
     config.engine.embedding.onnx_threads = getSize(values, {"embedding.onnx_threads", "rag.embedding.onnx_threads"}, config.engine.embedding.onnx_threads);
     config.engine.embedding.normalize_embeddings = getBool(values, {"embedding.normalize_embeddings", "rag.embedding.normalize_embeddings"}, config.engine.embedding.normalize_embeddings);
     config.engine.embedding.enable_fallback = getBool(values, {"embedding.enable_fallback", "rag.embedding.enable_fallback"}, config.engine.embedding.enable_fallback);
+    config.engine.embedding.lowercase_tokens = getBool(values, {"embedding.lowercase_tokens", "rag.embedding.lowercase_tokens"}, config.engine.embedding.lowercase_tokens);
 
     const bool has_llm = values.find("llm.api_url") != values.end()
         || values.find("llm.model") != values.end()

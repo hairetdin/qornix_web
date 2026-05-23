@@ -41,11 +41,18 @@ embedding:
   # because they are large and may have separate licenses.
   #
   # backend: onnx
+  # model_id: local-semantic-v1
+  # model_name: local semantic ONNX
+  # model_version: v1
   # model_path: qornix_rag/models/semantic_model.onnx
   # tokenizer_path: qornix_rag/models/tokenizer.json
+  # tokenizer_type: WordPiece
+  # pooling: mean
+  # dimension: 0
   # max_seq_len: 256
   # onnx_threads: 2
   # normalize_embeddings: true
+  # lowercase_tokens: true
 
 # LLM Configuration (optional)
 # Uncomment and configure to enable AI-powered Q&A
