@@ -111,6 +111,23 @@ boost::json::object qaSearchResultObject(const QASource::QAPair& pair, double sc
     return obj;
 }
 
+boost::json::object ingestionJobObject(const RagServiceIngestionJob& job) {
+    boost::json::object obj;
+    obj["id"] = job.id;
+    obj["source_id"] = job.source_id;
+    obj["root_path"] = job.root_path;
+    obj["status"] = job.status;
+    obj["files_seen"] = static_cast<std::int64_t>(job.files_seen);
+    obj["documents_imported"] = static_cast<std::int64_t>(job.documents_imported);
+    obj["duplicates_found"] = static_cast<std::int64_t>(job.duplicates_found);
+    obj["skipped"] = static_cast<std::int64_t>(job.skipped);
+    obj["errors"] = static_cast<std::int64_t>(job.errors);
+    obj["error_message"] = job.error_message;
+    obj["started_at"] = job.started_at;
+    obj["finished_at"] = job.finished_at;
+    return obj;
+}
+
 } // namespace
 
 namespace {
@@ -264,6 +281,71 @@ void RagApiHandler::handlePost(
 
             buildJsonResponse(res, http::status::ok,
                               boost::json::serialize(response));
+
+        } else if (apiPathMatches(path, "/api/ingest")) {
+            boost::json::value json_req = req.body().empty()
+                ? boost::json::object{}
+                : boost::json::parse(req.body());
+            std::optional<std::string> project_path;
+
+            if (json_req.if_object()) {
+                auto obj = json_req.as_object();
+                if (obj.contains("project_path")) {
+                    std::string requested_path = obj.at("project_path").as_string().c_str();
+                    if (!requested_path.empty() && requested_path != "." && requested_path != "./") {
+                        project_path = requested_path;
+                    }
+                }
+            }
+
+            auto ingested = rag_service_->ingestProject(project_path);
+            boost::json::object response;
+            response["success"] = ingested.success;
+            response["message"] = ingested.message;
+            response["job"] = ingestionJobObject(ingested.job);
+            response["stats"] = {
+                {"total_files", ingested.stats.total_files},
+                {"total_lines", ingested.stats.total_lines},
+                {"total_size_kb", ingested.stats.total_size_bytes / 1024},
+                {"index_duration_ms", static_cast<std::int64_t>(ingested.stats.index_duration_ms)}
+            };
+
+            buildJsonResponse(res, ingested.success ? http::status::ok : http::status::internal_server_error,
+                              boost::json::serialize(response));
+
+        } else if (apiPathMatches(path, "/api/documents/delete")) {
+            boost::json::value json_req = boost::json::parse(req.body());
+            std::string relative_path;
+            std::string source_id;
+
+            if (json_req.if_object()) {
+                auto obj = json_req.as_object();
+                if (obj.contains("relative_path")) {
+                    relative_path = obj.at("relative_path").as_string().c_str();
+                }
+                if (obj.contains("source_id")) {
+                    source_id = obj.at("source_id").as_string().c_str();
+                }
+            }
+
+            if (relative_path.empty()) {
+                buildErrorResponse(res, http::status::bad_request, "relative_path is required");
+                return;
+            }
+
+            if (!rag_service_->deletePersistedDocument(relative_path, source_id)) {
+                buildErrorResponse(res, http::status::not_found, "Persisted document not found: " + relative_path);
+                return;
+            }
+
+            boost::json::object response;
+            response["success"] = true;
+            response["message"] = "Persisted document deleted";
+            response["relative_path"] = relative_path;
+            if (!source_id.empty()) {
+                response["source_id"] = source_id;
+            }
+            buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
 
         } else if (apiPathMatches(path, "/api/search")) {
             // Project search
@@ -1563,13 +1645,55 @@ void RagApiHandler::handleGet(
     const http::request<http::string_body> &req,
     http::response<http::string_body> &res,
     const urls::url_view &url_view,
-    const std::map<std::string, std::string> &) {
+    const std::map<std::string, std::string> &path_params) {
     (void)req;
 
     try {
         std::string path = url_view.path();
 
-        if (apiPathMatches(path, "/api/sources")) {
+        if (apiPathMatches(path, "/api/ingest/jobs")) {
+            size_t limit = 20;
+            std::string query = url_view.query();
+            if (!query.empty() && query[0] == '?') {
+                query = query.substr(1);
+            }
+            if (!query.empty()) {
+                std::stringstream ss(query);
+                std::string param;
+                while (std::getline(ss, param, '&')) {
+                    auto eq_pos = param.find('=');
+                    if (eq_pos != std::string::npos && param.substr(0, eq_pos) == "limit") {
+                        limit = static_cast<size_t>(std::stoul(param.substr(eq_pos + 1)));
+                    }
+                }
+            }
+
+            auto jobs = rag_service_->listIngestionJobs(limit);
+            boost::json::array jobs_array;
+            for (const auto& job : jobs) {
+                jobs_array.emplace_back(ingestionJobObject(job));
+            }
+
+            boost::json::object response;
+            response["success"] = true;
+            response["jobs"] = jobs_array;
+            response["count"] = static_cast<std::int64_t>(jobs.size());
+            buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+
+        } else if (path_params.count("id") && path.find("/ingest/") != std::string::npos) {
+            const std::string job_id = path_params.at("id");
+            auto job = rag_service_->findIngestionJob(job_id);
+            if (!job) {
+                buildErrorResponse(res, http::status::not_found, "Ingestion job not found: " + job_id);
+                return;
+            }
+
+            boost::json::object response;
+            response["success"] = true;
+            response["job"] = ingestionJobObject(*job);
+            buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+
+        } else if (apiPathMatches(path, "/api/sources")) {
             auto sources = rag_engine_->getDataSources();
             boost::json::array sources_array;
 
@@ -1922,6 +2046,18 @@ void setupRagRoutes(HttpServer& server,
 
     server.add_route(api_route("/index"), full_handler);
     std::cout << "  \u2713 POST " << api_route("/index") << " - \u0418\u043d\u0434\u0435\u043a\u0441\u0430\u0446\u0438\u044f \u043f\u0440\u043e\u0435\u043a\u0442\u0430" << std::endl;
+
+    server.add_route(api_route("/ingest"), full_handler);
+    std::cout << "  ✓ POST " << api_route("/ingest") << " - Ingestion job" << std::endl;
+
+    server.add_route(api_route("/ingest/jobs"), full_handler);
+    std::cout << "  ✓ GET  " << api_route("/ingest/jobs") << " - Ingestion job history" << std::endl;
+
+    server.add_route(api_route("/ingest/{id}"), full_handler);
+    std::cout << "  ✓ GET  " << api_route("/ingest/{id}") << " - Ingestion job status" << std::endl;
+
+    server.add_route(api_route("/documents/delete"), full_handler);
+    std::cout << "  ✓ POST " << api_route("/documents/delete") << " - Delete persisted document" << std::endl;
 
     server.add_route(api_route("/search"), full_handler);
     std::cout << "  \u2713 POST " << api_route("/search") << " - \u041f\u043e\u0438\u0441\u043a" << std::endl;

@@ -2,6 +2,8 @@
 
 #include "data_source.h"
 #include "qa_source.h"
+#include "persistent_index_store.h"
+#include "ingestion_pipeline.h"
 
 using qornix::rag::QASource;
 
@@ -14,6 +16,7 @@ using qornix::rag::QASource;
 #include <optional>
 #include <map>
 #include <mutex>
+#include <cstdint>
 
 /**
  * SQLite-backed data source for persistent QA pairs storage.
@@ -27,13 +30,28 @@ using qornix::rag::QASource;
  *   import_history(id, file_path, documents_imported, duplicates_found,
  *                  status, error_message, imported_at)
  */
-class SQLiteSource : public DataSource {
+class SQLiteSource : public DataSource, public PersistentIndexStore {
 public:
     struct Config {
         std::string db_path;                      // Path to SQLite database
         std::string source_id;                    // Source identifier
         std::string name = "SQLite Knowledge Base"; // Source name
         bool auto_migrate = true;                 // Auto-create tables
+    };
+
+    struct IngestionJobRecord {
+        std::string id;
+        std::string source_id;
+        std::string root_path;
+        std::string status;
+        size_t files_seen = 0;
+        size_t documents_imported = 0;
+        size_t duplicates_found = 0;
+        size_t skipped = 0;
+        size_t errors = 0;
+        std::string error_message;
+        std::string started_at;
+        std::string finished_at;
     };
 
     explicit SQLiteSource(Config config);
@@ -74,6 +92,30 @@ public:
     std::string getDbPath() const { return config_.db_path; }
     std::string getSourceId() const { return config_.source_id; }
 
+    // Production RAG index persistence. These APIs are separate from the
+    // QA-pair DataSource behavior and store indexed documents/chunks/vectors.
+    PersistedIndexStats persistIndexedDocuments(const std::vector<Document>& documents,
+                                                const std::string& source_id = "",
+                                                const std::string& embedding_model_id = "",
+                                                const std::string& embedding_backend = "") override;
+    size_t countPersistedDocuments(const std::string& source_id = "") const override;
+    size_t countPersistedChunks(const std::string& source_id = "") const override;
+    size_t countPersistedEmbeddings(const std::string& source_id = "") const override;
+    std::optional<Document> findPersistedDocument(const std::string& relative_path,
+                                                  const std::string& source_id = "") const override;
+    bool deletePersistedDocument(const std::string& relative_path,
+                                 const std::string& source_id = "");
+
+    bool recordIngestionJobStarted(const std::string& job_id,
+                                   const std::string& source_id,
+                                   const std::string& root_path);
+    bool recordIngestionJobFinished(const std::string& job_id,
+                                    const std::string& status,
+                                    const qornix::rag::IngestionJobResult& result,
+                                    const std::string& error_message = "");
+    std::optional<IngestionJobRecord> findIngestionJob(const std::string& job_id) const;
+    std::vector<IngestionJobRecord> listIngestionJobs(size_t limit = 20) const;
+
 private:
     Config config_;
 #if QORNIX_HAS_SQLITE
@@ -88,6 +130,15 @@ private:
                                    const std::vector<std::string>& bind_values);
     std::string computeHash(const std::string& id, const std::string& question,
                             const std::string& answer) const;
+    std::string computeDocumentId(const std::string& source_id,
+                                  const std::string& relative_path) const;
+    std::string metadataToJson(const std::map<std::string, std::string>& metadata) const;
+    std::map<std::string, std::string> metadataFromJson(const std::string& json) const;
+    bool bindText(sqlite3_stmt* stmt, int index, const std::string& value) const;
+    bool bindInt64(sqlite3_stmt* stmt, int index, std::int64_t value) const;
+    bool bindFloatVector(sqlite3_stmt* stmt, int index, const std::vector<float>& values) const;
+    size_t countTableRows(const std::string& table, const std::string& source_id) const;
+    IngestionJobRecord rowToIngestionJob(sqlite3_stmt* stmt) const;
     QASource::QAPair rowToQAPair(sqlite3_stmt* stmt) const;
     Document qaPairToDocument(const QASource::QAPair& pair) const;
 };

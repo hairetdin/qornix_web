@@ -14,6 +14,7 @@
  */
 
 #include "data_source.h"
+#include "ingestion_pipeline.h"
 #include <set>
 
 namespace qornix {
@@ -71,6 +72,8 @@ private:
     bool shouldSkipDirectory(const std::string& path) const;
     bool isAllowedExtension(const std::string& ext) const;
     std::string getLanguageFromExtension(const std::string& ext) const;
+    IngestionPipeline::Config makeIngestionConfig() const;
+    Document fromIngestedDocument(const IngestedDocument& ingested) const;
     Document readFile(const std::string& path, const std::string& type,
                       const std::string& language) const;
     std::string determineRelativePath(const std::string& full_path) const;

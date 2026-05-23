@@ -15,10 +15,14 @@ if(NOT EXISTS "${QORNIX_WEB_ROOT}/CMakeLists.txt")
     message(FATAL_ERROR "QORNIX_WEB_ROOT does not point to a Qornix Web checkout: ${QORNIX_WEB_ROOT}")
 endif()
 
+@WITH_RAG_PROJECT_OPTION@
+
 # Keep the generated application build focused on this application.
 set(QORNIX_BUILD_APP OFF CACHE BOOL "Build Qornix Web demo application" FORCE)
 set(QORNIX_BUILD_EXAMPLES OFF CACHE BOOL "Build Qornix Web examples" FORCE)
-set(QORNIX_BUILD_RAG OFF CACHE BOOL "Build qornix_rag application" FORCE)
+set(QORNIX_BUILD_RAG @WITH_RAG_CMAKE_BOOL@ CACHE BOOL "Build qornix_rag reusable module" FORCE)
+set(QORNIX_BUILD_RAG_STANDALONE OFF CACHE BOOL "Build standalone qornix_rag executable" FORCE)
+set(QORNIX_BUILD_RAG_ROUTE_EXTENSION OFF CACHE BOOL "Build qornix_rag dynamic route extension" FORCE)
 set(QORNIX_BUILD_TESTS OFF CACHE BOOL "Build Qornix Web tests" FORCE)
 set(QORNIX_BUILD_ORM_TESTS OFF CACHE BOOL "Build qornix_orm tests" FORCE)
 
@@ -45,10 +49,12 @@ target_include_directories(@PROJECT_NAME@
 target_link_libraries(@PROJECT_NAME@
     PRIVATE
         qornix::web_core
+        @WITH_RAG_LINK_LIB@
 )
 
 target_compile_definitions(@PROJECT_NAME@ PRIVATE
     @PROJECT_NAME_UPPER@_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    @WITH_RAG_COMPILE_DEF@
 )
 
 set(@PROJECT_NAME_UPPER@_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy/@PROJECT_NAME@" CACHE PATH "Deploy bundle directory")
@@ -62,6 +68,7 @@ add_custom_command(TARGET @PROJECT_NAME@ POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/static" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/static"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/doc" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/doc"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/route_extensions" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/route_extensions"
+@WITH_RAG_POST_BUILD@
     COMMAND ${CMAKE_COMMAND} -E make_directory "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/logs"
     COMMENT "Assembling portable deploy bundle at ${@PROJECT_NAME_UPPER@_DEPLOY_DIR}"
 )
@@ -75,3 +82,4 @@ install(TARGETS @PROJECT_NAME@ RUNTIME DESTINATION .)
 install(FILES config.yaml README.md DESTINATION .)
 install(DIRECTORY templates static doc route_extensions DESTINATION .)
 install(DIRECTORY DESTINATION logs)
+@WITH_RAG_INSTALL@

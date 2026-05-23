@@ -124,6 +124,23 @@ endif()
 # API tests
 add_rag_test(test_rag_api test_rag_api.cpp)
 
+add_executable(test_ingestion_pipeline
+    test_ingestion_pipeline.cpp
+)
+target_include_directories(test_ingestion_pipeline PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+target_link_libraries(test_ingestion_pipeline PRIVATE
+    ${QORNIX_RAG_CORE_LINK_TARGET}
+)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_ingestion_pipeline PRIVATE
+        ../ingestion_pipeline.cpp
+    )
+endif()
+add_test(NAME test_ingestion_pipeline COMMAND test_ingestion_pipeline)
+
 add_executable(test_rag_service
     test_rag_service.cpp
 )
@@ -148,7 +165,13 @@ if(NOT QORNIX_RAG_CORE_LINK_TARGET)
         ../qa_source.cpp
         ../text_source.cpp
         ../memory_source.cpp
+        ../sqlite_source.cpp
     )
+endif()
+if(SQLITE3_LIBRARY)
+    target_link_libraries(test_rag_service PRIVATE ${SQLITE3_LIBRARY})
+    target_include_directories(test_rag_service PRIVATE ${SQLITE3_INCLUDE_DIR})
+    target_compile_definitions(test_rag_service PRIVATE QORNIX_HAS_SQLITE=1)
 endif()
 find_yaml_cpp_for(test_rag_service)
 add_test(NAME test_rag_service COMMAND test_rag_service)
@@ -422,6 +445,7 @@ add_test(NAME test_analytics COMMAND test_analytics)
 message(STATUS "qornix_rag tests enabled")
 message(STATUS "  - test_llm_client")
 message(STATUS "  - test_rag_api")
+message(STATUS "  - test_ingestion_pipeline")
 message(STATUS "  - test_rag_service")
 message(STATUS "  - test_graceful_degradation")
 message(STATUS "  - test_health_check")

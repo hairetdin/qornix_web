@@ -458,6 +458,198 @@ SQLiteSource initialized: /tmp/qornix_rag_app_c/data/rag_kb.db
 MarkdownSource initialized: /tmp/qornix_rag_app_c/knowledge_base
 ```
 
+## 2026-05-22 - Milestone D completed
+
+Status: `done`
+
+Scope:
+
+- add `--with-rag` as an optional feature for an existing Qornix Web template;
+- preserve the host application's existing routes and home page;
+- mount embedded RAG under `/rag` and `/api/rag/*`;
+- copy the required RAG runtime assets into generated applications and deploy bundles.
+
+Implemented:
+
+- added `--with-rag` to `create_new_project.sh`;
+- enabled `--with-rag` for the default `templates/app` template;
+- generated apps with RAG set `QORNIX_BUILD_RAG=ON`, keep the standalone RAG executable disabled, and link `qornix::rag_extension`;
+- generated apps with RAG define a compile-time RAG flag and initialize `RagExtension` after the normal host route setup;
+- generated apps with RAG expose a generated CMake option such as `-D<PROJECT>_ENABLE_RAG=OFF` to disable embedded RAG routes at build time;
+- generated apps with RAG resolve RAG SQLite, Markdown, templates, `data/`, and `logs` paths from the generated application root;
+- generated apps with RAG add a `rag:` config section using `/rag` and `/api/rag`;
+- generated apps with RAG copy `templates/rag_interface.html`, `static/rag_app.css`, `doc/rag_app.md`, `knowledge_base/`, `models/`, and `download_onnx_model.sh`;
+- generated deploy bundles include the RAG assets and empty runtime `data/` directory;
+- generator output now prints RAG URLs when `--with-rag` is used;
+- plain default app generation without `--with-rag` remains supported and buildable.
+
+Verified:
+
+```bash
+bash -n create_new_project.sh
+rm -rf /tmp/qornix_app_plain_d /tmp/qornix_app_with_rag_d
+./create_new_project.sh /tmp/qornix_app_plain_d
+./create_new_project.sh /tmp/qornix_app_with_rag_d --with-rag
+cmake -S /tmp/qornix_app_plain_d -B /tmp/qornix_app_plain_d/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_app_plain_d/build -j2
+cmake -S /tmp/qornix_app_with_rag_d -B /tmp/qornix_app_with_rag_d/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_app_with_rag_d/build -j2
+cmake -S /tmp/qornix_app_with_rag_d -B /tmp/qornix_app_with_rag_off_d/build -DCMAKE_BUILD_TYPE=Release -DQORNIX_APP_WITH_RAG_D_ENABLE_RAG=OFF
+cmake --build /tmp/qornix_app_with_rag_off_d/build -j2
+```
+
+Smoke checked generated `--with-rag` app:
+
+```text
+GET / -> 200
+GET /docs -> 200
+GET /rag -> 200
+GET /api/rag/health -> {"status":"ok",...,"embedding_backend":"tfidf",...}
+POST /api/rag/index -> {"success":true,...}
+POST /api/rag/search -> {"success":true,...,"count":3}
+POST /api/rag/ask -> {"success":true,...,"llm_status":"fallback",...}
+RAG module configured (mode=integrated, source=application config.yaml, ui=/rag, api_prefix=/api/rag)
+```
+
+Smoke checked generated `--with-rag` app built with RAG disabled:
+
+```text
+GET / -> 200
+GET /rag -> 404
+GET /api/rag/health -> 404
+```
+
+## 2026-05-22 - Milestone E1 persistence baseline completed
+
+Status: `done`
+
+Scope:
+
+- start Milestone E with persistent indexed document/chunk/vector storage;
+- keep the existing SQLite QA source behavior intact;
+- add a storage boundary that can later be replaced by Faiss, Qdrant, pgvector, or another backend;
+- make normal project indexing persist an index snapshot when SQLite is configured.
+
+Implemented:
+
+- added `qornix_rag/persistent_index_store.h`;
+- added `PersistentIndexStore` with methods for persisting indexed documents and counting/looking up persisted documents, chunks, and embeddings;
+- made `SQLiteSource` implement `PersistentIndexStore` in addition to the existing `DataSource` API;
+- added SQLite migration tables:
+  - `rag_documents`;
+  - `rag_chunks`;
+  - `rag_embeddings`;
+  - `rag_embedding_models`;
+- persisted indexed document metadata including path, relative path, type, language, hash, size, line count, metadata JSON, and last modified time;
+- persisted one baseline chunk per document, with content hash and chunk metadata;
+- persisted embedding vectors as binary float blobs with model/backend/dimension metadata;
+- made persistence idempotent per source by replacing the previous persisted snapshot for the source on reindex;
+- added `RagEngine::get_documents_snapshot()` for service-layer persistence without exposing mutable engine internals;
+- updated `RagService::indexProject()` so a successful project index writes the persistent snapshot through the SQLite-backed store when available;
+- updated persisted snapshots to upsert current documents and delete stale documents for the same source, cascading stale chunks and embeddings;
+- added SQLiteSource tests for persisted index snapshots, counts, metadata lookup, and idempotent re-persistence;
+- added RagService test coverage that verifies `indexProject()` persists documents, chunks, and embeddings.
+
+Verified:
+
+```bash
+cmake --build build --target test_sqlite_source test_rag_service -j2
+ctest --test-dir build -R "test_(sqlite_source|rag_service)" --output-on-failure
+cmake --build build --target qornix_rag qornix_web qornix_rag_route_extension -j2
+```
+
+Observed result:
+
+```text
+100% tests passed, 0 tests failed out of 2
+Built target qornix_rag
+Built target qornix_web
+Built target qornix_rag_route_extension
+```
+
+## 2026-05-22 - Milestone E2 ingestion baseline completed
+
+Status: `done`
+
+Scope:
+
+- add a reusable document ingestion pipeline for currently supported text-like files;
+- make project indexing use the ingestion pipeline instead of ad hoc filesystem scanning;
+- keep arbitrary binary/PDF/OCR-style ingestion deferred until parser plugins exist.
+
+Implemented:
+
+- added `qornix_rag/ingestion_pipeline.h`;
+- added `qornix_rag/ingestion_pipeline.cpp`;
+- added `IngestionPipeline` with a filesystem job config, recursive/non-recursive scanning, directory exclusions, file size checks, and structured job results;
+- added extension-based MIME/type/language detection for supported source, Markdown, text, and config files;
+- added `DocumentParser` as the parser plugin interface;
+- added parser registry in `IngestionPipeline`;
+- added `PlainTextParser` for currently supported text-like files;
+- added `HtmlParser` for `.html` and `.htm` files, including tag stripping, script/style removal, title extraction, entity decoding, and parser metadata;
+- added `IngestedDocument` records with content, hash, line count, last-modified time, MIME type, parser metadata, and relative path;
+- added structured ingestion issues with severity, code, path, and message;
+- added binary-content detection and skip reporting;
+- added duplicate detection by content hash within an ingestion job;
+- moved `RagEngine::index_project()` onto `IngestionPipeline`, so `/api/rag/index` uses the new ingestion path;
+- moved `FileSource` onto `IngestionPipeline`, so reusable filesystem sources and direct project indexing share the same detection/parser logic;
+- added `test_ingestion_pipeline` coverage for type detection, binary skip, excluded directories, metadata, hashes, HTML extraction, and imported document counts.
+
+Verified:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_TESTS=ON
+cmake --build build --target test_ingestion_pipeline test_data_sources test_rag_service test_sqlite_source qornix_rag -j2
+ctest --test-dir build -R "test_(ingestion_pipeline|data_sources|rag_service|sqlite_source)" --output-on-failure
+cmake --build build --target qornix_rag qornix_web qornix_rag_route_extension -j2
+```
+
+Observed result:
+
+```text
+100% tests passed, 0 tests failed out of 4
+Built target qornix_rag
+Built target qornix_web
+Built target qornix_rag_route_extension
+```
+
+## 2026-05-22 - Milestone E2 durable ingestion jobs and delete flow
+
+Scope:
+
+- close the remaining E2 baseline around durable ingestion jobs/status APIs and persisted document deletion;
+- keep heavyweight format adapters and asynchronous/background ingestion explicitly deferred.
+
+Implemented:
+
+- added `rag_ingestion_jobs` to the SQLite migration;
+- added `SQLiteSource::recordIngestionJobStarted()`, `recordIngestionJobFinished()`, `findIngestionJob()`, and `listIngestionJobs()`;
+- added `SQLiteSource::deletePersistedDocument()` for persisted index document removal with chunk/embedding cascade;
+- added `RagEngine::get_last_ingestion_result()` so service-level ingestion can persist job counters;
+- added `RagService::ingestProject()`, `findIngestionJob()`, `listIngestionJobs()`, and `deletePersistedDocument()`;
+- added `POST /api/rag/ingest` for synchronous job-oriented ingestion;
+- added `GET /api/rag/ingest/jobs` and `GET /api/rag/ingest/{id}` for ingestion history/status;
+- added `POST /api/rag/documents/delete` for deleting a persisted document by `relative_path` and optional `source_id`;
+- updated SQLite and service tests for durable job history and persisted document deletion;
+- moved advanced parser adapters, async/background ingestion, and full incremental in-memory reindexing into the backlog.
+
+Verified:
+
+```bash
+cmake --build build --target test_sqlite_source test_rag_service test_ingestion_pipeline qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R "test_(ingestion_pipeline|data_sources|rag_service|sqlite_source)" --output-on-failure
+git diff --check
+```
+
+Observed result:
+
+```text
+100% tests passed, 0 tests failed out of 4
+Built target qornix_rag
+Built target qornix_web
+Built target qornix_rag_route_extension
+```
+
 ## Current milestone state
 
 - Milestone 0: `done`
@@ -471,17 +663,27 @@ MarkdownSource initialized: /tmp/qornix_rag_app_c/knowledge_base
 - Milestone A8 - user documentation refresh: `done`
 - Milestone B - reusable RAG core: `done`
 - Milestone C - `qornix_web/templates/rag_app`: `done`
-- Milestone D - `--with-rag` for existing templates: `pending`
-- Milestone E - production RAG expansion: `pending`
+- Milestone D - `--with-rag` for existing templates: `done`
+- Milestone E - production RAG expansion: `in progress`
+  - E1 persistent knowledge and vector storage baseline: `done`
+  - E2 document ingestion pipeline baseline: `done`
+  - E3 chunking strategies: `pending`
+  - E4 ONNX embedding expansion: `pending`
+  - E5 RAG quality improvements: `pending`
+  - E6 operations and deployment: `pending`
 
 ## Deferred / known follow-ups
 
-These items are intentionally not closed by A2/A3/A4:
+These items are intentionally not closed by A2/A3/A4 or the E1 persistence baseline:
 
-- persistent vector store for project and document embeddings;
+- serving retrieval directly from persisted vectors, including HNSW save/load or a replaceable vector backend;
+- local SQLite metadata plus persisted HNSW index files;
+- optional Faiss backend adapter;
+- optional Qdrant backend adapter;
+- optional pgvector backend adapter;
+- vector backend selection/configuration docs and tests;
 - arbitrary document ingestion beyond current text/Markdown/QA flows;
 - PDF/DOCX/XLSX/images/OCR support;
-- `--with-rag` integration for existing `qornix_web/templates` applications;
 - auth/RBAC, which is not needed for standalone and belongs only to networked application templates if required later;
 - retrieval relevance and query normalization;
 - server-side QA pagination/filtering/autocomplete;

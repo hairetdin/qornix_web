@@ -29,6 +29,7 @@ For the same Dynamic API backend plus a Vue/Vite frontend scaffold, generate:
 ```bash
 ./create_new_project.sh ../my_vue --with-dynamic-api-vue
 ```
+@WITH_RAG_README@
 
 ## Build
 

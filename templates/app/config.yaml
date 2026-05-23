@@ -9,3 +9,4 @@ logging:
   file_path: logs/server
   rotation_size: 10485760
   max_files: 5
+@WITH_RAG_CONFIG@

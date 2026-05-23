@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <iostream>
 #include <sstream>
 
 using qornix::rag::QASource;
@@ -20,6 +21,31 @@ std::string qaPairId(const std::string& source_id) {
     const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
     return source_id + "_qa_" + std::to_string(millis);
 }
+
+std::string ingestionJobId() {
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+    return "ingest_" + std::to_string(millis);
+}
+
+#if QORNIX_HAS_SQLITE
+RagServiceIngestionJob serviceJob(const SQLiteSource::IngestionJobRecord& record) {
+    RagServiceIngestionJob job;
+    job.id = record.id;
+    job.source_id = record.source_id;
+    job.root_path = record.root_path;
+    job.status = record.status;
+    job.files_seen = record.files_seen;
+    job.documents_imported = record.documents_imported;
+    job.duplicates_found = record.duplicates_found;
+    job.skipped = record.skipped;
+    job.errors = record.errors;
+    job.error_message = record.error_message;
+    job.started_at = record.started_at;
+    job.finished_at = record.finished_at;
+    return job;
+}
+#endif
 
 std::string qaPath(const QASource::QAPair& pair) {
     return "qa://" + (pair.category.empty() ? std::string("general") : pair.category) + "/" + pair.id;
@@ -95,10 +121,138 @@ RagServiceIndexResponse RagService::indexProject(const std::optional<std::string
         path = ".";
     }
     rag_engine_->index_project(path);
+#if QORNIX_HAS_SQLITE
+    if (sqlite_source_) {
+        const auto persisted = sqlite_source_->persistIndexedDocuments(
+            rag_engine_->get_documents_snapshot(),
+            "project:" + path,
+            "",
+            rag_engine_->get_embedding_backend()
+        );
+        if (persisted.documents > 0) {
+            std::cout << "💾 Persisted RAG index snapshot: "
+                      << persisted.documents << " documents, "
+                      << persisted.chunks << " chunks, "
+                      << persisted.embeddings << " embeddings, "
+                      << persisted.deleted_documents << " stale documents deleted" << std::endl;
+        }
+    }
+#endif
     response.success = true;
     response.message = "Project indexed successfully";
     response.stats = rag_engine_->get_statistics();
     return response;
+}
+
+RagServiceIngestResponse RagService::ingestProject(const std::optional<std::string>& project_path) {
+    RagServiceIngestResponse response;
+    if (!rag_engine_) {
+        response.message = "RAG engine is not configured";
+        return response;
+    }
+
+    std::string path = project_path.value_or(rag_engine_->get_indexed_project_root());
+    if (path.empty()) {
+        path = ".";
+    }
+
+    response.job.id = ingestionJobId();
+    response.job.root_path = path;
+    response.job.source_id = "project:" + path;
+    response.job.status = "running";
+
+#if QORNIX_HAS_SQLITE
+    if (sqlite_source_) {
+        sqlite_source_->recordIngestionJobStarted(response.job.id, response.job.source_id, path);
+    }
+#endif
+
+    try {
+        auto indexed = indexProject(path);
+        const auto ingestion = rag_engine_->get_last_ingestion_result();
+        response.success = indexed.success;
+        response.message = indexed.message;
+        response.stats = indexed.stats;
+        response.job.status = indexed.success ? "completed" : "failed";
+        response.job.files_seen = ingestion.files_seen;
+        response.job.documents_imported = ingestion.documents_imported;
+        response.job.duplicates_found = ingestion.duplicates_found;
+        response.job.skipped = ingestion.skipped;
+        response.job.errors = ingestion.errors;
+
+#if QORNIX_HAS_SQLITE
+        if (sqlite_source_) {
+            sqlite_source_->recordIngestionJobFinished(
+                response.job.id,
+                response.job.status,
+                ingestion,
+                response.success ? "" : response.message
+            );
+            if (auto persisted = sqlite_source_->findIngestionJob(response.job.id)) {
+                response.job = serviceJob(*persisted);
+            }
+        }
+#endif
+    } catch (const std::exception& e) {
+        response.success = false;
+        response.message = e.what();
+        response.job.status = "failed";
+        response.job.error_message = response.message;
+#if QORNIX_HAS_SQLITE
+        if (sqlite_source_) {
+            qornix::rag::IngestionJobResult empty_result;
+            sqlite_source_->recordIngestionJobFinished(
+                response.job.id,
+                response.job.status,
+                empty_result,
+                response.message
+            );
+            if (auto persisted = sqlite_source_->findIngestionJob(response.job.id)) {
+                response.job = serviceJob(*persisted);
+            }
+        }
+#endif
+    }
+
+    return response;
+}
+
+std::optional<RagServiceIngestionJob> RagService::findIngestionJob(const std::string& job_id) const {
+#if QORNIX_HAS_SQLITE
+    if (sqlite_source_) {
+        if (auto job = sqlite_source_->findIngestionJob(job_id)) {
+            return serviceJob(*job);
+        }
+    }
+#else
+    (void)job_id;
+#endif
+    return std::nullopt;
+}
+
+std::vector<RagServiceIngestionJob> RagService::listIngestionJobs(size_t limit) const {
+    std::vector<RagServiceIngestionJob> jobs;
+#if QORNIX_HAS_SQLITE
+    if (sqlite_source_) {
+        for (const auto& job : sqlite_source_->listIngestionJobs(limit)) {
+            jobs.push_back(serviceJob(job));
+        }
+    }
+#else
+    (void)limit;
+#endif
+    return jobs;
+}
+
+bool RagService::deletePersistedDocument(const std::string& relative_path,
+                                         const std::string& source_id) {
+#if QORNIX_HAS_SQLITE
+    return sqlite_source_ && sqlite_source_->deletePersistedDocument(relative_path, source_id);
+#else
+    (void)relative_path;
+    (void)source_id;
+    return false;
+#endif
 }
 
 RagServiceSearchResponse RagService::search(const std::string& query, size_t top_k) {
@@ -327,4 +481,3 @@ std::vector<QASource::QAPair> RagService::searchQa(const std::string& query, siz
 #endif
     return {};
 }
-

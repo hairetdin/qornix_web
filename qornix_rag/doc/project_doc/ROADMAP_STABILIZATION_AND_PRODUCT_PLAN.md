@@ -28,7 +28,9 @@ Milestone A7: done
 Milestone A8: done
 Milestone B: done
 Milestone C: done
-Next: Milestone D
+Milestone D: done
+Milestone E: in progress
+Next: Milestone E3
 ```
 
 ## 1. Product split
@@ -611,7 +613,7 @@ curl -fsS -o /tmp/qornix_rag_app_smoke.html http://127.0.0.1:8018/rag
 
 ## 7. Milestone D: RAG option for existing templates
 
-Status: `pending`
+Status: `done`
 
 Goal: add RAG to other `qornix_web` templates as an optional feature.
 
@@ -638,13 +640,48 @@ Acceptance criteria:
 - Ask/Search endpoints work;
 - feature can be disabled through config or build option.
 
+Completed outcome:
+
+- `create_new_project.sh` accepts `--with-rag` for the default `templates/app` application template;
+- generated default apps keep their normal host routes, including `/`, `/docs`, `/health`, async examples, and project structure routes;
+- generated default apps with RAG link `qornix::web_core` and `qornix::rag_extension`;
+- generated default apps with RAG configure the reusable RAG module from their own `config.yaml`;
+- RAG UI is mounted at `/rag`;
+- RAG API is mounted under `/api/rag/*`;
+- generated apps copy RAG UI, static CSS, docs, `knowledge_base/`, `models/`, `data/`, and `download_onnx_model.sh`;
+- deploy bundles include the RAG runtime assets when `--with-rag` is used;
+- generated apps expose a CMake option such as `-D<PROJECT>_ENABLE_RAG=OFF` to disable embedded RAG routes at build time;
+- plain default app generation without `--with-rag` remains buildable.
+
+Verified:
+
+```bash
+./create_new_project.sh /tmp/qornix_app_plain_d
+./create_new_project.sh /tmp/qornix_app_with_rag_d --with-rag
+cmake -S /tmp/qornix_app_plain_d -B /tmp/qornix_app_plain_d/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_app_plain_d/build -j2
+cmake -S /tmp/qornix_app_with_rag_d -B /tmp/qornix_app_with_rag_d/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_app_with_rag_d/build -j2
+cmake -S /tmp/qornix_app_with_rag_d -B /tmp/qornix_app_with_rag_off_d/build -DCMAKE_BUILD_TYPE=Release -DQORNIX_APP_WITH_RAG_D_ENABLE_RAG=OFF
+cmake --build /tmp/qornix_app_with_rag_off_d/build -j2
+curl -fsS http://127.0.0.1:8008/
+curl -fsS http://127.0.0.1:8008/docs
+curl -fsS http://127.0.0.1:8008/rag
+curl -fsS http://127.0.0.1:8008/api/rag/health
+curl -fsS -X POST http://127.0.0.1:8008/api/rag/index -H 'Content-Type: application/json' -d '{}'
+curl -fsS -X POST http://127.0.0.1:8008/api/rag/search -H 'Content-Type: application/json' -d '{"query":"knowledge base","top_k":3}'
+curl -fsS -X POST http://127.0.0.1:8008/api/rag/ask -H 'Content-Type: application/json' -d '{"question":"Say OK in one short sentence.","top_k":1}'
+```
+
 ## 8. Milestone E: production RAG expansion
 
-Status: `pending`
+Status: `in progress`
 
 This milestone starts only after standalone stabilization, reusable core separation, and template integration are clear.
 
 ### E1. Persistent knowledge and vector storage
+
+Status: `done` for the first SQLite-backed persistence baseline.
 
 Current limitation: SQLite source is QA-pair oriented and does not provide a production vector store. HNSW-style index is in-memory and lost on restart.
 
@@ -661,7 +698,7 @@ Needed:
 - clarify how `qornix_orm` should be used for metadata/QA/document records where appropriate;
 - keep vector storage behind a dedicated vector-store abstraction.
 
-Potential vector backends:
+Planned vector backend options, tracked in backlog section 11.6:
 
 - local SQLite-backed metadata + persisted HNSW files;
 - Faiss;
@@ -669,7 +706,31 @@ Potential vector backends:
 - pgvector;
 - other adapters behind one interface.
 
+Completed baseline:
+
+- added `PersistentIndexStore` as the persistence boundary for indexed documents, chunks, and embedding vectors;
+- extended `SQLiteSource` as the first `PersistentIndexStore` implementation while keeping existing QA-pair APIs intact;
+- added `rag_documents` for indexed document metadata;
+- added `rag_chunks` for persisted document chunks;
+- added `rag_embeddings` for persisted vector blobs;
+- added `rag_embedding_models` for minimal embedding model metadata;
+- added idempotent replacement of a source's persisted index snapshot on reindex;
+- persisted one chunk per indexed document as the baseline before E3 chunking strategies;
+- persisted embeddings as binary float blobs with backend/model/dimension metadata;
+- exposed counts and document lookup helpers for persisted documents, chunks, and embeddings;
+- `RagService::indexProject()` now persists the current indexed document snapshot when SQLite is configured;
+- added focused tests for SQLite persistence and service-level persistence.
+
+Remaining E1 follow-ups:
+
+- HNSW save/load or a replaceable vector backend that can serve retrieval directly from persisted vectors; see backlog 11.6;
+- backup/export/import commands;
+- schema migration versioning;
+- deeper `qornix_orm` integration for metadata records where appropriate.
+
 ### E2. Document ingestion pipeline
+
+Status: `done` for the first text/Markdown/code/HTML ingestion pipeline and durable job baseline.
 
 Needed:
 
@@ -683,17 +744,49 @@ Needed:
 - duplicate detection;
 - content hashing.
 
-Document types to add after text/markdown baseline:
+Document types still to add after the text/Markdown/code/HTML baseline:
 
 - PDF;
 - DOCX;
 - XLSX/CSV;
 - PPTX;
 - images with OCR;
-- HTML;
 - source code repositories with structure-aware chunking.
 
+Completed baseline:
+
+- added `IngestionPipeline` as the reusable filesystem ingestion job layer;
+- added extension-based MIME/type/language detection for supported text, Markdown, config, and source-code files;
+- added ingestion job results with file counts, imported document counts, skipped counts, duplicate counts, errors, and structured issues;
+- added text parser baseline for currently supported plain-text-like files;
+- added binary-content detection and skip reporting;
+- added file size enforcement and skip reporting;
+- added duplicate detection by content hash within an ingestion job;
+- added source-root scanning with recursive and non-recursive modes;
+- added directory exclusion handling for build/cache/model directories;
+- added per-document metadata such as `mime_type`, `ingestion_parser`, and `source_extension`;
+- added `DocumentParser` as the parser plugin interface;
+- added parser registry in `IngestionPipeline`;
+- added plain-text parser for supported text-like files;
+- added HTML parser with tag/script/style stripping, title extraction, entity decoding, and metadata capture;
+- moved `RagEngine::index_project()` onto the ingestion pipeline so `/api/rag/index` uses the E2 path;
+- moved `FileSource` onto the ingestion pipeline so standalone source indexing and reusable source indexing share the same detection/parser behavior;
+- added durable SQLite ingestion job records in `rag_ingestion_jobs`;
+- added `RagService::ingestProject()` as a job-oriented indexing entrypoint;
+- added `/api/rag/ingest`, `/api/rag/ingest/jobs`, and `/api/rag/ingest/{id}` for ingestion job execution/history/status;
+- added persisted document delete flow through `SQLiteSource::deletePersistedDocument()`, `RagService::deletePersistedDocument()`, and `/api/rag/documents/delete`;
+- added service and SQLite tests for durable ingestion jobs and persisted document delete;
+- added focused ingestion pipeline tests and kept existing data source, service, and SQLite persistence tests passing.
+
+Remaining E2 follow-ups:
+
+- asynchronous/background ingestion with live progress streaming instead of synchronous job completion;
+- full incremental runtime indexing by modified time and content hash instead of rebuilding the in-memory index;
+- parser plugins for PDF, DOCX, XLSX/CSV, PPTX, and images/OCR; see backlog 11.6.
+
 ### E3. Chunking strategies
+
+Status: `pending`
 
 Needed strategies:
 
@@ -706,6 +799,8 @@ Needed strategies:
 - metadata preservation.
 
 ### E4. ONNX embedding expansion
+
+Status: `pending`
 
 Current limitation: ONNX embedding support is narrow: one model path, fixed output assumptions, and basic tokenization.
 
@@ -722,6 +817,8 @@ Needed:
 
 ### E5. RAG quality improvements
 
+Status: `pending`
+
 Needed:
 
 - citations in answers;
@@ -736,6 +833,8 @@ Needed:
 - regression tests for answer quality.
 
 ### E6. Operations and deployment
+
+Status: `pending`
 
 For full web applications, not local-only standalone baseline:
 
@@ -752,7 +851,7 @@ For full web applications, not local-only standalone baseline:
 
 ## 9. Suggested implementation order
 
-Recommended order from the current state:
+Completed order through Milestone D:
 
 1. Close A5: configuration, route ownership, and integration boundary hardening.
 2. Close A6: build separation and reusable-target preparation.
@@ -761,7 +860,13 @@ Recommended order from the current state:
 5. Start Milestone B: reusable RAG core.
 6. Add `qornix_web/templates/rag_app`.
 7. Add `--with-rag` option for existing templates.
-8. Start persistent vector store and arbitrary document ingestion.
+
+Recommended next order:
+
+1. Add E3 chunking strategies so persisted chunks are not only whole-document chunks.
+2. Add HNSW save/load or a replaceable vector backend that can use persisted vectors.
+3. Add deeper E2 follow-ups such as asynchronous ingestion and full incremental in-memory reindexing.
+4. Improve retrieval quality, citations, reranking, and evaluation after persisted chunks and vectors exist.
 
 ## 10. Definition of done for the current phase
 
@@ -881,7 +986,42 @@ Target dynamic API / ORM requirements:
 - optional FTS/search adapter when the ORM/data layer supports it;
 - no raw SQL examples in project roadmap documents unless the task is explicitly about low-level SQLite internals.
 
-### 11.5 QA/wiki quality improvements
+### 11.5 Production vector backend adapters
+
+Status: deferred after E1 SQLite persistence baseline.
+
+E1 established persistent document/chunk/embedding metadata and a `PersistentIndexStore` boundary. The following planned vector backend capabilities are not implemented by the E1 baseline and must not be considered closed:
+
+- Add a dedicated `VectorStore` interface for retrieval-time vector search, separate from metadata persistence.
+- Add local HNSW save/load support so the current in-memory HNSW index can survive restart when the persisted document/chunk snapshot is still valid.
+- Store and validate vector index metadata such as backend name, model id, embedding dimension, document/chunk snapshot hash, build time, and index file path.
+- Load a persisted local vector index at startup when metadata matches the current persisted embedding snapshot.
+- Rebuild the vector index automatically or explicitly when metadata is stale.
+- Keep SQLite-backed metadata as the local default, but avoid coupling retrieval to raw SQLite BLOB scans.
+- Add optional Faiss backend adapter after the local HNSW backend contract is stable.
+- Add optional Qdrant backend adapter for deployment scenarios that use an external vector database.
+- Add optional pgvector backend adapter for PostgreSQL-backed web applications.
+- Document backend selection, config keys, dependency requirements, migration behavior, and fallback behavior.
+- Add tests for backend selection, stale index detection, save/load roundtrip, and fallback to rebuild.
+
+### 11.6 Advanced ingestion adapters
+
+Status: deferred after E2 durable text/Markdown/code/HTML ingestion baseline.
+
+E2 established the ingestion pipeline, parser interface, parser registry, durable job records, job status APIs, and persisted document delete flow. The following ingestion capabilities are intentionally not implemented by the E2 baseline and must not be considered closed:
+
+- Add parser plugins for PDF documents.
+- Add parser plugins for DOCX documents.
+- Add parser plugins for XLSX and richer CSV ingestion.
+- Add parser plugins for PPTX documents.
+- Add image ingestion with OCR.
+- Add source-code repository structure-aware chunking beyond extension-based file parsing.
+- Add asynchronous/background ingestion with progress streaming or polling against in-flight jobs.
+- Add full incremental in-memory reindexing by modified time and content hash instead of rebuilding the current in-memory index.
+- Document dependency requirements, fallback behavior, and parser-specific error reporting.
+- Add parser adapter tests using small fixture files for each supported format.
+
+### 11.7 QA/wiki quality improvements
 
 Status: deferred after A4 baseline.
 
@@ -893,7 +1033,7 @@ Future QA improvements:
 - Optional markdown rendering in stored answers.
 - Better QA search scoring and source attribution.
 
-### 11.6 Explicitly out of scope for standalone stabilization
+### 11.8 Explicitly out of scope for standalone stabilization
 
 The following remain out of scope for Milestone A unless the roadmap is explicitly changed:
 

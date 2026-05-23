@@ -17,6 +17,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(QORNIX_RAG_CORE_SOURCES
     rag_config.cpp
     rag_service.cpp
+    ingestion_pipeline.cpp
     llm_client.cpp
     llm_cache.cpp
     rate_limiter.cpp
@@ -37,6 +38,7 @@ set(QORNIX_RAG_CORE_HEADERS
     core.h
     rag_config.h
     rag_service.h
+    ingestion_pipeline.h
     llm_client.h
     llm_cache.h
     rate_limiter.h
@@ -44,6 +46,7 @@ set(QORNIX_RAG_CORE_HEADERS
     prompt_cache.h
     prometheus_metrics.h
     data_source.h
+    persistent_index_store.h
     file_source.h
     qa_source.h
     text_source.h
