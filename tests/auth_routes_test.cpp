@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <string>
 
 namespace {
 
@@ -29,6 +30,17 @@ Response call(AuthApiHandler& handler,
 }
 
 } // namespace
+
+std::string jsonStringField(const std::string& body, const std::string& key) {
+    const std::string marker = "\"" + key + "\":\"";
+    const auto start = body.find(marker);
+    if (start == std::string::npos) {
+        return "";
+    }
+    const auto valueStart = start + marker.size();
+    const auto end = body.find('"', valueStart);
+    return end == std::string::npos ? "" : body.substr(valueStart, end - valueStart);
+}
 
 int main() {
     qornix_auth::AuthConfig config;
@@ -56,6 +68,8 @@ int main() {
                       R"({"username":"admin","password":"correct-horse-password"})");
     assert(login.result() == http::status::ok);
     assert(login.find(http::field::set_cookie) != login.end());
+    const std::string csrfToken = jsonStringField(login.body(), "csrf_token");
+    assert(csrfToken.find("csrf_") == 0);
     const std::string cookie(login[http::field::set_cookie]);
     assert(cookie.find("session_id=sess_") != std::string::npos);
     assert(cookie.find("HttpOnly") != std::string::npos);
@@ -63,6 +77,7 @@ int main() {
     auto me = call(*handler, http::verb::get, "/auth/me", {}, cookie);
     assert(me.result() == http::status::ok);
     assert(me.body().find("\"username\":\"admin\"") != std::string::npos);
+    assert(jsonStringField(me.body(), "csrf_token") == csrfToken);
 
     auto misleadingCookieMe = call(*handler,
                                    http::verb::get,

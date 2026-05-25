@@ -1584,6 +1584,41 @@ cmake -S /tmp/qornix_model_registry_with_rag_app -B /tmp/qornix_model_registry_w
 git diff --check
 ```
 
+## 2026-05-25 - Post-stabilization generated-app CSRF baseline completed
+
+Goal:
+- close the first 11.10 security hardening baseline after generated-app auth/RBAC;
+- protect cookie-authenticated browser write/admin routes from CSRF without blocking bearer/JWT/API-token clients;
+- keep generated `rag_app` and `--with-rag` templates buildable with auth enabled or disabled.
+
+Implemented:
+- added per-session CSRF tokens to `qornix_auth` session metadata;
+- exposed `csrf_token` from `/auth/login` and `/auth/me`;
+- added optional `AuthMiddleware` CSRF validation for `POST`, `PUT`, `PATCH`, and `DELETE` when the authenticated credential type is `session`;
+- wired generated apps to enable `auth.csrf.enabled` by default and use `X-CSRF-Token`;
+- updated bundled RAG Admin UI fetch helpers to retain and send CSRF tokens for unsafe browser requests;
+- documented the generated-app CSRF config and security checklist guidance;
+- added regression coverage for CSRF token issuance and middleware enforcement.
+
+Deferred:
+- session rotation after login and privilege-sensitive user updates;
+- audit events for login/logout/failed login/user-management/denied access;
+- password reset, invite, account recovery, MFA, and stricter cookie policy;
+- TLS/reverse-proxy examples and broader production container hardening.
+
+Validation:
+```text
+cmake --build build --target auth_routes_test auth_middleware_policy_test qornix_web -j2
+ctest --test-dir build -R 'auth_(routes|middleware_policy|manager|orm_store|orm_store_dsn)_test' --output-on-failure
+cmake --build build --target auth_routes_test auth_middleware_policy_test qornix_web qornix_rag qornix_rag_route_extension -j2
+ctest --test-dir build -R 'auth_(routes|middleware_policy|manager|orm_store|orm_store_dsn)_test|test_(embedding_config|rag_service|sqlite_source|rag_quality_eval)$' --output-on-failure
+./create_new_project.sh /tmp/qornix_csrf_rag_app --template rag_app
+./create_new_project.sh /tmp/qornix_csrf_with_rag_app --with-rag
+cmake -S /tmp/qornix_csrf_rag_app -B /tmp/qornix_csrf_rag_app/build && cmake --build /tmp/qornix_csrf_rag_app/build -j2
+cmake -S /tmp/qornix_csrf_with_rag_app -B /tmp/qornix_csrf_with_rag_app/build && cmake --build /tmp/qornix_csrf_with_rag_app/build -j2
+git diff --check
+```
+
 ## Current milestone state
 
 - Milestone 0: `done`
@@ -1620,11 +1655,12 @@ git diff --check
 - Post-stabilization 13 - auth/RBAC current-user validation and route/cookie matching hardening: `done`
 - Post-stabilization 14 - QA server-side pagination/filtering/suggestions baseline: `done`
 - Post-stabilization 15 - embedding model registry and ONNX config diagnostics baseline: `done`
+- Post-stabilization 16 - generated-app CSRF protection baseline: `done`
 - Next - select the next backlog item before implementation: `pending`
 
 ## Deferred / known follow-ups
 
-These items are intentionally not closed by A2/A3/A4, the E1 persistence baseline, the Post-stabilization 13 auth/RBAC baseline, the Post-stabilization 14 QA scale baseline, or the Post-stabilization 15 embedding registry baseline:
+These items are intentionally not closed by A2/A3/A4, the E1 persistence baseline, the Post-stabilization 13 auth/RBAC baseline, the Post-stabilization 14 QA scale baseline, the Post-stabilization 15 embedding registry baseline, or the Post-stabilization 16 CSRF baseline:
 
 - replaceable vector backend adapters beyond local HNSW;
 - optional Faiss backend adapter;
@@ -1633,7 +1669,7 @@ These items are intentionally not closed by A2/A3/A4, the E1 persistence baselin
 - deeper vector backend selection docs and tests beyond the local HNSW baseline;
 - arbitrary document ingestion beyond current text/Markdown/QA flows;
 - PDF/DOCX/XLSX/images/OCR support;
-- production security hardening beyond the generated-app auth/RBAC baseline, such as CSRF, audit events, session rotation, password reset, invite flows, MFA, and stricter cookie policy;
+- production security hardening beyond the generated-app CSRF baseline, such as audit events, session rotation, password reset, invite flows, MFA, and stricter cookie policy;
 - retrieval relevance and query normalization;
 - QA tags, ORM-backed list abstractions, optional FTS, and richer autocomplete beyond the first server-side QA list baseline;
 - model selection UI, runtime embedding model switching, model installer/download flow, tokenizer upgrades, and additional LLM diagnostics polish.

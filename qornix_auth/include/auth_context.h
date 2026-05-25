@@ -17,6 +17,7 @@ struct AuthContext {
     bool authenticated{false};
     std::string userId;
     std::string username;
+    std::string sessionId;
     std::vector<std::string> roles;
     std::vector<std::string> permissions;
     std::string credentialType;

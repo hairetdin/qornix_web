@@ -165,12 +165,20 @@ private:
         return object.find(key) != object.end();
     }
 
+    std::string csrfTokenForSession(const std::string& sessionId) const {
+        return sessionId.empty() ? "" : authManager_->csrfTokenForSession(sessionId);
+    }
+
     void writeAuthSuccess(Response& res, const qornix_auth::AuthResult& result) const {
         boost::json::object body;
         body["success"] = true;
         body["user"] = userObject(result);
         body["session_id"] = result.sessionId;
         body["token"] = result.token;
+        const std::string csrfToken = csrfTokenForSession(result.sessionId);
+        if (!csrfToken.empty()) {
+            body["csrf_token"] = csrfToken;
+        }
 
         res = make_json_response(http::status::ok, res.version(), boost::json::serialize(body));
         if (!result.sessionId.empty()) {
@@ -374,6 +382,12 @@ private:
         boost::json::object body;
         body["success"] = true;
         body["user"] = contextObject(*context);
+        if (context->credentialType == "session") {
+            const std::string csrfToken = csrfTokenForSession(context->sessionId);
+            if (!csrfToken.empty()) {
+                body["csrf_token"] = csrfToken;
+            }
+        }
         res = make_json_response(http::status::ok, res.version(), boost::json::serialize(body));
     }
 

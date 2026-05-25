@@ -75,12 +75,16 @@ namespace qornix_auth {
             return ss.str();
         }
 
-        static std::string generateSessionId() {
+        static std::string generateSecureToken(const std::string& prefix) {
             unsigned char random[32];
             if (RAND_bytes(random, sizeof(random)) != 1) {
-                throw std::runtime_error("Failed to generate secure session id");
+                throw std::runtime_error("Failed to generate secure token");
             }
-            return "sess_" + bytesToHex(random, sizeof(random));
+            return prefix + bytesToHex(random, sizeof(random));
+        }
+
+        static std::string generateSessionId() {
+            return generateSecureToken("sess_");
         }
 
     public:
@@ -97,6 +101,7 @@ namespace qornix_auth {
             auto session = std::make_shared<SessionData>(
                 generateSessionId(), userId, username, std::move(roles), std::move(permissions), defaultDuration_
             );
+            session->metadata["csrf_token"] = generateSecureToken("csrf_");
             sessions_[session->sessionId] = session;
             return session;
         }

@@ -17,6 +17,9 @@ auth:
   mode: session
   registration_enabled: false
   secure_cookies: false
+  csrf:
+    enabled: true
+    header: X-CSRF-Token
   auto_migrate: true
   min_password_length: 12
   session_duration_minutes: 30
