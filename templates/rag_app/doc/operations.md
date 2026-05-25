@@ -103,6 +103,17 @@ Only users with `auth:admin` can access user management. RAG permissions remain
 separate: grant `rag:read`, `rag:write`, and `rag:admin` according to the routes
 the user should operate.
 
+Cookie-authenticated browser write/admin routes use CSRF protection by default:
+
+```yaml
+auth:
+  csrf:
+    enabled: true
+    header: X-CSRF-Token
+```
+
+The login and current-user endpoints return `csrf_token`; the bundled Admin UI sends it as `X-CSRF-Token` for `POST`, `PUT`, `PATCH`, and `DELETE` requests. Bearer/JWT requests are not blocked by this browser-session CSRF check.
+
 ## Logging
 
 Generated apps use the host application's logging config:
@@ -164,6 +175,7 @@ This rebuilds the in-memory retrieval index from the restored data.
 - Use `0.0.0.0` only behind a trusted network boundary or reverse proxy.
 - Prefer `qornix_auth` for generated apps exposed on a network: set `auth.enabled: true`, configure `auth.database` through `qornix_orm`, and use SQLite/PostgreSQL/MySQL according to the deployment.
 - Use route permissions deliberately: `rag:read` covers read/search/ask, `rag:write` covers indexing/ingestion/QA writes/source writes, `rag:admin` covers diagnostics/metrics/analytics, and `auth:admin` covers user management.
+- Keep `auth.csrf.enabled: true` for cookie-authenticated browser sessions; disable it only when all unsafe routes are protected by non-cookie credentials.
 - Protect `/api/rag/admin/diagnostics`, `/api/rag/metrics`, QA write, ingestion, and document delete endpoints with `qornix_auth`, `rag.security`, or an upstream auth layer.
 - Store LLM API keys outside Git and container images.
 - Review upload/indexing path allowlists before enabling arbitrary user-controlled sources.

@@ -40,6 +40,8 @@ private:
     std::vector<std::string> requiredPermissions_;
     std::vector<AuthRoutePolicy> routePolicies_;
     bool enableLogging_;
+    bool csrfProtectionEnabled_{false};
+    std::string csrfHeaderName_{"X-CSRF-Token"};
 
     static std::string trim(std::string value) {
         value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char c) {
@@ -84,6 +86,18 @@ private:
             }
         }
         return "";
+    }
+
+    std::string csrfToken(const http::request<http::string_body> &req) const {
+        auto header = req.find(csrfHeaderName_);
+        if (header != req.end()) {
+            return std::string(header->value());
+        }
+        return "";
+    }
+
+    static bool isUnsafeMethod(const std::string& method) {
+        return method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE";
     }
 
     bool isExcluded(const std::string &path) const {
@@ -238,6 +252,27 @@ public:
             return;
         }
 
+        if (csrfProtectionEnabled_ &&
+            authContext.authenticated &&
+            authContext.credentialType == "session" &&
+            isUnsafeMethod(method) &&
+            !authManager_->validateCsrfToken(authContext.sessionId, csrfToken(req))) {
+            logMessage("ERROR", "CSRF token validation failed for path: " + path);
+
+            res.result(http::status::forbidden);
+            res.set(http::field::content_type, "application/json");
+
+            boost::json::object error_response;
+            error_response["error"] = "Forbidden";
+            error_response["message"] = "CSRF token required";
+            error_response["path"] = path;
+            error_response["method"] = method;
+
+            res.body() = boost::json::serialize(error_response);
+            res.prepare_payload();
+            return;
+        }
+
         if (authContext.authenticated &&
             (!hasAny(authContext.roles, requiredRoles) ||
              !hasAny(authContext.permissions, requiredPermissions))) {
@@ -281,6 +316,16 @@ public:
 
     void setEnableLogging(bool enable) {
         enableLogging_ = enable;
+    }
+
+    void setCsrfProtectionEnabled(bool enabled) {
+        csrfProtectionEnabled_ = enabled;
+    }
+
+    void setCsrfHeaderName(std::string headerName) {
+        if (!headerName.empty()) {
+            csrfHeaderName_ = std::move(headerName);
+        }
     }
 
     bool isRequired() const {

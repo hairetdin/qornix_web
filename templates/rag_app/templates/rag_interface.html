@@ -521,6 +521,7 @@
         let qaTotal = 0;
         let qaListDebounce = null;
         let currentAuthUser = null;
+        let currentCsrfToken = '';
         const ADMIN_TOKEN_STORAGE_KEY = 'qornix-rag-admin-token';
 
         window.addEventListener('load', async () => {
@@ -579,7 +580,12 @@
                 ? `${API_BASE}${path.slice(4)}`
                 : `${API_BASE}${path}`;
             const response = await fetch(targetPath, {
-                headers: { 'Content-Type': 'application/json', ...adminAuthHeaders(), ...(options.headers || {}) },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...adminAuthHeaders(),
+                    ...csrfHeaders(options.method || 'GET'),
+                    ...(options.headers || {})
+                },
                 ...options
             });
             let data = null;
@@ -588,6 +594,7 @@
                 const message = data.error || data.message || `HTTP ${response.status}`;
                 throw new Error(message);
             }
+            rememberCsrfToken(data);
             return data;
         }
 
@@ -596,7 +603,11 @@
                 ? `${API_BASE}${path.slice(4)}`
                 : `${API_BASE}${path}`;
             const response = await fetch(targetPath, {
-                headers: { ...adminAuthHeaders(), ...(options.headers || {}) },
+                headers: {
+                    ...adminAuthHeaders(),
+                    ...csrfHeaders(options.method || 'GET'),
+                    ...(options.headers || {})
+                },
                 ...options
             });
             const text = await response.text();
@@ -1433,6 +1444,21 @@ ${label}`)) {
             return token ? { 'X-Qornix-RAG-Admin-Token': token, 'Authorization': `Bearer ${token}` } : {};
         }
 
+        function csrfHeaders(method = 'GET') {
+            const unsafe = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(method || 'GET').toUpperCase());
+            return unsafe && currentCsrfToken ? { 'X-CSRF-Token': currentCsrfToken } : {};
+        }
+
+        function rememberCsrfToken(data) {
+            if (data && typeof data.csrf_token === 'string') {
+                currentCsrfToken = data.csrf_token;
+            }
+        }
+
+        function clearCsrfToken() {
+            currentCsrfToken = '';
+        }
+
         function saveAdminToken() {
             try { localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, currentAdminToken()); } catch (_) {}
             document.getElementById('admin-status').innerHTML = renderNotice('Admin token saved locally.', 'ok');
@@ -1467,6 +1493,7 @@ ${label}`)) {
         async function loadCurrentAuthUser(showErrors = true) {
             try {
                 const data = await api('/auth/me');
+                rememberCsrfToken(data);
                 currentAuthUser = data.user || null;
                 renderAuthUserBox();
                 return currentAuthUser;
@@ -1492,6 +1519,7 @@ ${label}`)) {
                     method: 'POST',
                     body: JSON.stringify({ username, password })
                 });
+                rememberCsrfToken(data);
                 currentAuthUser = data.user || null;
                 document.getElementById('auth-password').value = '';
                 renderAuthUserBox();
@@ -1505,6 +1533,7 @@ ${label}`)) {
             try {
                 await api('/auth/logout', { method: 'POST', body: '{}' });
                 currentAuthUser = null;
+                clearCsrfToken();
                 renderAuthUserBox();
                 document.getElementById('admin-status').innerHTML = renderNotice('Logged out.', 'ok');
             } catch (error) {

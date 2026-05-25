@@ -232,6 +232,7 @@ public:
         context.authenticated = true;
         context.userId = user->id;
         context.username = user->username;
+        context.sessionId = session->sessionId;
         context.roles = user->roles;
         context.permissions = user->permissions;
         context.credentialType = "session";
@@ -338,6 +339,22 @@ public:
 
     std::shared_ptr<AuthStore> store() const {
         return store_;
+    }
+
+    std::string csrfTokenForSession(const std::string& sessionId) {
+        auto session = validateSession(sessionId);
+        if (!session) {
+            return "";
+        }
+        auto it = session->metadata.find("csrf_token");
+        return it == session->metadata.end() ? "" : it->second;
+    }
+
+    bool validateCsrfToken(const std::string& sessionId, const std::string& csrfToken) {
+        if (sessionId.empty() || csrfToken.empty()) {
+            return false;
+        }
+        return csrfTokenForSession(sessionId) == csrfToken;
     }
 };
 

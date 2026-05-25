@@ -236,6 +236,8 @@ void setupApplicationAuth(HttpServer& httpServer,
             "/auth/login", "/auth/register", "/health", "/static"
         }),
         configBool(flatConfig, "auth.logging", false));
+    middleware->setCsrfProtectionEnabled(configBool(flatConfig, "auth.csrf.enabled", true));
+    middleware->setCsrfHeaderName(configValue(flatConfig, "auth.csrf.header", "X-CSRF-Token"));
     middleware->requireAnyRole(configList(flatConfig, "auth.required_roles"));
     middleware->requireAnyPermission(configList(flatConfig, "auth.required_permissions"));
 

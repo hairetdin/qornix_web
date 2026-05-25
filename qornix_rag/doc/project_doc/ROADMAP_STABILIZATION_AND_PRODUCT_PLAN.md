@@ -45,6 +45,7 @@ Post-stabilization 12: done
 Post-stabilization 13: done
 Post-stabilization 14: done
 Post-stabilization 15: done
+Post-stabilization 16: done
 Next: select the next backlog item before implementation
 ```
 
@@ -1212,11 +1213,12 @@ Future QA improvements:
 
 ### 11.10 Operations, deployment, and security follow-ups
 
-Status: partially completed through Post-stabilization 13; remaining production hardening is deferred.
+Status: partially completed through Post-stabilization 16; remaining production hardening is deferred.
 
-E6 added diagnostics, metrics, generated operations docs, Docker Compose volume updates, and file-based backup/restore guidance. Post-stabilization 7-13 added generated-app auth/RBAC baselines: `qornix_auth`, durable `QornixOrmAuthStore`, generated app auth wiring, route-level RAG permissions, login/user-management UI, and current-user validation for sessions/JWTs. The following operations and security capabilities are intentionally not complete and must not be considered closed:
+E6 added diagnostics, metrics, generated operations docs, Docker Compose volume updates, and file-based backup/restore guidance. Post-stabilization 7-13 added generated-app auth/RBAC baselines: `qornix_auth`, durable `QornixOrmAuthStore`, generated app auth wiring, route-level RAG permissions, login/user-management UI, and current-user validation for sessions/JWTs. Post-stabilization 16 added CSRF protection for cookie-authenticated browser write/admin routes in generated apps.
 
-- Add CSRF protection for cookie-authenticated browser write/admin routes.
+The following operations and security capabilities are intentionally not complete and must not be considered closed:
+
 - Add session rotation after login and privilege-sensitive user updates.
 - Add auth/security audit events for login, logout, failed login, user-management changes, permission changes, and denied access.
 - Add password reset, invite, and account recovery flows for generated networked applications.

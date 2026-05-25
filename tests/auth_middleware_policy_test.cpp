@@ -10,11 +10,15 @@ namespace {
 Response call(AuthMiddleware& middleware,
               http::verb method,
               const std::string& target,
-              const std::string& cookie = {}) {
+              const std::string& cookie = {},
+              const std::string& csrfToken = {}) {
     Request req{method, target, 11};
     req.set(http::field::host, "localhost");
     if (!cookie.empty()) {
         req.set(http::field::cookie, cookie);
+    }
+    if (!csrfToken.empty()) {
+        req.set("X-CSRF-Token", csrfToken);
     }
     req.prepare_payload();
 
@@ -99,6 +103,20 @@ int main() {
 
     auto writerWrite = call(*middleware, http::verb::post, "/api/rag/index", sessionCookie(writer));
     assert(writerWrite.result() == http::status::ok);
+
+    middleware->setCsrfProtectionEnabled(true);
+    const std::string writerCsrf = manager->csrfTokenForSession(writer.sessionId);
+    auto writerWriteMissingCsrf = call(*middleware, http::verb::post, "/api/rag/index", sessionCookie(writer));
+    assert(writerWriteMissingCsrf.result() == http::status::forbidden);
+    assert(writerWriteMissingCsrf.body().find("CSRF token required") != std::string::npos);
+
+    auto writerWriteBadCsrf = call(*middleware, http::verb::post, "/api/rag/index", sessionCookie(writer), "bad-token");
+    assert(writerWriteBadCsrf.result() == http::status::forbidden);
+
+    auto writerWriteWithCsrf = call(*middleware, http::verb::post, "/api/rag/index", sessionCookie(writer), writerCsrf);
+    assert(writerWriteWithCsrf.result() == http::status::ok);
+
+    middleware->setCsrfProtectionEnabled(false);
 
     auto writerAdmin = call(*middleware, http::verb::get, "/api/rag/admin/diagnostics", sessionCookie(writer));
     assert(writerAdmin.result() == http::status::forbidden);
