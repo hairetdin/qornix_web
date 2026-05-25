@@ -98,6 +98,36 @@ For portable bundles, paths are rewritten to `models/semantic_model.onnx` and `m
 
 If ONNX Runtime is not available or the model cannot be loaded, the build uses TF-IDF fallback when `enable_fallback` is true. In fallback mode, persisted embeddings use the TF-IDF model id rather than the requested ONNX id. See `qornix_rag/models/README.md` for where to get model files and the current compatibility limits.
 
+For multiple installed models, use a registry map and select one with `active_model_id`:
+
+```yaml
+embedding:
+  active_model_id: local-semantic-v1
+  registry:
+    local-semantic-v1:
+      backend: onnx
+      name: local semantic ONNX
+      version: v1
+      model_path: qornix_rag/models/semantic_model.onnx
+      tokenizer_path: qornix_rag/models/tokenizer.json
+      tokenizer_type: WordPiece
+      pooling: mean
+      dimension: 0
+      max_seq_len: 256
+      onnx_threads: 2
+      normalize_embeddings: true
+      lowercase_tokens: true
+      enable_fallback: true
+      license: model-specific
+      source: local
+    tfidf-local:
+      backend: tfidf
+      name: local TF-IDF
+      dimension: 256
+```
+
+The registry validates backend, ONNX paths, pooling mode, dimensions, tokenizer settings, and license/source metadata. The selected active model is reflected in `/api/health` and admin diagnostics through `embedding_active_model_id`, `embedding_registry_size`, `embedding_registry_model_ids`, and `embedding_registry_warnings`.
+
 ## Vector Store
 
 Hybrid search uses a retrieval-time vector store in addition to Xapian text search. The current local backend is HNSW:

@@ -1918,6 +1918,18 @@ void RagApiHandler::handleGet(
             rag_obj["embedding_backend"] = health.embedding_backend;
             rag_obj["embedding_model_id"] = health.embedding_model_id;
             rag_obj["embedding_dim"] = static_cast<std::int64_t>(health.embedding_dim);
+            rag_obj["embedding_active_model_id"] = health.embedding_active_model_id;
+            rag_obj["embedding_registry_size"] = static_cast<std::int64_t>(health.embedding_registry_size);
+            boost::json::array registry_models;
+            for (const auto& model_id : health.embedding_registry_model_ids) {
+                registry_models.emplace_back(model_id);
+            }
+            rag_obj["embedding_registry_model_ids"] = std::move(registry_models);
+            boost::json::array registry_warnings;
+            for (const auto& warning : health.embedding_registry_warnings) {
+                registry_warnings.emplace_back(warning);
+            }
+            rag_obj["embedding_registry_warnings"] = std::move(registry_warnings);
             rag_obj["vector_store_backend"] = health.vector_store_backend;
             rag_obj["vector_store_status"] = health.vector_store_status;
             rag_obj["query_expansion"] = health.query_expansion;
@@ -2160,6 +2172,19 @@ void RagApiHandler::handleGet(
             rag_obj["embedding_backend"] = rag_engine_->get_embedding_backend();
             rag_obj["embedding_model_id"] = rag_engine_->get_embedding_model_id();
             rag_obj["embedding_dim"] = static_cast<std::int64_t>(rag_engine_->get_embedding_dim());
+            const auto embedding_info = rag_engine_->get_embedding_model_info();
+            rag_obj["embedding_active_model_id"] = embedding_info.active_model_id;
+            rag_obj["embedding_registry_size"] = static_cast<std::int64_t>(embedding_info.registry_size);
+            boost::json::array registry_models;
+            for (const auto& model_id : embedding_info.registry_model_ids) {
+                registry_models.emplace_back(model_id);
+            }
+            rag_obj["embedding_registry_model_ids"] = std::move(registry_models);
+            boost::json::array registry_warnings;
+            for (const auto& warning : embedding_info.registry_warnings) {
+                registry_warnings.emplace_back(warning);
+            }
+            rag_obj["embedding_registry_warnings"] = std::move(registry_warnings);
             rag_obj["vector_store_backend"] = rag_engine_->get_vector_store_backend();
             rag_obj["vector_store_status"] = rag_engine_->get_vector_store_status();
             rag_obj["hybrid_search"] = true; // Default to true

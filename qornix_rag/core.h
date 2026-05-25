@@ -62,6 +62,7 @@ struct HybridSearchConfig {
 
 struct EmbeddingConfig {
     std::string backend = "tfidf"; // tfidf | onnx
+    std::string active_model_id;
     std::string model_id;
     std::string model_name;
     std::string model_version;
@@ -77,6 +78,25 @@ struct EmbeddingConfig {
     bool lowercase_tokens = true;
 };
 
+struct EmbeddingModelDefinition {
+    std::string id;
+    std::string backend = "onnx";
+    std::string name;
+    std::string version;
+    std::string model_path;
+    std::string tokenizer_path;
+    std::string tokenizer_type = "basic_wordpiece";
+    std::string pooling = "mean";
+    size_t dimension = 0;
+    size_t max_seq_len = 256;
+    size_t onnx_threads = 1;
+    bool normalize_embeddings = true;
+    bool lowercase_tokens = true;
+    bool enable_fallback = true;
+    std::string license;
+    std::string source;
+};
+
 struct EmbeddingModelInfo {
     std::string id;
     std::string name;
@@ -90,7 +110,39 @@ struct EmbeddingModelInfo {
     size_t max_seq_len = 0;
     bool ready = false;
     std::string status;
+    std::string active_model_id;
+    size_t registry_size = 0;
+    std::vector<std::string> registry_model_ids;
+    std::vector<std::string> registry_warnings;
 };
+
+struct EmbeddingModelRegistry {
+    std::map<std::string, EmbeddingModelDefinition> models;
+    std::vector<std::string> warnings;
+};
+
+inline void apply_embedding_model_definition(EmbeddingConfig& config,
+                                             const EmbeddingModelDefinition& model) {
+    config.active_model_id = model.id;
+    config.model_id = model.id;
+    config.backend = model.backend.empty() ? config.backend : model.backend;
+    config.model_name = model.name;
+    config.model_version = model.version;
+    if (!model.model_path.empty()) {
+        config.model_path = model.model_path;
+    }
+    if (!model.tokenizer_path.empty()) {
+        config.tokenizer_path = model.tokenizer_path;
+    }
+    config.tokenizer_type = model.tokenizer_type;
+    config.pooling = model.pooling;
+    config.dimension = model.dimension;
+    config.max_seq_len = model.max_seq_len;
+    config.onnx_threads = model.onnx_threads;
+    config.normalize_embeddings = model.normalize_embeddings;
+    config.lowercase_tokens = model.lowercase_tokens;
+    config.enable_fallback = model.enable_fallback;
+}
 
 struct VectorStoreConfig {
     std::string backend = "local_hnsw"; // local_hnsw
@@ -103,6 +155,7 @@ struct VectorStoreConfig {
 struct RagEngineConfig {
     HybridSearchConfig search;
     EmbeddingConfig embedding;
+    EmbeddingModelRegistry embedding_registry;
     VectorStoreConfig vector_store;
     size_t max_file_size_kb = 512;
 };
@@ -420,6 +473,7 @@ private:
     std::unique_ptr<Xapian::WritableDatabase> xapian_db_;
     HybridSearchConfig search_config_;
     EmbeddingConfig embedding_config_;
+    EmbeddingModelRegistry embedding_registry_;
     VectorStoreConfig vector_store_config_;
     size_t max_file_size_bytes_ = 512 * 1024;
     bool is_hybrid_indexed_ = false;
@@ -625,8 +679,10 @@ public:
     explicit RagEngine(const RagEngineConfig &config = RagEngineConfig())
         : search_config_(config.search),
           embedding_config_(config.embedding),
+          embedding_registry_(config.embedding_registry),
           vector_store_config_(config.vector_store),
           max_file_size_bytes_(config.max_file_size_kb * 1024) {
+        apply_active_embedding_model();
         initialize_embedding_backend();
     }
 
@@ -687,7 +743,18 @@ public:
 
     void set_embedding_config(const EmbeddingConfig &config) {
         embedding_config_ = config;
+        apply_active_embedding_model();
         initialize_embedding_backend();
+    }
+
+    void set_embedding_model_registry(const EmbeddingModelRegistry &registry) {
+        embedding_registry_ = registry;
+        apply_active_embedding_model();
+        initialize_embedding_backend();
+    }
+
+    const EmbeddingModelRegistry& get_embedding_model_registry() const {
+        return embedding_registry_;
     }
 
     const EmbeddingConfig& get_embedding_config() const {
@@ -1276,6 +1343,17 @@ private:
         return "tfidf:d" + std::to_string(effective_dimension > 0 ? effective_dimension : EMBEDDING_DIM);
     }
 
+    void apply_active_embedding_model() {
+        if (embedding_config_.active_model_id.empty()) {
+            return;
+        }
+
+        auto it = embedding_registry_.models.find(embedding_config_.active_model_id);
+        if (it != embedding_registry_.models.end()) {
+            apply_embedding_model_definition(embedding_config_, it->second);
+        }
+    }
+
     void refresh_embedding_model_info(bool ready, const std::string &status) {
         embedding_model_.backend = get_embedding_backend();
         embedding_model_.id = build_embedding_model_id(embedding_config_, embedding_model_.backend, embedding_dim_);
@@ -1291,6 +1369,14 @@ private:
         embedding_model_.max_seq_len = embedding_config_.max_seq_len;
         embedding_model_.ready = ready;
         embedding_model_.status = status;
+        embedding_model_.active_model_id = embedding_config_.active_model_id;
+        embedding_model_.registry_size = embedding_registry_.models.size();
+        embedding_model_.registry_model_ids.clear();
+        for (const auto& [id, model] : embedding_registry_.models) {
+            (void)model;
+            embedding_model_.registry_model_ids.push_back(id);
+        }
+        embedding_model_.registry_warnings = embedding_registry_.warnings;
     }
 
     bool parse_tokenizer_vocab(const std::string &tokenizer_path) {

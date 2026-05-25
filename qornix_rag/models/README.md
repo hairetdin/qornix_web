@@ -103,13 +103,18 @@ After adding compatible files, edit `qornix_rag/config.yaml`:
 
 ```yaml
 embedding:
-  backend: onnx
-  model_path: qornix_rag/models/semantic_model.onnx
-  tokenizer_path: qornix_rag/models/tokenizer.json
-  max_seq_len: 256
-  onnx_threads: 2
-  normalize_embeddings: true
-  enable_fallback: true
+  active_model_id: local-semantic-v1
+  registry:
+    local-semantic-v1:
+      backend: onnx
+      model_path: qornix_rag/models/semantic_model.onnx
+      tokenizer_path: qornix_rag/models/tokenizer.json
+      max_seq_len: 256
+      onnx_threads: 2
+      normalize_embeddings: true
+      enable_fallback: true
+      license: model-specific
+      source: local
 ```
 
 Restart:

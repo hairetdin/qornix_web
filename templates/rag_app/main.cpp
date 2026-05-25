@@ -50,6 +50,17 @@ std::string resolveAppPath(const std::string& path) {
 RagConfig makeApplicationRagConfig(const std::map<std::string, std::string>& flatConfig) {
     RagConfig config = makeRagConfigFromIntegratedFlatMap(flatConfig, "application config.yaml");
 
+    for (auto& [id, model] : config.engine.embedding_registry.models) {
+        (void)id;
+        model.model_path = resolveAppPath(model.model_path);
+        model.tokenizer_path = resolveAppPath(model.tokenizer_path);
+    }
+    if (!config.engine.embedding.active_model_id.empty()) {
+        auto active = config.engine.embedding_registry.models.find(config.engine.embedding.active_model_id);
+        if (active != config.engine.embedding_registry.models.end()) {
+            apply_embedding_model_definition(config.engine.embedding, active->second);
+        }
+    }
     config.engine.embedding.model_path = resolveAppPath(config.engine.embedding.model_path);
     config.engine.embedding.tokenizer_path = resolveAppPath(config.engine.embedding.tokenizer_path);
     config.markdown.directory_path = resolveAppPath(config.markdown.directory_path);
