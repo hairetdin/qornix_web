@@ -46,6 +46,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     target_link_libraries(console_auth_example PRIVATE qornix_auth)
 
     add_executable(web_auth_example example/web_auth_example.cpp)
+    target_include_directories(web_auth_example PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    )
     target_link_libraries(web_auth_example PRIVATE qornix_auth)
 endif()
 

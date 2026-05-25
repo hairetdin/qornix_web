@@ -7,15 +7,24 @@
 
 #pragma once
 
+#include "auth_context.h"
 #include "auth_interface.h"
-#include "user.h"
+#include "auth_store.h"
+#include "jwt_token.h"
 #include "password_hasher.h"
 #include "session.h"
-#include "jwt_token.h"
-#include <map>
+#include "user.h"
+
+#include <atomic>
+#include <chrono>
+#include <memory>
 #include <mutex>
-#include <shared_mutex>
-#include <random>
+#include <openssl/rand.h>
+#include <sstream>
+#include <iomanip>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace qornix_auth {
 
@@ -32,26 +41,39 @@ struct AuthConfig {
     std::string jwtSecret = "change-this-secret-key-in-production";
     std::string jwtIssuer = "qornix-auth";
     bool enablePasswordValidation = true;
-    size_t minPasswordLength = 6;
+    size_t minPasswordLength = 12;
     bool enableUserEnumerationProtection = true;
+    std::vector<std::string> defaultRoles{"user"};
+    std::vector<std::string> defaultPermissions{};
 };
 
 class AuthManager : public AuthInterface {
 private:
-    mutable std::shared_mutex usersMutex_;
-    std::map<std::string, User> users_;
-    std::map<std::string, std::string> usernameToId_;
-
+    std::shared_ptr<AuthStore> store_;
     std::unique_ptr<PasswordHasher> hasher_;
     std::unique_ptr<SessionManager> sessionManager_;
     std::unique_ptr<JwtManager> jwtManager_;
-
     AuthConfig config_;
 
+    mutable std::mutex lookupCacheMutex_;
+    mutable std::optional<User> lookupCache_;
+
+    static std::string bytesToHex(const unsigned char* bytes, size_t length) {
+        std::stringstream ss;
+        ss << std::hex << std::setfill('0');
+        for (size_t i = 0; i < length; ++i) {
+            ss << std::setw(2) << static_cast<int>(bytes[i]);
+        }
+        return ss.str();
+    }
+
     std::string generateUserId() const {
-        static std::atomic<int> counter{0};
-        return "usr_" + std::to_string(++counter) + "_" +
-               std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+        unsigned char random[16];
+        if (RAND_bytes(random, sizeof(random)) != 1) {
+            static std::atomic<int> fallbackCounter{0};
+            return "usr_fallback_" + std::to_string(++fallbackCounter);
+        }
+        return "usr_" + bytesToHex(random, sizeof(random));
     }
 
     bool validatePassword(const std::string& password) const {
@@ -61,28 +83,69 @@ private:
         return password.length() >= config_.minPasswordLength;
     }
 
+    std::optional<User> activeUserById(const std::string& userId) const {
+        auto user = store_->findUserById(userId);
+        if (!user.has_value() || !user->isActive) {
+            return std::nullopt;
+        }
+        return user;
+    }
+
+    AuthResult buildSuccessResult(const User& user) {
+        AuthResult result = AuthResult::success(user.id);
+        result.username = user.username;
+        result.roles = user.roles;
+        result.permissions = user.permissions;
+
+        if (config_.mode == AuthMode::SESSION || config_.mode == AuthMode::BOTH) {
+            auto session = sessionManager_->createSession(user.id, user.username, user.roles, user.permissions);
+            result.sessionId = session->sessionId;
+            result.message += "|session:" + session->sessionId;
+        }
+
+        if (config_.mode == AuthMode::JWT || config_.mode == AuthMode::BOTH) {
+            auto tokenResult = jwtManager_->generateToken(user.id, user.username, {}, user.roles, user.permissions);
+            if (tokenResult.success) {
+                result.token = tokenResult.token;
+                result.message += "|token:" + tokenResult.token;
+            }
+        }
+
+        return result;
+    }
+
 public:
-    explicit AuthManager(const AuthConfig& config = AuthConfig())
-        : config_(config),
+    explicit AuthManager(const AuthConfig& config = AuthConfig(),
+                         std::shared_ptr<AuthStore> store = std::make_shared<InMemoryAuthStore>())
+        : store_(std::move(store)),
           hasher_(PasswordHasher::createDefault()),
           sessionManager_(std::make_unique<SessionManager>(config.sessionDuration)),
           jwtManager_(std::make_unique<JwtManager>(
               config.jwtSecret, config.jwtIssuer, config.jwtDuration
-          )) {}
+          )),
+          config_(config) {}
 
     AuthResult registerUser(const std::string& username,
                            const std::string& password,
                            const std::string& email = "") override {
-        std::unique_lock lock(usersMutex_);
+        return registerUser(username, password, email, config_.defaultRoles, config_.defaultPermissions);
+    }
 
-        if (usernameToId_.find(username) != usernameToId_.end()) {
-            return AuthResult::failure(AuthStatus::USER_ALREADY_EXISTS,
-                                      "User already exists");
+    AuthResult registerUser(const std::string& username,
+                           const std::string& password,
+                           const std::string& email,
+                           std::vector<std::string> roles,
+                           std::vector<std::string> permissions = {}) {
+        if (username.empty()) {
+            return AuthResult::failure(AuthStatus::ERROR, "Username is required");
+        }
+
+        if (store_->findUserByUsername(username).has_value()) {
+            return AuthResult::failure(AuthStatus::USER_ALREADY_EXISTS, "User already exists");
         }
 
         if (!validatePassword(password)) {
-            return AuthResult::failure(AuthStatus::ERROR,
-                                      "Password does not meet requirements");
+            return AuthResult::failure(AuthStatus::ERROR, "Password does not meet requirements");
         }
 
         std::string userId = generateUserId();
@@ -92,58 +155,53 @@ public:
         User user(userId, username, email);
         user.password = passwordHash;
         user.salt = salt;
+        user.roles = roles.empty() ? config_.defaultRoles : std::move(roles);
+        user.permissions = std::move(permissions);
 
-        users_[userId] = user;
-        usernameToId_[username] = userId;
+        if (!store_->createUser(user)) {
+            return AuthResult::failure(AuthStatus::USER_ALREADY_EXISTS, "User already exists");
+        }
 
-        return AuthResult::success(userId);
+        AuthResult result = AuthResult::success(userId);
+        result.username = user.username;
+        result.roles = user.roles;
+        result.permissions = user.permissions;
+        return result;
     }
 
     AuthResult authenticate(const std::string& username,
                            const std::string& password) override {
-        std::shared_lock usersLock(usersMutex_);
-
-        auto it = usernameToId_.find(username);
-        if (it == usernameToId_.end()) {
+        auto user = store_->findUserByUsername(username);
+        if (!user.has_value()) {
             if (config_.enableUserEnumerationProtection) {
-                hasher_->hash(password, "dummy-salt");
+                (void)hasher_->hash(password, "dummy-salt");
             }
-            return AuthResult::failure(AuthStatus::USER_NOT_FOUND,
-                                      "Invalid credentials");
+            return AuthResult::failure(AuthStatus::USER_NOT_FOUND, "Invalid credentials");
         }
 
-        const User& user = users_.at(it->second);
-
-        if (!hasher_->verify(password, user.password, user.salt)) {
-            return AuthResult::failure(AuthStatus::INVALID_CREDENTIALS,
-                                      "Invalid credentials");
+        if (!user->isActive) {
+            return AuthResult::failure(AuthStatus::INVALID_CREDENTIALS, "Invalid credentials");
         }
 
-        AuthResult result = AuthResult::success(user.id);
-
-        if (config_.mode == AuthMode::SESSION || config_.mode == AuthMode::BOTH) {
-            auto session = sessionManager_->createSession(user.id, user.username);
-            result.message += "|session:" + session->sessionId;
+        if (!hasher_->verify(password, user->password, user->salt)) {
+            return AuthResult::failure(AuthStatus::INVALID_CREDENTIALS, "Invalid credentials");
         }
 
-        if (config_.mode == AuthMode::JWT || config_.mode == AuthMode::BOTH) {
-            auto tokenResult = jwtManager_->generateToken(user.id, user.username);
-            if (tokenResult.success) {
-                result.message += "|token:" + tokenResult.token;
-            }
-        }
+        user->lastLoginAt = std::chrono::system_clock::now();
+        store_->updateUser(*user);
 
-        return result;
+        return buildSuccessResult(*user);
     }
 
-    AuthResult logout(const std::string& userId) override {
+    AuthResult logout(const std::string& sessionIdOrUserId) override {
+        sessionManager_->invalidateSession(sessionIdOrUserId);
         sessionManager_->cleanupExpiredSessions();
         return AuthResult::success("");
     }
 
     bool isAuthenticated(const std::string& userId) const override {
-        auto user = getUserById(userId);
-        return user != nullptr && user->isActive;
+        auto user = store_->findUserById(userId);
+        return user.has_value() && user->isActive;
     }
 
     std::optional<std::string> getCurrentUser() const override {
@@ -158,37 +216,104 @@ public:
         return jwtManager_->validateToken(token);
     }
 
-    const User* getUserById(const std::string& userId) const {
-        std::shared_lock lock(usersMutex_);
-        auto it = users_.find(userId);
-        if (it != users_.end()) {
-            return &it->second;
+    std::optional<AuthContext> authenticateSession(const std::string& sessionId) {
+        auto session = validateSession(sessionId);
+        if (!session || session->isExpired()) {
+            return std::nullopt;
         }
-        return nullptr;
+
+        auto user = activeUserById(session->userId);
+        if (!user.has_value()) {
+            sessionManager_->invalidateSession(sessionId);
+            return std::nullopt;
+        }
+
+        AuthContext context;
+        context.authenticated = true;
+        context.userId = user->id;
+        context.username = user->username;
+        context.roles = user->roles;
+        context.permissions = user->permissions;
+        context.credentialType = "session";
+        return context;
+    }
+
+    std::optional<AuthContext> authenticateBearerToken(const std::string& token) {
+        auto tokenResult = validateJwtToken(token);
+        if (!tokenResult.success || !tokenResult.claims) {
+            return std::nullopt;
+        }
+
+        auto user = activeUserById(tokenResult.claims->subject);
+        if (!user.has_value()) {
+            return std::nullopt;
+        }
+
+        AuthContext context;
+        context.authenticated = true;
+        context.userId = user->id;
+        context.username = user->username;
+        context.roles = user->roles;
+        context.permissions = user->permissions;
+        context.credentialType = "jwt";
+        return context;
+    }
+
+    bool userHasRole(const std::string& userId, const std::string& role) const {
+        auto user = store_->findUserById(userId);
+        return user.has_value() && user->hasRole(role);
+    }
+
+    bool userHasPermission(const std::string& userId, const std::string& permission) const {
+        auto user = store_->findUserById(userId);
+        return user.has_value() && user->hasPermission(permission);
+    }
+
+    bool assignRole(const std::string& userId, const std::string& role) {
+        auto user = store_->findUserById(userId);
+        if (!user.has_value() || role.empty()) {
+            return false;
+        }
+        if (!user->hasRole(role)) {
+            user->roles.push_back(role);
+        }
+        return store_->updateUser(*user);
+    }
+
+    bool grantPermission(const std::string& userId, const std::string& permission) {
+        auto user = store_->findUserById(userId);
+        if (!user.has_value() || permission.empty()) {
+            return false;
+        }
+        if (!user->hasPermission(permission)) {
+            user->permissions.push_back(permission);
+        }
+        return store_->updateUser(*user);
+    }
+
+    const User* getUserById(const std::string& userId) const {
+        auto user = store_->findUserById(userId);
+        std::lock_guard lock(lookupCacheMutex_);
+        lookupCache_ = std::move(user);
+        return lookupCache_ ? &*lookupCache_ : nullptr;
     }
 
     const User* getUserByUsername(const std::string& username) const {
-        std::shared_lock lock(usersMutex_);
-        auto it = usernameToId_.find(username);
-        if (it != usernameToId_.end()) {
-            return &users_.at(it->second);
-        }
-        return nullptr;
+        auto user = store_->findUserByUsername(username);
+        std::lock_guard lock(lookupCacheMutex_);
+        lookupCache_ = std::move(user);
+        return lookupCache_ ? &*lookupCache_ : nullptr;
     }
 
     bool changePassword(const std::string& userId,
                        const std::string& oldPassword,
                        const std::string& newPassword) {
-        std::unique_lock lock(usersMutex_);
-
-        auto it = users_.find(userId);
-        if (it == users_.end()) {
+        auto user = store_->findUserById(userId);
+        if (!user.has_value()) {
             return false;
         }
 
-        User& user = it->second;
-
-        if (!hasher_->verify(oldPassword, user.password, user.salt)) {
+        if (!hasher_->verify(oldPassword, user->password, user->salt)) {
             return false;
         }
 
@@ -196,13 +321,9 @@ public:
             return false;
         }
 
-        std::string newSalt = hasher_->generateSalt();
-        std::string newPasswordHash = hasher_->hash(newPassword, newSalt);
-
-        user.password = newPasswordHash;
-        user.salt = newSalt;
-
-        return true;
+        user->salt = hasher_->generateSalt();
+        user->password = hasher_->hash(newPassword, user->salt);
+        return store_->updateUser(*user);
     }
 
     void setConfig(const AuthConfig& config) {
@@ -214,7 +335,10 @@ public:
     const AuthConfig& getConfig() const {
         return config_;
     }
+
+    std::shared_ptr<AuthStore> store() const {
+        return store_;
+    }
 };
 
 } // namespace qornix_auth
-

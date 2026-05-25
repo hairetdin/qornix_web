@@ -11,6 +11,8 @@
 #include <chrono>
 #include <optional>
 #include <map>
+#include <sstream>
+#include <vector>
 
 #ifdef HAVE_JWT_CPP
 #include <jwt-cpp/jwt.h>
@@ -21,6 +23,8 @@ namespace qornix_auth {
         std::string subject;
         std::string issuer;
         std::map<std::string, std::string> customClaims;
+        std::vector<std::string> roles;
+        std::vector<std::string> permissions;
         std::chrono::system_clock::time_point issuedAt;
         std::chrono::system_clock::time_point expiresAt;
 
@@ -56,6 +60,29 @@ namespace qornix_auth {
         std::string issuer_;
         std::chrono::minutes tokenDuration_;
 
+        static std::string join(const std::vector<std::string>& values) {
+            std::string result;
+            for (const auto& value : values) {
+                if (!result.empty()) {
+                    result += ",";
+                }
+                result += value;
+            }
+            return result;
+        }
+
+        static std::vector<std::string> split(const std::string& value) {
+            std::vector<std::string> result;
+            std::stringstream ss(value);
+            std::string item;
+            while (std::getline(ss, item, ',')) {
+                if (!item.empty()) {
+                    result.push_back(item);
+                }
+            }
+            return result;
+        }
+
     public:
         JwtManager(const std::string &secretKey,
                    const std::string &issuer = "qornix-auth",
@@ -68,7 +95,9 @@ namespace qornix_auth {
 
         JwtTokenResult generateToken(const std::string &userId,
                                      const std::string &username,
-                                     const std::map<std::string, std::string> &extraClaims = {}) {
+                                     const std::map<std::string, std::string> &extraClaims = {},
+                                     const std::vector<std::string> &roles = {},
+                                     const std::vector<std::string> &permissions = {}) {
             try {
 #ifdef HAVE_JWT_CPP
                 auto now = std::chrono::system_clock::now();
@@ -83,6 +112,8 @@ namespace qornix_auth {
                 obj.payload().set_issued_at(now);
                 obj.payload().set_expires_at(expire);
                 obj.payload().set_claim("username", username);
+                obj.payload().set_claim("roles", join(roles));
+                obj.payload().set_claim("permissions", join(permissions));
 
                 for (const auto &[key, value]: extraClaims) {
                     obj.payload().set_claim(key, value);
@@ -116,6 +147,12 @@ namespace qornix_auth {
 
                 if (decoded.has_payload_claim("username")) {
                     claims.customClaims["username"] = decoded.get_payload_claim("username").as_string();
+                }
+                if (decoded.has_payload_claim("roles")) {
+                    claims.roles = split(decoded.get_payload_claim("roles").as_string());
+                }
+                if (decoded.has_payload_claim("permissions")) {
+                    claims.permissions = split(decoded.get_payload_claim("permissions").as_string());
                 }
 
                 claims.issuedAt = decoded.get_issued_at();

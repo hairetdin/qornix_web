@@ -460,6 +460,17 @@
             <div class="grid admin-grid">
                 <div class="card">
                     <h2>Admin</h2>
+                    <h3>Session</h3>
+                    <div id="auth-user-box" class="notice">Checking session...</div>
+                    <label for="auth-username">Username</label>
+                    <input id="auth-username" type="text" autocomplete="username" placeholder="admin">
+                    <label for="auth-password">Password</label>
+                    <input id="auth-password" type="password" autocomplete="current-password" placeholder="Password">
+                    <div style="margin-top: 12px;">
+                        <button class="btn" onclick="loginAuthUser()">Login</button>
+                        <button class="btn secondary" onclick="logoutAuthUser()">Logout</button>
+                    </div>
+
                     <label for="admin-token">Admin token</label>
                     <input id="admin-token" type="password" autocomplete="off" placeholder="Optional token for protected RAG admin/write routes">
                     <div style="margin-top: 12px;">
@@ -471,6 +482,21 @@
                         <button class="btn" onclick="loadAdminDiagnostics()">Diagnostics</button>
                         <button class="btn secondary" onclick="loadIngestionJobs()">Ingestion jobs</button>
                         <button class="btn secondary" onclick="loadMetrics()">Metrics</button>
+                        <button class="btn secondary" onclick="loadAuthUsers()">Users</button>
+                    </div>
+                    <h3>Create user</h3>
+                    <label for="auth-new-username">Username</label>
+                    <input id="auth-new-username" type="text" autocomplete="off" placeholder="reader">
+                    <label for="auth-new-email">Email</label>
+                    <input id="auth-new-email" type="email" autocomplete="off" placeholder="reader@example.com">
+                    <label for="auth-new-password">Password</label>
+                    <input id="auth-new-password" type="password" autocomplete="new-password" placeholder="At least 12 characters">
+                    <label for="auth-new-roles">Roles</label>
+                    <input id="auth-new-roles" type="text" autocomplete="off" value="user">
+                    <label for="auth-new-permissions">Permissions</label>
+                    <input id="auth-new-permissions" type="text" autocomplete="off" value="rag:read">
+                    <div style="margin-top: 12px;">
+                        <button class="btn secondary" onclick="createAuthUser()">Create user</button>
                     </div>
                     <div id="admin-status" style="margin-top: 12px;"></div>
                 </div>
@@ -491,12 +517,14 @@
         let lastQAPairs = [];
         let qaCurrentPage = 1;
         let qaPageSize = 25;
+        let currentAuthUser = null;
         const ADMIN_TOKEN_STORAGE_KEY = 'qornix-rag-admin-token';
 
         window.addEventListener('load', async () => {
             setupTabs();
             setupShortcuts();
             restoreAdminToken();
+            await loadCurrentAuthUser(false);
             await refreshDashboard();
         });
 
@@ -509,7 +537,10 @@
                     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
                     if (btn.dataset.tab === 'qa') await loadQAPairs();
                     if (btn.dataset.tab === 'sources') await refreshDashboard();
-                    if (btn.dataset.tab === 'admin') await loadAdminDiagnostics();
+                    if (btn.dataset.tab === 'admin') {
+                        await loadCurrentAuthUser(false);
+                        await loadAdminDiagnostics();
+                    }
                 });
             });
         }
@@ -1385,6 +1416,155 @@ ${label}`)) {
             if (input) input.value = '';
             try { localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY); } catch (_) {}
             document.getElementById('admin-status').innerHTML = renderNotice('Admin token cleared.', 'ok');
+        }
+
+        function renderAuthUserBox() {
+            const box = document.getElementById('auth-user-box');
+            if (!box) return;
+            if (!currentAuthUser) {
+                box.className = 'notice warn';
+                box.textContent = 'No active auth session.';
+                return;
+            }
+            box.className = 'notice ok';
+            const roles = Array.isArray(currentAuthUser.roles) ? currentAuthUser.roles.join(', ') : '';
+            const permissions = Array.isArray(currentAuthUser.permissions) ? currentAuthUser.permissions.join(', ') : '';
+            box.innerHTML = `
+                <strong>${escapeHtml(currentAuthUser.username || currentAuthUser.id || 'user')}</strong>
+                <div class="meta" style="margin-top: 6px;">
+                    <span>roles: ${escapeHtml(roles || '-')}</span>
+                    <span>permissions: ${escapeHtml(permissions || '-')}</span>
+                </div>`;
+        }
+
+        async function loadCurrentAuthUser(showErrors = true) {
+            try {
+                const data = await api('/auth/me');
+                currentAuthUser = data.user || null;
+                renderAuthUserBox();
+                return currentAuthUser;
+            } catch (error) {
+                currentAuthUser = null;
+                renderAuthUserBox();
+                if (showErrors) {
+                    document.getElementById('admin-status').innerHTML = renderNotice(error.message, 'error');
+                }
+                return null;
+            }
+        }
+
+        async function loginAuthUser() {
+            const username = document.getElementById('auth-username').value.trim();
+            const password = document.getElementById('auth-password').value;
+            if (!username || !password) {
+                document.getElementById('admin-status').innerHTML = renderNotice('Username and password are required.', 'error');
+                return;
+            }
+            try {
+                const data = await api('/auth/login', {
+                    method: 'POST',
+                    body: JSON.stringify({ username, password })
+                });
+                currentAuthUser = data.user || null;
+                document.getElementById('auth-password').value = '';
+                renderAuthUserBox();
+                document.getElementById('admin-status').innerHTML = renderNotice('Logged in.', 'ok');
+            } catch (error) {
+                document.getElementById('admin-status').innerHTML = renderNotice(error.message, 'error');
+            }
+        }
+
+        async function logoutAuthUser() {
+            try {
+                await api('/auth/logout', { method: 'POST', body: '{}' });
+                currentAuthUser = null;
+                renderAuthUserBox();
+                document.getElementById('admin-status').innerHTML = renderNotice('Logged out.', 'ok');
+            } catch (error) {
+                document.getElementById('admin-status').innerHTML = renderNotice(error.message, 'error');
+            }
+        }
+
+        function commaList(value) {
+            return String(value || '')
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean);
+        }
+
+        async function createAuthUser() {
+            const payload = {
+                username: document.getElementById('auth-new-username').value.trim(),
+                email: document.getElementById('auth-new-email').value.trim(),
+                password: document.getElementById('auth-new-password').value,
+                roles: commaList(document.getElementById('auth-new-roles').value),
+                permissions: commaList(document.getElementById('auth-new-permissions').value)
+            };
+            if (!payload.username || !payload.password) {
+                document.getElementById('admin-status').innerHTML = renderNotice('New user username and password are required.', 'error');
+                return;
+            }
+            try {
+                await api('/auth/users', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                document.getElementById('auth-new-password').value = '';
+                document.getElementById('admin-status').innerHTML = renderNotice('User created.', 'ok');
+                await loadAuthUsers();
+            } catch (error) {
+                document.getElementById('admin-status').innerHTML = renderNotice(error.message, 'error');
+            }
+        }
+
+        async function loadAuthUsers() {
+            const output = document.getElementById('admin-output');
+            try {
+                const data = await api('/auth/users');
+                const users = Array.isArray(data.users) ? data.users : [];
+                output.innerHTML = users.length
+                    ? `<div class="qa-table-wrap"><table class="qa-table">
+                        <thead><tr><th>User</th><th>Roles</th><th>Permissions</th><th>Status</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${users.map((user) => {
+                                const roles = Array.isArray(user.roles) ? user.roles.join(',') : '';
+                                const permissions = Array.isArray(user.permissions) ? user.permissions.join(',') : '';
+                                return `<tr>
+                                    <td>
+                                        <strong>${escapeHtml(user.username || user.id)}</strong>
+                                        <div class="muted">${escapeHtml(user.email || '')}</div>
+                                    </td>
+                                    <td><input id="roles-${escapeAttr(user.id)}" type="text" value="${escapeAttr(roles)}"></td>
+                                    <td><input id="permissions-${escapeAttr(user.id)}" type="text" value="${escapeAttr(permissions)}"></td>
+                                    <td><label><input id="active-${escapeAttr(user.id)}" type="checkbox" ${user.active ? 'checked' : ''}> active</label></td>
+                                    <td><button class="btn secondary" onclick="saveAuthUser('${escapeJs(user.id)}')">Save</button></td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table></div>`
+                    : renderNotice('No auth users found.');
+                document.getElementById('admin-status').innerHTML = renderNotice('Users loaded.', 'ok');
+            } catch (error) {
+                output.innerHTML = renderNotice(error.message, 'error');
+                document.getElementById('admin-status').innerHTML = renderNotice('Users request failed.', 'error');
+            }
+        }
+
+        async function saveAuthUser(userId) {
+            try {
+                await api(`/auth/users/${encodeURIComponent(userId)}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                        roles: commaList(document.getElementById(`roles-${userId}`).value),
+                        permissions: commaList(document.getElementById(`permissions-${userId}`).value),
+                        active: Boolean(document.getElementById(`active-${userId}`).checked)
+                    })
+                });
+                document.getElementById('admin-status').innerHTML = renderNotice('User updated.', 'ok');
+                await loadAuthUsers();
+            } catch (error) {
+                document.getElementById('admin-status').innerHTML = renderNotice(error.message, 'error');
+            }
         }
 
         async function loadAdminDiagnostics() {

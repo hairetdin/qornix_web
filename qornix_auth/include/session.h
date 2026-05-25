@@ -12,7 +12,12 @@
 #include <unordered_map>
 #include <memory>
 #include <mutex>
-#include <atomic>
+#include <vector>
+#include <openssl/rand.h>
+#include <sstream>
+#include <iomanip>
+#include <stdexcept>
+#include <utility>
 
 
 namespace qornix_auth {
@@ -20,6 +25,8 @@ namespace qornix_auth {
         std::string sessionId;
         std::string userId;
         std::string username;
+        std::vector<std::string> roles;
+        std::vector<std::string> permissions;
         std::chrono::system_clock::time_point createdAt;
         std::chrono::system_clock::time_point expiresAt;
         std::chrono::system_clock::time_point lastAccessedAt;
@@ -32,8 +39,11 @@ namespace qornix_auth {
         SessionData(const std::string &session_id,
                     const std::string &user_id,
                     const std::string &user_name,
+                    std::vector<std::string> user_roles = {},
+                    std::vector<std::string> user_permissions = {},
                     std::chrono::minutes duration = std::chrono::minutes(30))
             : sessionId(session_id), userId(user_id), username(user_name),
+              roles(std::move(user_roles)), permissions(std::move(user_permissions)),
               createdAt(std::chrono::system_clock::now()),
               lastAccessedAt(std::chrono::system_clock::now()),
               isValid(true) {
@@ -56,10 +66,21 @@ namespace qornix_auth {
         std::unordered_map<std::string, std::shared_ptr<SessionData> > sessions_;
         std::chrono::minutes defaultDuration_;
 
+        static std::string bytesToHex(const unsigned char* bytes, size_t length) {
+            std::stringstream ss;
+            ss << std::hex << std::setfill('0');
+            for (size_t i = 0; i < length; ++i) {
+                ss << std::setw(2) << static_cast<int>(bytes[i]);
+            }
+            return ss.str();
+        }
+
         static std::string generateSessionId() {
-            static std::atomic<int> counter{0};
-            auto now = std::chrono::system_clock::now().time_since_epoch().count();
-            return "sess_" + std::to_string(now) + "_" + std::to_string(++counter);
+            unsigned char random[32];
+            if (RAND_bytes(random, sizeof(random)) != 1) {
+                throw std::runtime_error("Failed to generate secure session id");
+            }
+            return "sess_" + bytesToHex(random, sizeof(random));
         }
 
     public:
@@ -68,11 +89,13 @@ namespace qornix_auth {
         }
 
         std::shared_ptr<SessionData> createSession(const std::string &userId,
-                                                   const std::string &username) {
+                                                   const std::string &username,
+                                                   std::vector<std::string> roles = {},
+                                                   std::vector<std::string> permissions = {}) {
             std::lock_guard<std::mutex> lock(mutex_);
 
             auto session = std::make_shared<SessionData>(
-                generateSessionId(), userId, username, defaultDuration_
+                generateSessionId(), userId, username, std::move(roles), std::move(permissions), defaultDuration_
             );
             sessions_[session->sessionId] = session;
             return session;

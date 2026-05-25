@@ -1208,6 +1208,296 @@ Generated app auth smoke returned /rag 200, diagnostics 401 without token, and d
 git diff --check passed.
 ```
 
+## 2026-05-25 - Post-stabilization qornix_auth baseline completed
+
+Status: `done`
+
+Scope:
+
+- stabilize `qornix_auth` before replacing RAG's token/header guard with full host-application authentication;
+- keep standalone local RAG mode free of mandatory authentication;
+- provide reusable auth primitives that generated `qornix_web` apps can use for sessions, JWT, roles, and permissions.
+
+Implemented:
+
+- added `AuthStore` and `InMemoryAuthStore` as the persistence boundary for users;
+- changed the default password hasher to PBKDF2-SHA256 through OpenSSL while retaining legacy SHA-256 verification fallback;
+- changed session id generation to cryptographically random OpenSSL bytes;
+- added structured `AuthResult` fields for username, session id, JWT token, roles, and permissions;
+- added user roles and permissions plus role/permission helpers;
+- added `AuthContext` for authenticated request identity;
+- added `AuthManager` helpers for session/JWT authentication, role checks, permission checks, role assignment, and permission grants;
+- updated `AuthMiddleware` to validate sessions or bearer tokens and enforce optional role/permission requirements;
+- added `AuthApiHandler` and `setupAuthRoutes()` for `/auth/login`, `/auth/logout`, `/auth/me`, and optional `/auth/register`;
+- added `qornix_auth/README.md`;
+- added `auth_manager_test` and `auth_routes_test`.
+
+Verified:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_TESTS=ON -DENABLE_AUTH=ON -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
+cmake --build build --target auth_manager_test auth_routes_test qornix_web qornix_rag qornix_rag_route_extension -j2
+ctest --test-dir build -R 'auth_(manager|routes)_test|test_(embedding_config|rag_service|rag_quality_eval)$' --output-on-failure
+```
+
+Observed result:
+
+```text
+100% focused tests passed, 0 tests failed out of 5.
+qornix_web, qornix_rag, and qornix_rag_route_extension rebuilt successfully.
+```
+
+## 2026-05-25 - Post-stabilization qornix_orm auth store baseline completed
+
+Status: `done`
+
+Scope:
+
+- add durable auth storage through `qornix_orm`, not a SQLite-only auth backend;
+- keep SQLite as the self-contained test backend while allowing generated applications to select PostgreSQL or MySQL through normal ORM driver configuration;
+- preserve the `AuthStore` boundary added by the previous auth baseline.
+
+Implemented:
+
+- added `qornix_auth/include/auth_orm_store.h`;
+- added `QornixOrmAuthStore`, backed by `DatabaseInterface`;
+- added auth schema migration for:
+  - `auth_users`;
+  - `auth_roles`;
+  - `auth_permissions`;
+  - `auth_user_roles`;
+  - `auth_user_permissions`;
+- kept backend-specific SQL details inside the store:
+  - `?` placeholders for SQLite;
+  - `$n` placeholders for PostgreSQL and MySQL driver param substitution;
+  - `ON CONFLICT DO NOTHING` for SQLite/PostgreSQL;
+  - `INSERT IGNORE` for MySQL;
+- updated `qornix_auth/README.md` to document `QornixOrmAuthStore` and SQLite/PostgreSQL/MySQL backend selection;
+- added `auth_orm_store_test` as a self-contained ORM-backed SQLite integration test.
+
+Verified:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_TESTS=ON -DENABLE_AUTH=ON -DQORNIX_ENABLE_ORM=ON -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
+cmake --build build --target auth_orm_store_test auth_manager_test auth_routes_test qornix_web qornix_rag qornix_rag_route_extension -j2
+ctest --test-dir build -R 'auth_(manager|routes|orm_store)_test|test_(embedding_config|rag_service|rag_quality_eval)$' --output-on-failure
+```
+
+Observed result:
+
+```text
+100% focused tests passed, 0 tests failed out of 6.
+qornix_web, qornix_rag, and qornix_rag_route_extension rebuilt successfully.
+```
+
+## 2026-05-25 - Post-stabilization generated app auth wiring completed
+
+Status: `done`
+
+Scope:
+
+- wire generated `rag_app` and default `--with-rag` applications to `qornix_auth`;
+- use `QornixOrmAuthStore` for durable user/role/permission storage;
+- keep runtime auth opt-in through config so local generated apps still start without login by default.
+
+Implemented:
+
+- generated `rag_app` projects now build with `qornix_auth` and `qornix_orm` enabled by default;
+- generated default app projects now expose compile definitions for auth/ORM integration and keep RAG-compatible auth wiring available;
+- generated apps can create `AuthManager` from `auth.*` config;
+- generated apps can create `QornixOrmAuthStore` from `auth.database.*` config;
+- added `/auth/login`, `/auth/logout`, `/auth/me`, and optional `/auth/register` route registration in generated apps when `auth.enabled: true`;
+- added auth middleware registration in generated apps when `auth.enabled: true`;
+- added optional bootstrap admin creation through `auth.bootstrap_admin.*` and `QORNIX_ADMIN_PASSWORD`;
+- added generated config examples for SQLite plus PostgreSQL/MySQL connection strings;
+- added DSN-gated `auth_orm_store_dsn_test` for PostgreSQL/MySQL/other ORM driver smoke coverage when environment variables are present.
+
+Verified:
+
+```bash
+./create_new_project.sh /tmp/qornix_rag_auth_app --template rag_app
+./create_new_project.sh /tmp/qornix_with_rag_auth_app --with-rag
+cmake -S /tmp/qornix_rag_auth_app -B /tmp/qornix_rag_auth_app/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_rag_auth_app/build -j2
+cmake -S /tmp/qornix_with_rag_auth_app -B /tmp/qornix_with_rag_auth_app/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_with_rag_auth_app/build -j2
+cmake --build build --target auth_orm_store_dsn_test auth_orm_store_test auth_manager_test auth_routes_test qornix_web qornix_rag qornix_rag_route_extension -j2
+ctest --test-dir build -R 'auth_(manager|routes|orm_store|orm_store_dsn)_test|test_(embedding_config|rag_service|rag_quality_eval)$' --output-on-failure
+```
+
+Runtime smoke:
+
+```text
+auth.enabled=true and bootstrap admin via QORNIX_ADMIN_PASSWORD
+GET /rag without cookie -> 401
+POST /auth/login -> 200 with session_id cookie
+GET /auth/me with cookie -> 200
+GET /rag with cookie -> 200
+```
+
+Observed result:
+
+```text
+100% focused tests passed, 0 tests failed out of 7.
+Generated rag_app and --with-rag applications built successfully.
+```
+
+## 2026-05-25 - Post-stabilization auth route policies completed
+
+Status: `done`
+
+Scope:
+
+- replace coarse generated-app auth requirements with route-level policies;
+- enforce separate RAG read, write, and admin permissions through `qornix_auth`;
+- keep the generated-app runtime auth opt-in through `auth.enabled`.
+
+Implemented:
+
+- added `AuthRoutePolicy` to `AuthMiddleware`;
+- added method/path exact or prefix matching for route policies;
+- added per-policy `authentication_required`, `any_roles`, and `any_permissions`;
+- kept global middleware roles/permissions as fallback when no route policy matches;
+- wired generated `rag_app` and `--with-rag` RAG policies:
+  - `rag:read` for `/rag`, health, sources, stats, search, ask, and batch;
+  - `rag:write` for indexing, ingestion, document delete, QA writes, imports, and source writes;
+  - `rag:admin` for diagnostics, metrics, analytics, and admin routes;
+- exposed `auth.rag_read_permissions`, `auth.rag_write_permissions`, and `auth.rag_admin_permissions` in generated config;
+- documented route permissions in `qornix_auth/README.md` and generated operations docs;
+- added `auth_middleware_policy_test`.
+
+Verified:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_TESTS=ON -DENABLE_AUTH=ON -DQORNIX_ENABLE_ORM=ON -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
+cmake --build build --target auth_middleware_policy_test auth_orm_store_dsn_test auth_orm_store_test auth_manager_test auth_routes_test qornix_web qornix_rag qornix_rag_route_extension -j2
+ctest --test-dir build -R 'auth_(manager|routes|middleware_policy|orm_store|orm_store_dsn)_test|test_(embedding_config|rag_service|rag_quality_eval)$' --output-on-failure
+./create_new_project.sh /tmp/qornix_policy_rag_app --template rag_app
+./create_new_project.sh /tmp/qornix_policy_with_rag_app --with-rag
+cmake --build /tmp/qornix_policy_rag_app/build -j2
+cmake --build /tmp/qornix_policy_with_rag_app/build -j2
+```
+
+Runtime smoke:
+
+```text
+auth.enabled=true and bootstrap admin via QORNIX_ADMIN_PASSWORD
+GET /rag without cookie -> 401
+POST /auth/login -> 200 with session_id cookie
+GET /api/rag/admin/diagnostics with admin cookie -> 200
+POST /api/rag/index with admin cookie -> 200
+```
+
+Observed result:
+
+```text
+100% focused tests passed, 0 tests failed out of 8.
+Generated rag_app and --with-rag applications built successfully.
+```
+
+## 2026-05-25 - Post-stabilization auth admin UI and API completed
+
+Status: `done`
+
+Scope:
+
+- add generated-app login/logout controls in the RAG Admin tab;
+- add `auth:admin` user-management API routes on top of `qornix_auth`;
+- keep RAG route permissions separate from auth administration permissions.
+
+Implemented:
+
+- added `GET /auth/users`, `POST /auth/users`, and `PATCH /auth/users/{id}`;
+- protected user-management routes through generated-app `auth.admin_permissions`, defaulting to `auth:admin`;
+- added `auth:admin` to generated bootstrap admin permissions;
+- added Admin-tab session login/logout controls;
+- added Admin-tab user listing, user creation, role/permission editing, active-state update, and password update controls;
+- documented the admin API, UI flow, and permission split in `qornix_auth/README.md` and generated operations docs;
+- extended `auth_routes_test` with admin create/list/update coverage.
+
+Verified:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_TESTS=ON -DENABLE_AUTH=ON -DQORNIX_ENABLE_ORM=ON -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
+cmake --build build --target auth_routes_test auth_middleware_policy_test auth_orm_store_test auth_orm_store_dsn_test qornix_web qornix_rag qornix_rag_route_extension -j2
+ctest --test-dir build -R 'auth_(manager|routes|middleware_policy|orm_store|orm_store_dsn)_test|test_(embedding_config|rag_service|rag_quality_eval)$' --output-on-failure
+./create_new_project.sh /tmp/qornix_auth_ui_rag_app --template rag_app
+cmake -S /tmp/qornix_auth_ui_rag_app -B /tmp/qornix_auth_ui_rag_app/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_auth_ui_rag_app/build -j2
+./create_new_project.sh /tmp/qornix_auth_ui_with_rag_app --with-rag
+cmake -S /tmp/qornix_auth_ui_with_rag_app -B /tmp/qornix_auth_ui_with_rag_app/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_auth_ui_with_rag_app/build -j2
+```
+
+Runtime smoke:
+
+```text
+auth.enabled=true and bootstrap admin via QORNIX_ADMIN_PASSWORD
+GET /rag without cookie -> 401
+POST /auth/login as admin -> 200 with session_id cookie
+GET /auth/users with admin cookie -> 200
+POST /auth/users with admin cookie -> 201
+POST /auth/login as reader -> 200
+GET /rag with reader cookie -> 200
+GET /api/rag/admin/diagnostics with reader cookie -> 403
+PATCH /auth/users/{id} with admin cookie -> 200
+```
+
+Observed result:
+
+```text
+100% focused tests passed, 0 tests failed out of 8.
+Generated rag_app and --with-rag applications built successfully.
+Generated rag_app auth admin runtime smoke passed.
+```
+
+## 2026-05-25 - Post-stabilization auth/RBAC hardening completed
+
+Status: `done`
+
+Scope:
+
+- make session and bearer-token authorization reflect the current user record;
+- revoke access for disabled users without requiring generated applications to restart;
+- tighten route policy and cookie matching around auth-sensitive routes.
+
+Implemented:
+
+- `AuthManager::authenticateSession()` now reloads the current user from `AuthStore`;
+- active sessions now use the latest stored roles and permissions instead of stale session snapshots;
+- disabled or missing users now cause session authentication to fail and invalidate the session;
+- `AuthManager::authenticateBearerToken()` now validates the token subject against `AuthStore`;
+- bearer-token requests now use current stored roles and permissions instead of stale JWT claims;
+- disabled or missing users now cause bearer-token authentication to fail;
+- auth middleware exclude paths and non-exact route policies now require a path boundary, so `/api/rag/admin` does not match `/api/rag/administrator` and `/auth/login` does not match `/auth/login-extra`;
+- auth cookie extraction now matches the exact `session_id` cookie name instead of substrings such as `other_session_id`;
+- added regression coverage for session permission refresh, disabled-user session/JWT rejection, route prefix boundaries, exclude path boundaries, and exact cookie-name parsing.
+
+Verified:
+
+```bash
+cmake --build build --target auth_manager_test auth_routes_test auth_middleware_policy_test -j2
+ctest --test-dir build -R 'auth_(manager|routes|middleware_policy)_test$' --output-on-failure
+cmake --build build --target auth_manager_test auth_routes_test auth_middleware_policy_test auth_orm_store_test auth_orm_store_dsn_test qornix_web qornix_rag qornix_rag_route_extension -j2
+ctest --test-dir build -R 'auth_(manager|routes|middleware_policy|orm_store|orm_store_dsn)_test|test_(embedding_config|rag_service|rag_quality_eval)$' --output-on-failure
+./create_new_project.sh /tmp/qornix_auth_harden_rag_app --template rag_app
+./create_new_project.sh /tmp/qornix_auth_harden_with_rag_app --with-rag
+cmake -S /tmp/qornix_auth_harden_rag_app -B /tmp/qornix_auth_harden_rag_app/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_auth_harden_rag_app/build -j2
+cmake -S /tmp/qornix_auth_harden_with_rag_app -B /tmp/qornix_auth_harden_with_rag_app/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_auth_harden_with_rag_app/build -j2
+git diff --check
+```
+
+Observed result:
+
+```text
+100% focused tests passed, 0 tests failed out of 8.
+qornix_web, qornix_rag, and qornix_rag_route_extension rebuilt successfully.
+Generated rag_app and --with-rag applications built successfully.
+git diff --check passed.
+```
+
 ## Current milestone state
 
 - Milestone 0: `done`
@@ -1236,11 +1526,17 @@ git diff --check passed.
 - Post-stabilization 5 - reranking and query expansion baseline: `done`
 - Post-stabilization 6 - evaluation datasets and retrieval-quality regression tests: `done`
 - Post-stabilization 7 - admin UI and host-application auth/RBAC integration baseline: `done`
+- Post-stabilization 8 - `qornix_auth` stabilization baseline before full RAG host auth integration: `done`
+- Post-stabilization 9 - `qornix_orm`-backed durable auth store baseline: `done`
+- Post-stabilization 10 - generated app auth wiring with `QornixOrmAuthStore`: `done`
+- Post-stabilization 11 - route-level auth policies for generated RAG apps: `done`
+- Post-stabilization 12 - generated-app login and auth admin user management: `done`
+- Post-stabilization 13 - auth/RBAC current-user validation and route/cookie matching hardening: `done`
 - Next - select the next backlog item before implementation: `pending`
 
 ## Deferred / known follow-ups
 
-These items are intentionally not closed by A2/A3/A4 or the E1 persistence baseline:
+These items are intentionally not closed by A2/A3/A4, the E1 persistence baseline, or the Post-stabilization 13 auth/RBAC baseline:
 
 - replaceable vector backend adapters beyond local HNSW;
 - optional Faiss backend adapter;
@@ -1249,7 +1545,7 @@ These items are intentionally not closed by A2/A3/A4 or the E1 persistence basel
 - deeper vector backend selection docs and tests beyond the local HNSW baseline;
 - arbitrary document ingestion beyond current text/Markdown/QA flows;
 - PDF/DOCX/XLSX/images/OCR support;
-- auth/RBAC, which is not needed for standalone and belongs only to networked application templates if required later;
+- production security hardening beyond the generated-app auth/RBAC baseline, such as CSRF, audit events, session rotation, password reset, invite flows, MFA, and stricter cookie policy;
 - retrieval relevance and query normalization;
 - server-side QA pagination/filtering/autocomplete;
 - model selection UI and additional LLM diagnostics polish.
