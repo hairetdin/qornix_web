@@ -531,6 +531,10 @@ RagServiceHealth RagService::health() const {
     health.embedding_model_id = embedding_info.id;
     health.embedding_model_name = embedding_info.name;
     health.embedding_dim = embedding_info.dimension;
+    health.embedding_active_model_id = embedding_info.active_model_id;
+    health.embedding_registry_size = embedding_info.registry_size;
+    health.embedding_registry_model_ids = embedding_info.registry_model_ids;
+    health.embedding_registry_warnings = embedding_info.registry_warnings;
     health.vector_store_backend = rag_engine_->get_vector_store_backend();
     health.vector_store_status = rag_engine_->get_vector_store_status();
     health.query_expansion = rag_engine_->is_query_expansion_enabled();

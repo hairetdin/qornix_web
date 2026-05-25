@@ -77,6 +77,32 @@ embedding:
   # normalize_embeddings: true
   # lowercase_tokens: true
 
+  # Optional model registry. The active model is applied to the embedding
+  # backend at startup; paths are validated and shown in /api/health.
+  #
+  # active_model_id: local-semantic-v1
+  # registry:
+  #   local-semantic-v1:
+  #     backend: onnx
+  #     name: local semantic ONNX
+  #     version: v1
+  #     model_path: qornix_rag/models/semantic_model.onnx
+  #     tokenizer_path: qornix_rag/models/tokenizer.json
+  #     tokenizer_type: WordPiece
+  #     pooling: mean
+  #     dimension: 0
+  #     max_seq_len: 256
+  #     onnx_threads: 2
+  #     normalize_embeddings: true
+  #     lowercase_tokens: true
+  #     enable_fallback: true
+  #     license: model-specific
+  #     source: local
+  #   tfidf-local:
+  #     backend: tfidf
+  #     name: local TF-IDF
+  #     dimension: 256
+
 # LLM Configuration (optional)
 # Uncomment and configure to enable AI-powered Q&A
 llm:

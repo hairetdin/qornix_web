@@ -75,6 +75,54 @@ int main() {
     }
 
     {
+        std::unordered_map<std::string, std::string> flat;
+        flat["embedding.active_model_id"] = "bge-small";
+        flat["embedding.registry.bge-small.backend"] = "onnx";
+        flat["embedding.registry.bge-small.name"] = "BGE small registry";
+        flat["embedding.registry.bge-small.version"] = "2026-05";
+        flat["embedding.registry.bge-small.model_path"] = "models/bge-small.onnx";
+        flat["embedding.registry.bge-small.tokenizer_path"] = "models/bge-tokenizer.json";
+        flat["embedding.registry.bge-small.tokenizer_type"] = "WordPiece";
+        flat["embedding.registry.bge-small.pooling"] = "mean";
+        flat["embedding.registry.bge-small.dimension"] = "384";
+        flat["embedding.registry.bge-small.max_seq_len"] = "512";
+        flat["embedding.registry.bge-small.onnx_threads"] = "2";
+        flat["embedding.registry.bge-small.license"] = "MIT";
+        flat["embedding.registry.bge-small.source"] = "local";
+        flat["embedding.registry.tfidf-local.backend"] = "tfidf";
+        flat["embedding.registry.tfidf-local.name"] = "Local TF-IDF";
+        flat["embedding.registry.tfidf-local.dimension"] = "256";
+
+        auto config = makeRagConfigFromStandaloneFlatMap(flat, "registry-unit");
+        assert(config.engine.embedding_registry.models.size() == 2);
+        assert(config.engine.embedding.active_model_id == "bge-small");
+        assert(config.engine.embedding.model_id == "bge-small");
+        assert(config.engine.embedding.backend == "onnx");
+        assert(config.engine.embedding.model_name == "BGE small registry");
+        assert(config.engine.embedding.model_version == "2026-05");
+        assert(config.engine.embedding.model_path == "models/bge-small.onnx");
+        assert(config.engine.embedding.tokenizer_path == "models/bge-tokenizer.json");
+        assert(config.engine.embedding.dimension == 384);
+        assert(config.engine.embedding.max_seq_len == 512);
+        assert(config.engine.embedding.onnx_threads == 2);
+        assert(config.engine.embedding_registry.models.at("bge-small").license == "MIT");
+        assert(config.engine.embedding_registry.models.at("bge-small").source == "local");
+        assert(config.diagnostics.warnings.empty());
+    }
+
+    {
+        std::unordered_map<std::string, std::string> flat;
+        flat["embedding.active_model_id"] = "missing";
+        flat["embedding.registry.present.backend"] = "tfidf";
+
+        auto config = makeRagConfigFromStandaloneFlatMap(flat, "registry-warning-unit");
+        assert(config.engine.embedding_registry.models.size() == 1);
+        assert(!config.diagnostics.warnings.empty());
+        assert(config.diagnostics.warnings.front().find("active_model_id") != std::string::npos);
+        assert(!config.engine.embedding_registry.warnings.empty());
+    }
+
+    {
         RagEngine engine;
         auto info = engine.get_embedding_model_info();
         assert(info.backend == "tfidf");
@@ -100,6 +148,26 @@ int main() {
         assert(info.dimension == 256);
         assert(!info.ready);
         assert(engine.get_embedding_dim() == 256);
+    }
+
+    {
+        RagEngineConfig config;
+        config.embedding.active_model_id = "tfidf-local";
+        EmbeddingModelDefinition model;
+        model.id = "tfidf-local";
+        model.backend = "tfidf";
+        model.name = "Local TF-IDF registry";
+        model.dimension = 256;
+        config.embedding_registry.models.emplace(model.id, model);
+
+        RagEngine engine(config);
+        auto info = engine.get_embedding_model_info();
+        assert(info.backend == "tfidf");
+        assert(info.active_model_id == "tfidf-local");
+        assert(info.registry_size == 1);
+        assert(info.registry_model_ids.size() == 1);
+        assert(info.registry_model_ids.front() == "tfidf-local");
+        assert(info.name == "Local TF-IDF registry");
     }
 
     std::cout << "Embedding config tests passed\n";

@@ -44,6 +44,7 @@ Post-stabilization 11: done
 Post-stabilization 12: done
 Post-stabilization 13: done
 Post-stabilization 14: done
+Post-stabilization 15: done
 Next: select the next backlog item before implementation
 ```
 
@@ -1164,12 +1165,13 @@ E2 established the ingestion pipeline, parser interface, parser registry, durabl
 
 ### 11.7 Embedding model registry and ONNX runtime follow-ups
 
-Status: deferred after E4 embedding metadata baseline.
+Status: completed baseline in Post-stabilization 15; remaining runtime and installer work is deferred.
 
-E4 added active-model metadata, stable effective model ids, embedding namespaces, dimension validation, pooling selection, and fallback-safe persistence. The following embedding capabilities are intentionally not implemented by the E4 baseline and must not be considered closed:
+E4 added active-model metadata, stable effective model ids, embedding namespaces, dimension validation, pooling selection, and fallback-safe persistence. Post-stabilization 15 added a config-driven embedding model registry with multiple installed model definitions, active model selection, validation warnings, generated-app path resolution, health/admin diagnostics, docs, and regression coverage.
 
-- Add a real embedding model registry loaded from config or a models directory, not only metadata for the active configured model.
-- Support multiple installed embedding models with validation of backend, model id, version, paths, tokenizer, dimension, max sequence length, pooling mode, and license/source metadata.
+The following embedding capabilities are intentionally not complete and must not be considered closed:
+
+- Add automatic model registry discovery from a models directory, beyond the current config-driven registry.
 - Add runtime model switching with explicit reindex/re-embed orchestration and stale index warnings.
 - Add a model install/download command that writes registry metadata and validates model/tokenizer compatibility after download.
 - Add tokenizer implementations beyond the current basic WordPiece-like path, including compatibility with common Hugging Face tokenizer JSON variants.

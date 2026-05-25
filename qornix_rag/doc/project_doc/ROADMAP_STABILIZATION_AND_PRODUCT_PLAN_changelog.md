@@ -1551,6 +1551,39 @@ Standalone smoke returned filtered QA list, QA suggestions, and QA categories.
 git diff --check passed.
 ```
 
+## 2026-05-25 - Post-stabilization embedding model registry baseline completed
+
+Goal:
+- close backlog item 11.7 with a config-driven embedding model registry baseline;
+- support multiple installed embedding model definitions without adding runtime switching or installer scope;
+- surface active model selection and registry validation through health/admin diagnostics.
+
+Implemented:
+- added `EmbeddingModelRegistry` to `RagEngineConfig` and applied `embedding.active_model_id` before embedding backend initialization;
+- added flat config parsing for `embedding.registry.<id>.*` and `rag.embedding.registry.<id>.*`;
+- validated registry backend, ONNX model/tokenizer paths, pooling mode, dimensions, tokenizer settings, and license/source metadata;
+- preserved generated-app path resolution for active registry model paths;
+- exposed registry active id, size, model ids, and warnings through RAG service health, `/api/health`, and admin diagnostics;
+- documented the registry shape in standalone and generated-app config/docs;
+- added regression tests for registry parsing, active model application, missing active id warnings, and engine model info.
+
+Deferred:
+- runtime model switching and explicit reindex/re-embed orchestration;
+- model install/download command that writes registry metadata;
+- tokenizer implementations beyond the current basic WordPiece-like path;
+- automatic registry discovery from a models directory.
+
+Validation:
+```text
+cmake --build build --target test_embedding_config test_rag_service qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_(embedding_config|rag_service|sqlite_source|rag_quality_eval)$' --output-on-failure
+./create_new_project.sh /tmp/qornix_model_registry_rag_app --template rag_app
+./create_new_project.sh /tmp/qornix_model_registry_with_rag_app --with-rag
+cmake -S /tmp/qornix_model_registry_rag_app -B /tmp/qornix_model_registry_rag_app/build && cmake --build /tmp/qornix_model_registry_rag_app/build -j2
+cmake -S /tmp/qornix_model_registry_with_rag_app -B /tmp/qornix_model_registry_with_rag_app/build && cmake --build /tmp/qornix_model_registry_with_rag_app/build -j2
+git diff --check
+```
+
 ## Current milestone state
 
 - Milestone 0: `done`
@@ -1586,11 +1619,12 @@ git diff --check passed.
 - Post-stabilization 12 - generated-app login and auth admin user management: `done`
 - Post-stabilization 13 - auth/RBAC current-user validation and route/cookie matching hardening: `done`
 - Post-stabilization 14 - QA server-side pagination/filtering/suggestions baseline: `done`
+- Post-stabilization 15 - embedding model registry and ONNX config diagnostics baseline: `done`
 - Next - select the next backlog item before implementation: `pending`
 
 ## Deferred / known follow-ups
 
-These items are intentionally not closed by A2/A3/A4, the E1 persistence baseline, the Post-stabilization 13 auth/RBAC baseline, or the Post-stabilization 14 QA scale baseline:
+These items are intentionally not closed by A2/A3/A4, the E1 persistence baseline, the Post-stabilization 13 auth/RBAC baseline, the Post-stabilization 14 QA scale baseline, or the Post-stabilization 15 embedding registry baseline:
 
 - replaceable vector backend adapters beyond local HNSW;
 - optional Faiss backend adapter;
@@ -1602,4 +1636,4 @@ These items are intentionally not closed by A2/A3/A4, the E1 persistence baselin
 - production security hardening beyond the generated-app auth/RBAC baseline, such as CSRF, audit events, session rotation, password reset, invite flows, MFA, and stricter cookie policy;
 - retrieval relevance and query normalization;
 - QA tags, ORM-backed list abstractions, optional FTS, and richer autocomplete beyond the first server-side QA list baseline;
-- model selection UI and additional LLM diagnostics polish.
+- model selection UI, runtime embedding model switching, model installer/download flow, tokenizer upgrades, and additional LLM diagnostics polish.

@@ -148,6 +148,10 @@ struct RagServiceHealth {
     std::string embedding_model_id;
     std::string embedding_model_name;
     size_t embedding_dim = 0;
+    std::string embedding_active_model_id;
+    size_t embedding_registry_size = 0;
+    std::vector<std::string> embedding_registry_model_ids;
+    std::vector<std::string> embedding_registry_warnings;
     std::string vector_store_backend;
     std::string vector_store_status;
     bool hybrid_search = true;

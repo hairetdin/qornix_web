@@ -53,6 +53,18 @@ float parseFloat(const std::string& value, float fallback) {
     }
 }
 
+bool isSupportedEmbeddingBackend(const std::string& backend) {
+    return backend == "tfidf" || backend == "onnx";
+}
+
+bool isSupportedPooling(const std::string& pooling) {
+    return pooling == "mean" || pooling == "cls";
+}
+
+void addWarning(RagConfig& config, const std::string& warning) {
+    config.diagnostics.warnings.push_back(warning);
+}
+
 std::string normalizePathPrefix(std::string prefix, const std::string& fallback) {
     if (prefix.empty()) {
         prefix = fallback;
@@ -132,6 +144,84 @@ float getFloat(const Map& values,
 }
 
 template <typename Map>
+std::vector<std::string> collectEmbeddingRegistryIds(const Map& values) {
+    std::set<std::string> ids;
+    const std::vector<std::string> prefixes = {
+        "embedding.registry.",
+        "rag.embedding.registry."
+    };
+
+    for (const auto& [key, value] : values) {
+        (void)value;
+        for (const auto& prefix : prefixes) {
+            if (key.rfind(prefix, 0) != 0) {
+                continue;
+            }
+            const auto rest = key.substr(prefix.size());
+            const auto dot = rest.find('.');
+            if (dot != std::string::npos && dot > 0) {
+                ids.insert(rest.substr(0, dot));
+            }
+        }
+    }
+
+    return {ids.begin(), ids.end()};
+}
+
+template <typename Map>
+std::string getRegistryString(const Map& values,
+                              const std::string& id,
+                              const std::vector<std::string>& fields,
+                              const std::string& fallback) {
+    std::vector<std::string> keys;
+    keys.reserve(fields.size() * 2);
+    for (const auto& field : fields) {
+        keys.push_back("embedding.registry." + id + "." + field);
+        keys.push_back("rag.embedding.registry." + id + "." + field);
+    }
+    return getString(values, keys, fallback);
+}
+
+template <typename Map>
+bool getRegistryBool(const Map& values,
+                     const std::string& id,
+                     const std::string& field,
+                     bool fallback) {
+    return getBool(values, {
+        "embedding.registry." + id + "." + field,
+        "rag.embedding.registry." + id + "." + field
+    }, fallback);
+}
+
+template <typename Map>
+size_t getRegistrySize(const Map& values,
+                       const std::string& id,
+                       const std::string& field,
+                       size_t fallback) {
+    return getSize(values, {
+        "embedding.registry." + id + "." + field,
+        "rag.embedding.registry." + id + "." + field
+    }, fallback);
+}
+
+void validateEmbeddingModel(RagConfig& config, const EmbeddingModelDefinition& model) {
+    if (!isSupportedEmbeddingBackend(model.backend)) {
+        addWarning(config, "embedding.registry." + model.id + ".backend unsupported: " + model.backend);
+    }
+    if (model.backend == "onnx") {
+        if (model.model_path.empty()) {
+            addWarning(config, "embedding.registry." + model.id + ".model_path is required for onnx backend");
+        }
+        if (model.tokenizer_path.empty()) {
+            addWarning(config, "embedding.registry." + model.id + ".tokenizer_path is required for onnx backend");
+        }
+    }
+    if (!isSupportedPooling(model.pooling)) {
+        addWarning(config, "embedding.registry." + model.id + ".pooling unsupported: " + model.pooling);
+    }
+}
+
+template <typename Map>
 void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.engine.search.use_hybrid = getBool(values, {"search.use_hybrid", "rag.search.use_hybrid"}, config.engine.search.use_hybrid);
     config.engine.search.vector_weight = getFloat(values, {"search.vector_weight", "rag.search.vector_weight"}, config.engine.search.vector_weight);
@@ -147,6 +237,7 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.engine.max_file_size_kb = getSize(values, {"indexing.max_file_size_kb", "rag.indexing.max_file_size_kb"}, config.engine.max_file_size_kb);
 
     config.engine.embedding.backend = getString(values, {"embedding.backend", "rag.embedding.backend"}, config.engine.embedding.backend);
+    config.engine.embedding.active_model_id = getString(values, {"embedding.active_model_id", "rag.embedding.active_model_id"}, config.engine.embedding.active_model_id);
     config.engine.embedding.model_id = getString(values, {"embedding.model_id", "rag.embedding.model_id"}, config.engine.embedding.model_id);
     config.engine.embedding.model_name = getString(values, {"embedding.model_name", "rag.embedding.model_name"}, config.engine.embedding.model_name);
     config.engine.embedding.model_version = getString(values, {"embedding.model_version", "rag.embedding.model_version"}, config.engine.embedding.model_version);
@@ -160,6 +251,40 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.engine.embedding.normalize_embeddings = getBool(values, {"embedding.normalize_embeddings", "rag.embedding.normalize_embeddings"}, config.engine.embedding.normalize_embeddings);
     config.engine.embedding.enable_fallback = getBool(values, {"embedding.enable_fallback", "rag.embedding.enable_fallback"}, config.engine.embedding.enable_fallback);
     config.engine.embedding.lowercase_tokens = getBool(values, {"embedding.lowercase_tokens", "rag.embedding.lowercase_tokens"}, config.engine.embedding.lowercase_tokens);
+
+    EmbeddingModelRegistry registry;
+    for (const auto& id : collectEmbeddingRegistryIds(values)) {
+        EmbeddingModelDefinition model;
+        model.id = id;
+        model.backend = getRegistryString(values, id, {"backend"}, model.backend);
+        model.name = getRegistryString(values, id, {"name", "model_name"}, model.name);
+        model.version = getRegistryString(values, id, {"version", "model_version"}, model.version);
+        model.model_path = getRegistryString(values, id, {"model_path"}, model.model_path);
+        model.tokenizer_path = getRegistryString(values, id, {"tokenizer_path"}, model.tokenizer_path);
+        model.tokenizer_type = getRegistryString(values, id, {"tokenizer_type"}, model.tokenizer_type);
+        model.pooling = getRegistryString(values, id, {"pooling"}, model.pooling);
+        model.dimension = getRegistrySize(values, id, "dimension", model.dimension);
+        model.max_seq_len = getRegistrySize(values, id, "max_seq_len", model.max_seq_len);
+        model.onnx_threads = getRegistrySize(values, id, "onnx_threads", model.onnx_threads);
+        model.normalize_embeddings = getRegistryBool(values, id, "normalize_embeddings", model.normalize_embeddings);
+        model.lowercase_tokens = getRegistryBool(values, id, "lowercase_tokens", model.lowercase_tokens);
+        model.enable_fallback = getRegistryBool(values, id, "enable_fallback", model.enable_fallback);
+        model.license = getRegistryString(values, id, {"license"}, model.license);
+        model.source = getRegistryString(values, id, {"source"}, model.source);
+        validateEmbeddingModel(config, model);
+        registry.models.emplace(id, std::move(model));
+    }
+
+    if (!config.engine.embedding.active_model_id.empty()) {
+        auto active = registry.models.find(config.engine.embedding.active_model_id);
+        if (active != registry.models.end()) {
+            apply_embedding_model_definition(config.engine.embedding, active->second);
+        } else {
+            addWarning(config, "embedding.active_model_id not found in registry: " + config.engine.embedding.active_model_id);
+        }
+    }
+    registry.warnings = config.diagnostics.warnings;
+    config.engine.embedding_registry = std::move(registry);
 
     config.engine.vector_store.backend = getString(values, {"vector_store.backend", "rag.vector_store.backend"}, config.engine.vector_store.backend);
     config.engine.vector_store.index_path = getString(values, {"vector_store.index_path", "rag.vector_store.index_path"}, config.engine.vector_store.index_path);
