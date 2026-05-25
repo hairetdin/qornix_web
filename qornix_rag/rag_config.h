@@ -15,6 +15,7 @@
 #include "prompt_cache.h"
 #include "analytics_service.h"
 #include "deduplication_service.h"
+#include "rag_auth.h"
 #if QORNIX_HAS_SQLITE
 #include "sqlite_source.h"
 #endif
@@ -36,7 +37,7 @@ struct RagRouteConfig {
     std::string ui_path = "/";
     std::string api_prefix = "/api";
 };
-
+using RagSecurityConfig = RagRouteAuthOptions;
 struct RagConfigDiagnostics {
     std::vector<std::string> warnings;
 };
@@ -65,6 +66,7 @@ struct RagConfig {
     bool sqlite_enabled = false;
 #endif
     RagRouteConfig routes;
+    RagSecurityConfig security;
     RagConfigDiagnostics diagnostics;
 };
 
@@ -77,4 +79,3 @@ RagConfig makeRagConfigFromStandaloneFlatMap(
 RagConfig makeRagConfigFromIntegratedFlatMap(
     const std::map<std::string, std::string>& flat,
     const std::string& config_source = "host application config");
-

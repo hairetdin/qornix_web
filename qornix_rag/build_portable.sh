@@ -149,6 +149,8 @@ fi
 sed \
     -e 's#qornix_rag/models/#models/#g' \
     -e 's#qornix_rag/data/rag_kb.db#data/rag_kb.db#g' \
+    -e 's#qornix_rag/data/hnsw_index.bin#data/hnsw_index.bin#g' \
+    -e 's#qornix_rag/data/hnsw_index.meta.json#data/hnsw_index.meta.json#g' \
     -e 's#qornix_rag/knowledge_base#knowledge_base#g' \
     -e 's#auto_index_on_startup: true#auto_index_on_startup: false#g' \
     "${SCRIPT_DIR}/config.yaml" > "${BUNDLE_DIR}/config/config.example.yaml"
@@ -217,6 +219,8 @@ if command -v ldd >/dev/null 2>&1; then
 fi
 
 find "${BUNDLE_DIR}" -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -delete
+find "${BUNDLE_DIR}" -type f -name 'hnsw_index.bin' -delete
+find "${BUNDLE_DIR}" -type f -name 'hnsw_index.meta.json' -delete
 find "${BUNDLE_DIR}" -type d \( -name xapian_index -o -name cmake-build-debug -o -name build \) -prune -exec rm -rf {} +
 
 if [[ "${RUN_SMOKE}" == "true" ]]; then

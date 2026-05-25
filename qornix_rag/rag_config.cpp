@@ -138,6 +138,12 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.engine.search.text_weight = getFloat(values, {"search.text_weight", "rag.search.text_weight"}, config.engine.search.text_weight);
     config.engine.search.top_k = getSize(values, {"search.top_k", "rag.search.top_k"}, config.engine.search.top_k);
     config.engine.search.min_score_threshold = getFloat(values, {"search.min_score_threshold", "rag.search.min_score_threshold"}, config.engine.search.min_score_threshold);
+    config.engine.search.use_query_expansion = getBool(values, {"search.use_query_expansion", "rag.search.use_query_expansion"}, config.engine.search.use_query_expansion);
+    config.engine.search.use_reranking = getBool(values, {"search.use_reranking", "rag.search.use_reranking"}, config.engine.search.use_reranking);
+    config.engine.search.rerank_input_multiplier = getSize(values, {"search.rerank_input_multiplier", "rag.search.rerank_input_multiplier"}, config.engine.search.rerank_input_multiplier);
+    config.engine.search.rerank_path_boost = getFloat(values, {"search.rerank_path_boost", "rag.search.rerank_path_boost"}, config.engine.search.rerank_path_boost);
+    config.engine.search.rerank_metadata_boost = getFloat(values, {"search.rerank_metadata_boost", "rag.search.rerank_metadata_boost"}, config.engine.search.rerank_metadata_boost);
+    config.engine.search.rerank_exact_content_boost = getFloat(values, {"search.rerank_exact_content_boost", "rag.search.rerank_exact_content_boost"}, config.engine.search.rerank_exact_content_boost);
     config.engine.max_file_size_kb = getSize(values, {"indexing.max_file_size_kb", "rag.indexing.max_file_size_kb"}, config.engine.max_file_size_kb);
 
     config.engine.embedding.backend = getString(values, {"embedding.backend", "rag.embedding.backend"}, config.engine.embedding.backend);
@@ -154,6 +160,22 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.engine.embedding.normalize_embeddings = getBool(values, {"embedding.normalize_embeddings", "rag.embedding.normalize_embeddings"}, config.engine.embedding.normalize_embeddings);
     config.engine.embedding.enable_fallback = getBool(values, {"embedding.enable_fallback", "rag.embedding.enable_fallback"}, config.engine.embedding.enable_fallback);
     config.engine.embedding.lowercase_tokens = getBool(values, {"embedding.lowercase_tokens", "rag.embedding.lowercase_tokens"}, config.engine.embedding.lowercase_tokens);
+
+    config.engine.vector_store.backend = getString(values, {"vector_store.backend", "rag.vector_store.backend"}, config.engine.vector_store.backend);
+    config.engine.vector_store.index_path = getString(values, {"vector_store.index_path", "rag.vector_store.index_path"}, config.engine.vector_store.index_path);
+    config.engine.vector_store.metadata_path = getString(values, {"vector_store.metadata_path", "rag.vector_store.metadata_path"}, config.engine.vector_store.metadata_path);
+    config.engine.vector_store.auto_load = getBool(values, {"vector_store.auto_load", "rag.vector_store.auto_load"}, config.engine.vector_store.auto_load);
+    config.engine.vector_store.auto_save = getBool(values, {"vector_store.auto_save", "rag.vector_store.auto_save"}, config.engine.vector_store.auto_save);
+
+    config.security.enabled = getBool(values, {"security.enabled", "rag.security.enabled"}, config.security.enabled);
+    config.security.protect_admin_routes = getBool(values, {"security.protect_admin_routes", "rag.security.protect_admin_routes"}, config.security.protect_admin_routes);
+    config.security.protect_write_routes = getBool(values, {"security.protect_write_routes", "rag.security.protect_write_routes"}, config.security.protect_write_routes);
+    config.security.mode = getString(values, {"security.mode", "rag.security.mode"}, config.security.mode);
+    config.security.admin_token = getString(values, {"security.admin_token", "rag.security.admin_token"}, config.security.admin_token);
+    config.security.admin_token_env = getString(values, {"security.admin_token_env", "rag.security.admin_token_env"}, config.security.admin_token_env);
+    config.security.token_header = getString(values, {"security.token_header", "rag.security.token_header"}, config.security.token_header);
+    config.security.role_header = getString(values, {"security.role_header", "rag.security.role_header"}, config.security.role_header);
+    config.security.admin_role = getString(values, {"security.admin_role", "rag.security.admin_role"}, config.security.admin_role);
 
     const bool has_llm = values.find("llm.api_url") != values.end()
         || values.find("llm.model") != values.end()

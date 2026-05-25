@@ -11,6 +11,7 @@
 #include <chrono>
 #include <iostream>
 #include <sstream>
+#include <thread>
 
 using qornix::rag::QASource;
 
@@ -40,6 +41,8 @@ RagServiceIngestionJob serviceJob(const SQLiteSource::IngestionJobRecord& record
     job.duplicates_found = record.duplicates_found;
     job.skipped = record.skipped;
     job.errors = record.errors;
+    job.progress_percent = record.status == "completed" || record.status == "failed" ? 100 : 0;
+    job.background = false;
     job.error_message = record.error_message;
     job.started_at = record.started_at;
     job.finished_at = record.finished_at;
@@ -187,6 +190,28 @@ RagServiceIndexResponse RagService::indexProject(const std::optional<std::string
 }
 
 RagServiceIngestResponse RagService::ingestProject(const std::optional<std::string>& project_path) {
+    if (!rag_engine_) {
+        RagServiceIngestResponse response;
+        response.message = "RAG engine is not configured";
+        return response;
+    }
+
+    std::string path = project_path.value_or(rag_engine_->get_indexed_project_root());
+    if (path.empty()) {
+        path = ".";
+    }
+
+    RagServiceIngestionJob job;
+    job.id = ingestionJobId();
+    job.root_path = path;
+    job.source_id = "project:" + path;
+    job.status = "running";
+    job.progress_percent = 0;
+
+    return runIngestionJob(std::move(job), path);
+}
+
+RagServiceIngestResponse RagService::startBackgroundIngestProject(const std::optional<std::string>& project_path) {
     RagServiceIngestResponse response;
     if (!rag_engine_) {
         response.message = "RAG engine is not configured";
@@ -198,10 +223,42 @@ RagServiceIngestResponse RagService::ingestProject(const std::optional<std::stri
         path = ".";
     }
 
-    response.job.id = ingestionJobId();
-    response.job.root_path = path;
-    response.job.source_id = "project:" + path;
+    RagServiceIngestionJob job;
+    job.id = ingestionJobId();
+    job.root_path = path;
+    job.source_id = "project:" + path;
+    job.status = "queued";
+    job.progress_percent = 0;
+    job.background = true;
+    updateActiveIngestionJob(job);
+
+#if QORNIX_HAS_SQLITE
+    if (sqlite_source_) {
+        sqlite_source_->recordIngestionJobStarted(job.id, job.source_id, path);
+    }
+#endif
+
+    response.success = true;
+    response.message = "Ingestion job queued";
+    response.job = job;
+
+    std::thread([this, job, path]() mutable {
+        job.status = "running";
+        job.progress_percent = 5;
+        job.background = true;
+        updateActiveIngestionJob(job);
+        runIngestionJob(std::move(job), path);
+    }).detach();
+
+    return response;
+}
+
+RagServiceIngestResponse RagService::runIngestionJob(RagServiceIngestionJob job, const std::string& path) {
+    RagServiceIngestResponse response;
+    response.job = job;
     response.job.status = "running";
+    response.job.progress_percent = std::max(response.job.progress_percent, 5);
+    updateActiveIngestionJob(response.job);
 
 #if QORNIX_HAS_SQLITE
     if (sqlite_source_) {
@@ -210,17 +267,21 @@ RagServiceIngestResponse RagService::ingestProject(const std::optional<std::stri
 #endif
 
     try {
+        response.job.progress_percent = 15;
+        updateActiveIngestionJob(response.job);
         auto indexed = indexProject(path);
         const auto ingestion = rag_engine_->get_last_ingestion_result();
         response.success = indexed.success;
         response.message = indexed.message;
         response.stats = indexed.stats;
         response.job.status = indexed.success ? "completed" : "failed";
+        response.job.progress_percent = 100;
         response.job.files_seen = ingestion.files_seen;
         response.job.documents_imported = ingestion.documents_imported;
         response.job.duplicates_found = ingestion.duplicates_found;
         response.job.skipped = ingestion.skipped;
         response.job.errors = ingestion.errors;
+        updateActiveIngestionJob(response.job);
 
 #if QORNIX_HAS_SQLITE
         if (sqlite_source_) {
@@ -232,6 +293,8 @@ RagServiceIngestResponse RagService::ingestProject(const std::optional<std::stri
             );
             if (auto persisted = sqlite_source_->findIngestionJob(response.job.id)) {
                 response.job = serviceJob(*persisted);
+                response.job.progress_percent = 100;
+                response.job.background = job.background;
             }
         }
 #endif
@@ -239,7 +302,9 @@ RagServiceIngestResponse RagService::ingestProject(const std::optional<std::stri
         response.success = false;
         response.message = e.what();
         response.job.status = "failed";
+        response.job.progress_percent = 100;
         response.job.error_message = response.message;
+        updateActiveIngestionJob(response.job);
 #if QORNIX_HAS_SQLITE
         if (sqlite_source_) {
             qornix::rag::IngestionJobResult empty_result;
@@ -251,15 +316,25 @@ RagServiceIngestResponse RagService::ingestProject(const std::optional<std::stri
             );
             if (auto persisted = sqlite_source_->findIngestionJob(response.job.id)) {
                 response.job = serviceJob(*persisted);
+                response.job.progress_percent = 100;
+                response.job.background = job.background;
             }
         }
 #endif
     }
 
+    removeActiveIngestionJob(response.job.id);
     return response;
 }
 
 std::optional<RagServiceIngestionJob> RagService::findIngestionJob(const std::string& job_id) const {
+    {
+        std::lock_guard<std::mutex> lock(ingestion_jobs_mutex_);
+        auto it = active_ingestion_jobs_.find(job_id);
+        if (it != active_ingestion_jobs_.end()) {
+            return it->second;
+        }
+    }
 #if QORNIX_HAS_SQLITE
     if (sqlite_source_) {
         if (auto job = sqlite_source_->findIngestionJob(job_id)) {
@@ -274,9 +349,19 @@ std::optional<RagServiceIngestionJob> RagService::findIngestionJob(const std::st
 
 std::vector<RagServiceIngestionJob> RagService::listIngestionJobs(size_t limit) const {
     std::vector<RagServiceIngestionJob> jobs;
+    {
+        std::lock_guard<std::mutex> lock(ingestion_jobs_mutex_);
+        for (const auto& [_, job] : active_ingestion_jobs_) {
+            jobs.push_back(job);
+            if (jobs.size() >= limit) {
+                return jobs;
+            }
+        }
+    }
 #if QORNIX_HAS_SQLITE
     if (sqlite_source_) {
         for (const auto& job : sqlite_source_->listIngestionJobs(limit)) {
+            if (jobs.size() >= limit) break;
             jobs.push_back(serviceJob(job));
         }
     }
@@ -284,6 +369,16 @@ std::vector<RagServiceIngestionJob> RagService::listIngestionJobs(size_t limit) 
     (void)limit;
 #endif
     return jobs;
+}
+
+void RagService::updateActiveIngestionJob(const RagServiceIngestionJob& job) {
+    std::lock_guard<std::mutex> lock(ingestion_jobs_mutex_);
+    active_ingestion_jobs_[job.id] = job;
+}
+
+void RagService::removeActiveIngestionJob(const std::string& job_id) {
+    std::lock_guard<std::mutex> lock(ingestion_jobs_mutex_);
+    active_ingestion_jobs_.erase(job_id);
 }
 
 bool RagService::deletePersistedDocument(const std::string& relative_path,
@@ -306,6 +401,10 @@ RagServiceSearchResponse RagService::search(const std::string& query, size_t top
         response.success = false;
         return response;
     }
+
+    response.expanded_query = rag_engine_->expand_query(query);
+    response.query_expansion_applied = response.expanded_query != query;
+    response.reranking_applied = rag_engine_->is_reranking_enabled();
 
     auto results = rag_engine_->search(query, top_k);
     response.results.reserve(results.size());
@@ -333,6 +432,9 @@ RagServiceAskResponse RagService::ask(const std::string& question, size_t top_k,
         response.llm_status = "invalid_request";
         return response;
     }
+    response.expanded_query = rag_engine_->expand_query(question);
+    response.query_expansion_applied = response.expanded_query != question;
+    response.reranking_applied = rag_engine_->is_reranking_enabled();
 
     std::string context_text;
     const auto qa_pairs = searchQa(question, std::min<size_t>(top_k, 5));
@@ -428,6 +530,10 @@ RagServiceHealth RagService::health() const {
     health.embedding_model_id = embedding_info.id;
     health.embedding_model_name = embedding_info.name;
     health.embedding_dim = embedding_info.dimension;
+    health.vector_store_backend = rag_engine_->get_vector_store_backend();
+    health.vector_store_status = rag_engine_->get_vector_store_status();
+    health.query_expansion = rag_engine_->is_query_expansion_enabled();
+    health.reranking = rag_engine_->is_reranking_enabled();
 
     if (llm_client_ && llm_client_->is_enabled()) {
         health.llm_response_time_ms = llm_client_->health_check();

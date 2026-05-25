@@ -26,6 +26,23 @@ int main() {
         flat["embedding.max_seq_len"] = "512";
         flat["embedding.onnx_threads"] = "4";
         flat["embedding.lowercase_tokens"] = "false";
+        flat["vector_store.backend"] = "local_hnsw";
+        flat["vector_store.index_path"] = "data/test_hnsw.bin";
+        flat["vector_store.metadata_path"] = "data/test_hnsw.meta.json";
+        flat["vector_store.auto_load"] = "true";
+        flat["vector_store.auto_save"] = "true";
+        flat["search.use_query_expansion"] = "true";
+        flat["search.use_reranking"] = "true";
+        flat["search.rerank_input_multiplier"] = "4";
+        flat["search.rerank_path_boost"] = "0.25";
+        flat["search.rerank_metadata_boost"] = "0.15";
+        flat["search.rerank_exact_content_boost"] = "0.07";
+        flat["rag.security.enabled"] = "true";
+        flat["rag.security.mode"] = "host_header";
+        flat["rag.security.role_header"] = "X-App-Role";
+        flat["rag.security.admin_role"] = "rag_admin";
+        flat["rag.security.protect_admin_routes"] = "true";
+        flat["rag.security.protect_write_routes"] = "false";
 
         auto config = makeRagConfigFromStandaloneFlatMap(flat, "unit");
         assert(config.engine.embedding.backend == "onnx");
@@ -38,6 +55,23 @@ int main() {
         assert(config.engine.embedding.max_seq_len == 512);
         assert(config.engine.embedding.onnx_threads == 4);
         assert(!config.engine.embedding.lowercase_tokens);
+        assert(config.engine.vector_store.backend == "local_hnsw");
+        assert(config.engine.vector_store.index_path == "data/test_hnsw.bin");
+        assert(config.engine.vector_store.metadata_path == "data/test_hnsw.meta.json");
+        assert(config.engine.vector_store.auto_load);
+        assert(config.engine.vector_store.auto_save);
+        assert(config.engine.search.use_query_expansion);
+        assert(config.engine.search.use_reranking);
+        assert(config.engine.search.rerank_input_multiplier == 4);
+        assert(config.engine.search.rerank_path_boost > 0.24f);
+        assert(config.engine.search.rerank_metadata_boost > 0.14f);
+        assert(config.engine.search.rerank_exact_content_boost > 0.06f);
+        assert(config.security.enabled);
+        assert(config.security.mode == "host_header");
+        assert(config.security.role_header == "X-App-Role");
+        assert(config.security.admin_role == "rag_admin");
+        assert(config.security.protect_admin_routes);
+        assert(!config.security.protect_write_routes);
     }
 
     {

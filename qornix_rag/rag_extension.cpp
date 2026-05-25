@@ -135,7 +135,8 @@ void RagExtension::registerRoutes(HttpServer& server, DIContainer& container) {
         , RagRouteOptions{
             runtime_config_.routes.expose_root_ui,
             runtime_config_.routes.ui_path,
-            runtime_config_.routes.api_prefix
+            runtime_config_.routes.api_prefix,
+            runtime_config_.security
         }
     );
 

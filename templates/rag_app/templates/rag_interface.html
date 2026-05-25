@@ -251,6 +251,8 @@
         .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin-top: 12px; }
         .stat { background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
         .stat strong { display: block; font-size: 24px; color: var(--accent); margin-bottom: 4px; }
+        .admin-grid { grid-template-columns: minmax(360px, .9fr) minmax(560px, 1.2fr); }
+        .admin-pre { max-height: 460px; overflow: auto; white-space: pre-wrap; }
         .notice { border-radius: 14px; padding: 12px; background: #f8fafc; border: 1px solid var(--line); color: var(--muted); line-height: 1.5; }
         .notice.error { background: #fef2f2; color: var(--danger); border-color: #fecaca; }
         .notice.ok { background: #f0fdf4; color: var(--ok); border-color: #bbf7d0; }
@@ -311,7 +313,7 @@
     <main class="shell">
         <section class="hero">
             <h1>Qornix RAG Local Wiki</h1>
-            <p>Интерфейс RAG-приложения для вопросов к проекту и базе знаний. Основной сценарий — Ask с LLM-ответом и источниками; поиск, QA и состояние системы доступны во вкладках.</p>
+            <p>Локальный standalone-интерфейс для вопросов к проекту и базе знаний. Основной сценарий — Ask с LLM-ответом и источниками; поиск, QA и состояние системы доступны во вкладках.</p>
             <div class="toolbar">
                 <span class="pill" id="hero-llm">LLM: checking...</span>
                 <span class="pill" id="hero-index">Index: checking...</span>
@@ -326,6 +328,7 @@
             <button class="tab-btn" data-tab="search">Search</button>
             <button class="tab-btn" data-tab="qa">QA</button>
             <button class="tab-btn" data-tab="sources">Sources / Health</button>
+            <button class="tab-btn" data-tab="admin">Admin</button>
         </nav>
 
         <section id="tab-ask" class="tab-panel active">
@@ -335,7 +338,7 @@
                     <p class="muted">Задайте вопрос. Система найдёт локальный контекст и передаст его в LLM.</p>
                     <div id="ask-llm-diagnostic" style="margin-top: 12px;"></div>
                     <label for="ask-input">Вопрос</label>
-                    <textarea id="ask-input" placeholder="Например: Как запускается RAG application и какие endpoints доступны?"></textarea>
+                    <textarea id="ask-input" placeholder="Например: Как запускается standalone qornix_rag и какие endpoints доступны?"></textarea>
                     <div class="row" style="margin-top: 10px;">
                         <div class="small">
                             <label for="ask-top-k">Top K</label>
@@ -382,9 +385,9 @@
             <div class="grid qa-grid">
                 <div class="card">
                     <h2>Add QA pair</h2>
-                    <p class="muted">Локальная база знаний для wiki-сценариев. В этом приложении она хранится в локальной SQLite-базе, если SQLite включён в конфиге.</p>
+                    <p class="muted">Локальная база знаний для wiki-сценариев. В standalone она хранится в локальной SQLite-базе, если SQLite включён в конфиге.</p>
                     <label for="qa-question">Question</label>
-                    <input id="qa-question" placeholder="Например: Какой порт по умолчанию у RAG-приложения?">
+                    <input id="qa-question" placeholder="Например: Какой порт по умолчанию у qornix_rag standalone?">
                     <label for="qa-answer">Answer</label>
                     <textarea id="qa-answer" placeholder="Например: По умолчанию 8081, но можно передать --port 8082."></textarea>
                     <label for="qa-category">Category</label>
@@ -452,6 +455,31 @@
                 </aside>
             </div>
         </section>
+
+        <section id="tab-admin" class="tab-panel">
+            <div class="grid admin-grid">
+                <div class="card">
+                    <h2>Admin</h2>
+                    <label for="admin-token">Admin token</label>
+                    <input id="admin-token" type="password" autocomplete="off" placeholder="Optional token for protected RAG admin/write routes">
+                    <div style="margin-top: 12px;">
+                        <button class="btn secondary" onclick="saveAdminToken()">Save token</button>
+                        <button class="btn secondary" onclick="clearAdminToken()">Clear token</button>
+                    </div>
+                    <h3>Actions</h3>
+                    <div class="item-actions">
+                        <button class="btn" onclick="loadAdminDiagnostics()">Diagnostics</button>
+                        <button class="btn secondary" onclick="loadIngestionJobs()">Ingestion jobs</button>
+                        <button class="btn secondary" onclick="loadMetrics()">Metrics</button>
+                    </div>
+                    <div id="admin-status" style="margin-top: 12px;"></div>
+                </div>
+                <aside class="card">
+                    <h2>Output</h2>
+                    <div id="admin-output" class="list"><div class="notice">Select an admin action.</div></div>
+                </aside>
+            </div>
+        </section>
     </main>
 
     <script>
@@ -463,10 +491,12 @@
         let lastQAPairs = [];
         let qaCurrentPage = 1;
         let qaPageSize = 25;
+        const ADMIN_TOKEN_STORAGE_KEY = 'qornix-rag-admin-token';
 
         window.addEventListener('load', async () => {
             setupTabs();
             setupShortcuts();
+            restoreAdminToken();
             await refreshDashboard();
         });
 
@@ -479,6 +509,7 @@
                     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
                     if (btn.dataset.tab === 'qa') await loadQAPairs();
                     if (btn.dataset.tab === 'sources') await refreshDashboard();
+                    if (btn.dataset.tab === 'admin') await loadAdminDiagnostics();
                 });
             });
         }
@@ -510,7 +541,7 @@
                 ? `${API_BASE}${path.slice(4)}`
                 : `${API_BASE}${path}`;
             const response = await fetch(targetPath, {
-                headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+                headers: { 'Content-Type': 'application/json', ...adminAuthHeaders(), ...(options.headers || {}) },
                 ...options
             });
             let data = null;
@@ -520,6 +551,21 @@
                 throw new Error(message);
             }
             return data;
+        }
+
+        async function apiText(path, options = {}) {
+            const targetPath = API_BASE && path.startsWith('/api/')
+                ? `${API_BASE}${path.slice(4)}`
+                : `${API_BASE}${path}`;
+            const response = await fetch(targetPath, {
+                headers: { ...adminAuthHeaders(), ...(options.headers || {}) },
+                ...options
+            });
+            const text = await response.text();
+            if (!response.ok) {
+                throw new Error(text || `HTTP ${response.status}`);
+            }
+            return text;
         }
 
         async function refreshDashboard() {
@@ -592,8 +638,8 @@ Available models: ${escapeHtml(modelsText)}</div>
                     severity: 'error',
                     heroText: 'LLM: status error',
                     title: 'Не удалось проверить состояние LLM',
-                    summary: 'Интерфейс не смог получить данные health API. Проверьте, что приложение запущено и обновите страницу.',
-                    actions: ['Перезапустите приложение.', 'Откройте endpoint health в браузере для быстрой проверки.']
+                    summary: 'Интерфейс не смог получить данные /api/health. Проверьте, что qornix_rag запущен и обновите страницу.',
+                    actions: ['Перезапустите qornix_rag.', 'Откройте /api/health в браузере для быстрой проверки.']
                 };
                 currentLlmDiagnostic = diagnostic;
                 renderGlobalLlmDiagnostic(diagnostic);
@@ -631,9 +677,9 @@ Available models: ${escapeHtml(modelsText)}</div>
                     title: 'Модель из настроек не найдена',
                     summary: `Сервер ${providerLabel(provider)} отвечает, но в настройке указана модель ${quoteOrDash(configuredModel)}, а среди доступных моделей её нет. Доступные модели: ${formatAvailableModels(availableModels)}.`,
                     actions: [
-                        `Самый простой вариант: открыть config.yaml и заменить llm.model на ${replacementLine}.`,
+                        `Самый простой вариант: открыть qornix_rag/config.yaml и заменить llm.model на ${replacementLine}.`,
                         provider === 'ollama' ? `Или установить нужную модель командой: ${pullLine}.` : 'Или установить/подключить модель с именем из конфигурации.',
-                        'После изменения config.yaml перезапустите приложение.'
+                        'После изменения config.yaml перезапустите qornix_rag.'
                     ],
                     provider, configuredModel, availableModels, apiUrl, status, recommendedModel
                 };
@@ -647,7 +693,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                     summary: `Сервер ${providerLabel(provider)} отвечает, но не сообщил ни одной доступной модели. В настройке указана модель ${quoteOrDash(configuredModel)}.`,
                     actions: [
                         provider === 'ollama' ? `Установите модель: ollama pull ${configuredModel || 'llama3'}.` : 'Проверьте настройки provider и доступные модели на стороне LLM сервера.',
-                        'После установки модели обновите страницу или перезапустите приложение.'
+                        'После установки модели обновите страницу или перезапустите qornix_rag.'
                     ],
                     provider, configuredModel, availableModels, apiUrl, status, recommendedModel
                 };
@@ -673,9 +719,9 @@ Available models: ${escapeHtml(modelsText)}</div>
                 ];
             }
             return [
-                'Проверьте LLM API URL в config.yaml.',
+                'Проверьте LLM API URL в qornix_rag/config.yaml.',
                 'Проверьте API key или параметры подключения, если provider требует авторизацию.',
-                'После исправления настроек перезапустите приложение или обновите страницу.'
+                'После исправления настроек перезапустите qornix_rag или обновите страницу.'
             ];
         }
 
@@ -849,7 +895,8 @@ Available models: ${escapeHtml(modelsText)}</div>
                 });
                 renderAnswer(data.answer || 'Пустой ответ.');
                 const statusType = data.llm_status === 'ok' ? 'ok' : 'warn';
-                showAskStatus(`LLM: ${data.llm_status || 'unknown'} | ${data.response_time_ms ?? 0} ms | sources: ${(data.context || []).length}`, statusType);
+                const confidence = formatScore(data.retrieval_confidence ?? 0);
+                showAskStatus(`LLM: ${data.llm_status || 'unknown'} | ${data.response_time_ms ?? 0} ms | sources: ${(data.context || []).length} | grounding: ${data.grounding_status || 'unknown'} | confidence: ${confidence}`, statusType);
                 renderAskSources(data.context || [], data.sources || []);
             } catch (error) {
                 renderAnswer(error.message);
@@ -967,9 +1014,10 @@ Available models: ${escapeHtml(modelsText)}</div>
             }
             container.innerHTML = context.map((item, index) => `
                 <div class="item">
-                    <div class="item-title">${index + 1}. ${escapeHtml(item.path || sources[index] || 'source')}</div>
+                    <div class="item-title">${index + 1}. ${item.citation_id ? `[${escapeHtml(item.citation_id)}] ` : ''}${escapeHtml(item.source_path || item.path || sources[index] || 'source')}</div>
                     <div class="meta">
                         <span class="badge">score: ${formatScore(item.score)}</span>
+                        <span class="badge">confidence: ${formatScore(item.confidence)}</span>
                         <span>source: ${escapeHtml(item.source_type || 'project')}</span>
                         ${item.category ? `<span>category: ${escapeHtml(item.category)}</span>` : ''}
                     </div>
@@ -1012,9 +1060,10 @@ Available models: ${escapeHtml(modelsText)}</div>
                 }
                 container.innerHTML = results.map((result, index) => `
                     <div class="item">
-                        <div class="item-title">${index + 1}. ${escapeHtml(result.path || '-')}</div>
+                        <div class="item-title">${index + 1}. ${result.citation_id ? `[${escapeHtml(result.citation_id)}] ` : ''}${escapeHtml(result.source_path || result.path || '-')}</div>
                         <div class="meta">
                             <span class="badge">score: ${formatScore(result.score)}</span>
+                            <span class="badge">confidence: ${formatScore(result.confidence)}</span>
                             <span>source: ${escapeHtml(result.source_type || 'project')}</span>
                             <span>type: ${escapeHtml(result.type || '-')}</span>
                             <span>language: ${escapeHtml(result.language || '-')}</span>
@@ -1303,6 +1352,102 @@ ${label}`)) {
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Переиндексировать проект';
+            }
+        }
+
+        function restoreAdminToken() {
+            const input = document.getElementById('admin-token');
+            if (!input) return;
+            try {
+                input.value = localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || '';
+            } catch (_) {
+                input.value = '';
+            }
+        }
+
+        function currentAdminToken() {
+            const input = document.getElementById('admin-token');
+            return input ? input.value.trim() : '';
+        }
+
+        function adminAuthHeaders() {
+            const token = currentAdminToken();
+            return token ? { 'X-Qornix-RAG-Admin-Token': token, 'Authorization': `Bearer ${token}` } : {};
+        }
+
+        function saveAdminToken() {
+            try { localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, currentAdminToken()); } catch (_) {}
+            document.getElementById('admin-status').innerHTML = renderNotice('Admin token saved locally.', 'ok');
+        }
+
+        function clearAdminToken() {
+            const input = document.getElementById('admin-token');
+            if (input) input.value = '';
+            try { localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY); } catch (_) {}
+            document.getElementById('admin-status').innerHTML = renderNotice('Admin token cleared.', 'ok');
+        }
+
+        async function loadAdminDiagnostics() {
+            const output = document.getElementById('admin-output');
+            try {
+                const data = await api('/api/admin/diagnostics');
+                const auth = data.auth || {};
+                output.innerHTML = `
+                    <div class="item">
+                        <div class="item-title">Diagnostics</div>
+                        <div class="meta">
+                            <span class="badge ${data.status === 'ok' ? 'ok' : 'warn'}">${escapeHtml(data.status || 'unknown')}</span>
+                            <span>metrics: ${data.metrics_enabled ? 'enabled' : 'disabled'}</span>
+                            <span>auth: ${auth.enabled ? 'enabled' : 'disabled'}</span>
+                            <span>mode: ${escapeHtml(auth.mode || 'none')}</span>
+                        </div>
+                        <div class="snippet admin-pre">${escapeHtml(JSON.stringify(data, null, 2))}</div>
+                    </div>`;
+                document.getElementById('admin-status').innerHTML = renderNotice('Diagnostics loaded.', 'ok');
+            } catch (error) {
+                output.innerHTML = renderNotice(error.message, 'error');
+                document.getElementById('admin-status').innerHTML = renderNotice('Diagnostics request failed.', 'error');
+            }
+        }
+
+        async function loadIngestionJobs() {
+            const output = document.getElementById('admin-output');
+            try {
+                const data = await api('/api/ingest/jobs?limit=10');
+                const jobs = data.jobs || [];
+                output.innerHTML = jobs.length
+                    ? jobs.map((job) => `
+                        <div class="item">
+                            <div class="item-title">${escapeHtml(job.id || 'job')}</div>
+                            <div class="meta">
+                                <span class="badge ${job.status === 'completed' ? 'ok' : (job.status === 'failed' ? 'error' : 'warn')}">${escapeHtml(job.status || 'unknown')}</span>
+                                <span>progress: ${job.progress_percent ?? 0}%</span>
+                                <span>documents: ${job.documents_imported ?? 0}</span>
+                                <span>errors: ${job.errors ?? 0}</span>
+                            </div>
+                            <div class="snippet">${escapeHtml(job.root_path || '')}</div>
+                        </div>`).join('')
+                    : renderNotice('No ingestion jobs found.');
+                document.getElementById('admin-status').innerHTML = renderNotice('Ingestion jobs loaded.', 'ok');
+            } catch (error) {
+                output.innerHTML = renderNotice(error.message, 'error');
+                document.getElementById('admin-status').innerHTML = renderNotice('Ingestion jobs request failed.', 'error');
+            }
+        }
+
+        async function loadMetrics() {
+            const output = document.getElementById('admin-output');
+            try {
+                const text = await apiText('/api/metrics');
+                output.innerHTML = `
+                    <div class="item">
+                        <div class="item-title">Prometheus metrics</div>
+                        <div class="snippet admin-pre">${escapeHtml(text || 'No metrics returned.')}</div>
+                    </div>`;
+                document.getElementById('admin-status').innerHTML = renderNotice('Metrics loaded.', 'ok');
+            } catch (error) {
+                output.innerHTML = renderNotice(error.message, 'error');
+                document.getElementById('admin-status').innerHTML = renderNotice('Metrics request failed.', 'error');
             }
         }
 

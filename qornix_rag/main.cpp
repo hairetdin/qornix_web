@@ -384,7 +384,8 @@ int main(int argc, char* argv[]) {
                       , RagRouteOptions{
                             rag_runtime_config.routes.expose_root_ui,
                             rag_runtime_config.routes.ui_path,
-                            rag_runtime_config.routes.api_prefix
+                            rag_runtime_config.routes.api_prefix,
+                            rag_runtime_config.security
                         }
         );
 

@@ -838,6 +838,376 @@ Built target qornix_web
 Built target qornix_rag_route_extension
 ```
 
+## 2026-05-23 - Roadmap/changelog stabilization sync
+
+Status: `done`
+
+Reason:
+
+- the roadmap top-level current status and changelog showed Milestone E as complete, while section 8 still said `in progress`;
+- the suggested implementation order still listed E3-era work as the next step even though E3, E4, E5, and E6 are complete.
+
+Updated:
+
+- synchronized section 8 to `done` for the E1-E6 production RAG baseline;
+- added a short E1-E6 completed-baseline summary to the roadmap;
+- changed the implementation order section from "through Milestone D" to "through Milestone E";
+- replaced the stale recommended next order with a post-stabilization plan that starts with a local vector backend and HNSW save/load;
+- marked the current phase definition of done as complete for the stabilization and E1-E6 baseline.
+
+Verified:
+
+```bash
+rg -n <stale-roadmap-status-and-order-patterns> \
+  qornix_rag/doc/project_doc/ROADMAP_STABILIZATION_AND_PRODUCT_PLAN.md \
+  qornix_rag/doc/project_doc/ROADMAP_STABILIZATION_AND_PRODUCT_PLAN_changelog.md
+git diff --check
+cmake --build build --target qornix_rag qornix_web qornix_rag_route_extension test_rag_service test_document_chunker test_embedding_config test_sqlite_source test_ingestion_pipeline -j2
+ctest --test-dir build -R 'test_(rag_service|document_chunker|embedding_config|sqlite_source|ingestion_pipeline)$' --output-on-failure
+./build/qornix_rag/qornix_rag --port 8097 --project qornix_rag/doc/project_doc
+curl -fsS http://127.0.0.1:8097/api/health
+curl -fsS http://127.0.0.1:8097/api/admin/diagnostics
+curl -fsS http://127.0.0.1:8097/api/metrics
+```
+
+Observed result:
+
+```text
+No stale roadmap status/order matches were found.
+git diff --check passed.
+100% tests passed, 0 tests failed out of 5.
+Built target qornix_rag, qornix_web, qornix_rag_route_extension, and focused RAG test binaries.
+Standalone smoke returned health, admin diagnostics, and Prometheus metrics.
+```
+
+## 2026-05-23 - Post-stabilization vector store baseline completed
+
+Status: `done`
+
+Scope:
+
+- start the `Recommended post-stabilization order`;
+- add a retrieval-time vector store boundary separate from SQLite metadata persistence;
+- make the local HNSW index saveable/loadable through configuration;
+- keep deeper metadata validation and stale-index rebuild policy as the next post-stabilization item.
+
+Implemented:
+
+- added `qornix_rag/vector_store.h`;
+- added `qornix_rag/vector_store.cpp`;
+- added `VectorStore`, `VectorRecord`, and `VectorSearchHit`;
+- added `LocalHnswVectorStore` with build, search, save, load, clear, readiness, size, and dimension operations;
+- moved `RagEngine` hybrid vector retrieval onto `VectorStore` instead of owning HNSW pointers directly;
+- added `VectorStoreConfig` to `RagEngineConfig`;
+- added `vector_store.backend`, `vector_store.index_path`, `vector_store.auto_load`, and `vector_store.auto_save` config parsing;
+- added standalone and generated-app config examples for `local_hnsw` and `data/hnsw_index.bin`;
+- updated portable bundle config rewriting and cleanup for `hnsw_index.bin`;
+- ignored `qornix_rag/data/` runtime artifacts in Git;
+- exposed `vector_store_backend` and `vector_store_status` through health and admin diagnostics responses;
+- documented vector store config and API health/diagnostics fields;
+- added `qornix_rag/tests/test_vector_store.cpp`;
+- added vector-store config parsing coverage to `test_embedding_config`;
+- fixed a latent missing `<numeric>` include in `qa_source.cpp` that blocked a fresh rebuild after CMake reconfiguration.
+
+Verified:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_TESTS=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
+cmake --build build --target test_vector_store test_embedding_config test_rag_service qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_(vector_store|embedding_config|rag_service|document_chunker|sqlite_source|ingestion_pipeline)$' --output-on-failure
+timeout 8s ./build/qornix_rag/qornix_rag --config qornix_rag/config.yaml --port 8098 --project qornix_rag/doc/project_doc
+timeout 8s ./build/qornix_rag/qornix_rag --config qornix_rag/config.yaml --port 8098 --project qornix_rag/doc/project_doc
+curl -fsS http://127.0.0.1:8098/api/health
+curl -fsS http://127.0.0.1:8098/api/admin/diagnostics
+./create_new_project.sh /tmp/qornix_app_with_vector_store --with-rag
+cmake -S /tmp/qornix_app_with_vector_store -B /tmp/qornix_app_with_vector_store/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_app_with_vector_store/build -j2
+git diff --check
+```
+
+Observed result:
+
+```text
+100% tests passed, 0 tests failed out of 6.
+First standalone smoke saved qornix_rag/data/hnsw_index.bin.
+Second standalone smoke loaded qornix_rag/data/hnsw_index.bin.
+/api/health and /api/admin/diagnostics reported vector_store_backend=local_hnsw and vector_store_status=loaded.
+Generated --with-rag app included vector_store config and built successfully.
+```
+
+## 2026-05-23 - Post-stabilization vector index metadata validation completed
+
+Status: `done`
+
+Scope:
+
+- close the second `Recommended post-stabilization order` item;
+- prevent stale local HNSW index reuse when the embedding model, dimension, vector count, or indexed document/chunk snapshot changes.
+
+Implemented:
+
+- added `vector_store.metadata_path` config parsing;
+- added default metadata sidecar paths to standalone, `rag_app`, and `--with-rag` generated configs;
+- added vector index metadata sidecar writing after local HNSW save;
+- metadata records include backend, index path, embedding model id/backend, embedding dimension, vector count, document/chunk snapshot hash, and build time;
+- load now validates metadata before loading the local HNSW index;
+- stale or missing metadata causes load skip and explicit rebuild/save;
+- portable bundle config rewriting and cleanup now handles `hnsw_index.meta.json`;
+- `test_rag_service` now verifies save, metadata creation, same-snapshot load, and changed-snapshot rebuild behavior.
+
+Verified:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_TESTS=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
+cmake --build build --target test_vector_store test_embedding_config test_rag_service qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_(vector_store|embedding_config|rag_service|document_chunker|sqlite_source|ingestion_pipeline)$' --output-on-failure
+timeout 8s ./build/qornix_rag/qornix_rag --config qornix_rag/config.yaml --port 8098 --project qornix_rag/doc/project_doc
+timeout 8s ./build/qornix_rag/qornix_rag --config qornix_rag/config.yaml --port 8098 --project qornix_rag/doc/project_doc
+curl -fsS http://127.0.0.1:8098/api/health
+curl -fsS http://127.0.0.1:8098/api/admin/diagnostics
+./create_new_project.sh /tmp/qornix_app_with_vector_store --with-rag
+cmake -S /tmp/qornix_app_with_vector_store -B /tmp/qornix_app_with_vector_store/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_app_with_vector_store/build -j2
+git diff --check
+```
+
+Observed result:
+
+```text
+100% tests passed, 0 tests failed out of 6.
+First standalone smoke skipped the old persisted vector index because metadata was missing, rebuilt, and wrote metadata.
+Second standalone smoke loaded qornix_rag/data/hnsw_index.bin with matching metadata.
+/api/health and /api/admin/diagnostics reported vector_store_status=loaded.
+Generated --with-rag app included index and metadata paths and built successfully.
+```
+
+## 2026-05-23 - Post-stabilization background ingestion baseline completed
+
+Status: `done`
+
+Scope:
+
+- close the third `Recommended post-stabilization order` item with a polling-based background ingestion baseline;
+- keep the existing synchronous ingestion behavior intact.
+
+Implemented:
+
+- added `RagService::startBackgroundIngestProject()`;
+- added in-memory active ingestion job tracking with `progress_percent` and `background` fields;
+- updated job lookup/listing so active background jobs are visible before durable completion records are written;
+- kept completed/failed job history backed by existing SQLite durable ingestion job records;
+- extended `POST /api/ingest` to accept `async: true` or `background: true`;
+- async ingestion returns `202 Accepted` with the queued/running job object;
+- `GET /api/ingest/{id}` and `GET /api/ingest/jobs` can be used for polling;
+- added service regression coverage for background ingestion status/progress through `test_rag_service`;
+- documented async ingestion request/response behavior in the API docs.
+
+Verified:
+
+```bash
+cmake --build build --target test_rag_service qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_rag_service$' --output-on-failure
+cmake --build build --target test_vector_store test_embedding_config test_rag_service qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_(vector_store|embedding_config|rag_service|document_chunker|sqlite_source|ingestion_pipeline)$' --output-on-failure
+./build/qornix_rag/qornix_rag --config qornix_rag/config.yaml --port 8099 --project qornix_rag/doc/project_doc
+curl -fsS -X POST http://127.0.0.1:8099/api/ingest -H 'Content-Type: application/json' -d '{"project_path":"qornix_rag/doc/project_doc","async":true}'
+curl -fsS http://127.0.0.1:8099/api/ingest/{job_id}
+curl -fsS 'http://127.0.0.1:8099/api/ingest/jobs?limit=3'
+git diff --check
+```
+
+Observed result:
+
+```text
+100% tests passed, 0 tests failed out of 6.
+Built target qornix_rag, qornix_web, and qornix_rag_route_extension.
+POST /api/ingest with async=true returned a queued background job.
+GET /api/ingest/{id} returned completed job counters and progress_percent=100.
+GET /api/ingest/jobs returned the completed job in history.
+```
+
+## 2026-05-23 - Post-stabilization incremental in-memory reindex baseline completed
+
+Status: `done`
+
+Scope:
+
+- close the fourth `Recommended post-stabilization order` item with an in-memory incremental reindex baseline;
+- avoid recomputing embeddings for unchanged chunks during repeated indexing of the same engine.
+
+Implemented:
+
+- added reusable embedding keys based on effective embedding model id, chunk relative path, and chunk content hash;
+- `RagEngine::index_project()` now captures reusable embeddings before replacing the in-memory document snapshot;
+- `RagEngine::indexSources()` uses the same unchanged-chunk embedding reuse path;
+- unchanged chunks reuse previous embeddings;
+- changed or new chunks generate fresh embeddings;
+- removed chunks naturally become stale when the new in-memory snapshot replaces the old one;
+- added incremental counters to `ProjectStats`: `indexed_chunks`, `reused_embeddings`, `generated_embeddings`, and `stale_embeddings`;
+- exposed incremental counters through index/ingest responses, `/api/health`, `/api/stats`, and admin diagnostics;
+- added regression coverage in `test_rag_service` for first index, unchanged reindex, and changed snapshot behavior.
+
+Verified:
+
+```bash
+cmake --build build --target test_rag_service qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_rag_service$' --output-on-failure
+cmake --build build --target test_vector_store test_embedding_config test_rag_service qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_(vector_store|embedding_config|rag_service|document_chunker|sqlite_source|ingestion_pipeline)$' --output-on-failure
+./build/qornix_rag/qornix_rag --config qornix_rag/config.yaml --port 8100 --project qornix_rag/doc/project_doc
+curl -fsS -X POST http://127.0.0.1:8100/api/index -H 'Content-Type: application/json' -d '{"project_path":"qornix_rag/doc/project_doc"}'
+curl -fsS http://127.0.0.1:8100/api/stats
+curl -fsS http://127.0.0.1:8100/api/health
+git diff --check
+```
+
+Observed result:
+
+```text
+100% tests passed, 0 tests failed out of 1.
+100% focused tests passed, 0 tests failed out of 6.
+Built target qornix_rag, qornix_web, and qornix_rag_route_extension.
+Repeated POST /api/index reused all unchanged chunk embeddings.
+/api/stats and /api/health returned indexed_chunks, reused_embeddings, generated_embeddings, and stale_embeddings.
+```
+
+## 2026-05-24 - Post-stabilization reranking and query expansion baseline completed
+
+Status: `done`
+
+Scope:
+
+- close the fifth `Recommended post-stabilization order` item with a deterministic retrieval-quality baseline;
+- keep query expansion visible in API responses instead of silently changing user intent;
+- avoid adding model-based reranking or evaluation datasets in this step.
+
+Implemented:
+
+- added `search.use_query_expansion`, `search.use_reranking`, `search.rerank_input_multiplier`, and rerank boost config parsing;
+- added deterministic lexical query expansion with normalized terms, simple singular variants, identifier splitting, and path-like stem extraction;
+- added a reranking pass after first-stage vector/Xapian retrieval using path, chunk metadata, and exact content phrase boosts;
+- reranking now collects a larger first-stage candidate pool and trims back to requested `top_k` after rerank;
+- exposed `expanded_query`, `query_expansion_applied`, and `reranking_applied` through Search and Ask service/API responses;
+- exposed query expansion and reranking flags through health, stats, and admin diagnostics;
+- updated standalone, generated `rag_app`, and generated `--with-rag` config defaults;
+- documented retrieval-quality config and API response fields;
+- added service/config regression coverage.
+
+Verified:
+
+```bash
+cmake --build build --target test_rag_service test_embedding_config qornix_rag -j2
+ctest --test-dir build -R 'test_(rag_service|embedding_config)$' --output-on-failure
+cmake --build build --target test_vector_store test_embedding_config test_rag_service qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_(vector_store|embedding_config|rag_service|document_chunker|sqlite_source|ingestion_pipeline)$' --output-on-failure
+bash -n create_new_project.sh
+./create_new_project.sh /tmp/qornix_app_ps5 --with-rag
+cmake -S /tmp/qornix_app_ps5 -B /tmp/qornix_app_ps5/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_app_ps5/build -j2
+git diff --check
+```
+
+Observed result:
+
+```text
+100% focused tests passed, 0 tests failed out of 6.
+qornix_rag, qornix_web, and qornix_rag_route_extension rebuilt successfully.
+Standalone smoke returned query_expansion/reranking health fields and expanded_query/search flags.
+Generated --with-rag app included the retrieval-quality config and built successfully.
+create_new_project.sh syntax check passed.
+git diff --check passed.
+```
+
+## 2026-05-24 - Post-stabilization evaluation regression baseline completed
+
+Status: `done`
+
+Scope:
+
+- close the sixth `Recommended post-stabilization order` item with a first local evaluation dataset;
+- add deterministic regression coverage for retrieval quality, citation correctness, QA citation ordering, and no-context refusal behavior;
+- avoid depending on an external LLM for quality regression tests.
+
+Implemented:
+
+- added `qornix_rag/tests/eval/retrieval_quality.json` as a small fixture dataset with local docs, QA pairs, and expected evaluation cases;
+- added `qornix_rag/tests/test_rag_quality_eval.cpp`;
+- the quality eval test creates a temporary project from the dataset and indexes it through `RagService`;
+- retrieval quality case verifies expected top source, snippet content, confidence, query expansion, and reranking flags;
+- citation case verifies Ask context source paths, `S*` citation ids, grounding status, and LLM-unavailable fallback behavior;
+- QA case verifies matching QA pairs are placed first in Ask context with `Q*` citation ids when SQLite storage is available;
+- refusal case verifies unrelated questions produce empty context, no citations, `grounding_status=no_context`, and `llm_status=unavailable`;
+- registered `test_rag_quality_eval` in `qornix_rag/tests/CMakeLists.txt`.
+
+Verified:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_TESTS=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
+cmake --build build --target test_rag_quality_eval -j2
+ctest --test-dir build -R 'test_rag_quality_eval$' --output-on-failure
+cmake --build build --target test_vector_store test_embedding_config test_rag_service test_rag_quality_eval qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_(vector_store|embedding_config|rag_service|rag_quality_eval|document_chunker|sqlite_source|ingestion_pipeline)$' --output-on-failure
+git diff --check
+```
+
+Observed result:
+
+```text
+100% focused tests passed, 0 tests failed out of 7.
+qornix_rag, qornix_web, and qornix_rag_route_extension rebuilt successfully.
+git diff --check passed.
+```
+
+## 2026-05-24 - Post-stabilization admin UI and route auth baseline completed
+
+Status: `done`
+
+Scope:
+
+- close the seventh `Recommended post-stabilization order` item with a first generated-app admin/security baseline;
+- keep standalone local mode usable without mandatory auth;
+- add an upstream-friendly host auth/RBAC integration point without implementing full user/session management inside standalone RAG.
+
+Implemented:
+
+- added `RagRouteAuthOptions` and `RagConfig.security`;
+- parsed `security.*` and `rag.security.*` config keys;
+- added optional RAG route guard modes:
+  - `admin_token`, accepting `Authorization: Bearer <token>` or `X-Qornix-RAG-Admin-Token`;
+  - `host_header`, accepting a configured role header from a trusted host app or reverse proxy;
+- protected admin routes and write routes when `security.enabled` is true;
+- exposed route auth status through admin diagnostics;
+- added `security` defaults to standalone, dedicated `rag_app`, and generated `--with-rag` configs;
+- added an Admin tab to the RAG UI with local admin-token storage, diagnostics, ingestion job history, and Prometheus metrics views;
+- synced the dedicated `templates/rag_app/templates/rag_interface.html` UI copy;
+- documented route security in API, config, generated README, operations, and integration docs;
+- added config parsing coverage for `rag.security.*`.
+
+Verified:
+
+```bash
+cmake --build build --target test_embedding_config test_rag_service test_rag_quality_eval qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_(embedding_config|rag_service|rag_quality_eval)$' --output-on-failure
+QORNIX_RAG_ADMIN_TOKEN=secret ./build/qornix_rag/qornix_rag --config <tmp-security-enabled-config> --port 8102 --project qornix_rag/doc/project_doc
+curl http://127.0.0.1:8102/api/admin/diagnostics
+curl -H 'X-Qornix-RAG-Admin-Token: secret' http://127.0.0.1:8102/api/admin/diagnostics
+./create_new_project.sh /tmp/qornix_app_ps7b --with-rag
+cmake -S /tmp/qornix_app_ps7b -B /tmp/qornix_app_ps7b/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_app_ps7b/build -j2
+git diff --check
+```
+
+Observed result:
+
+```text
+100% focused tests passed, 0 tests failed out of 3.
+qornix_rag, qornix_web, and qornix_rag_route_extension rebuilt successfully.
+Standalone auth smoke returned 401 without token and 200 with token.
+Generated --with-rag app included security config and Admin tab.
+Generated app auth smoke returned /rag 200, diagnostics 401 without token, and diagnostics 200 with token.
+git diff --check passed.
+```
+
 ## Current milestone state
 
 - Milestone 0: `done`
@@ -859,17 +1229,24 @@ Built target qornix_rag_route_extension
   - E4 ONNX embedding expansion: `done`
   - E5 RAG quality improvements: `done`
   - E6 operations and deployment: `done`
+- Post-stabilization 1 - VectorStore and local HNSW save/load baseline: `done`
+- Post-stabilization 2 - vector index metadata validation and stale rebuild baseline: `done`
+- Post-stabilization 3 - background ingestion with progress polling baseline: `done`
+- Post-stabilization 4 - incremental in-memory reindex baseline: `done`
+- Post-stabilization 5 - reranking and query expansion baseline: `done`
+- Post-stabilization 6 - evaluation datasets and retrieval-quality regression tests: `done`
+- Post-stabilization 7 - admin UI and host-application auth/RBAC integration baseline: `done`
+- Next - select the next backlog item before implementation: `pending`
 
 ## Deferred / known follow-ups
 
 These items are intentionally not closed by A2/A3/A4 or the E1 persistence baseline:
 
-- serving retrieval directly from persisted vectors, including HNSW save/load or a replaceable vector backend;
-- local SQLite metadata plus persisted HNSW index files;
+- replaceable vector backend adapters beyond local HNSW;
 - optional Faiss backend adapter;
 - optional Qdrant backend adapter;
 - optional pgvector backend adapter;
-- vector backend selection/configuration docs and tests;
+- deeper vector backend selection docs and tests beyond the local HNSW baseline;
 - arbitrary document ingestion beyond current text/Markdown/QA flows;
 - PDF/DOCX/XLSX/images/OCR support;
 - auth/RBAC, which is not needed for standalone and belongs only to networked application templates if required later;

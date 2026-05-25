@@ -59,7 +59,7 @@ GET  /api/rag/sources
 GET  /api/rag/qa/list
 ```
 
-Protect diagnostics, metrics, QA write, ingestion, and delete routes with the host application's auth/proxy layer before exposing a generated app outside a trusted network. See generated `doc/operations.md` for the deployment checklist.
+Protect diagnostics, metrics, QA write, ingestion, and delete routes with `rag.security` or the host application's auth/proxy layer before exposing a generated app outside a trusted network. See generated `doc/operations.md` for the deployment checklist.
 
 ## Dynamic Route Extension
 

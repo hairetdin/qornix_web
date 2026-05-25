@@ -158,6 +158,23 @@ if(NOT QORNIX_RAG_CORE_LINK_TARGET)
 endif()
 add_test(NAME test_document_chunker COMMAND test_document_chunker)
 
+add_executable(test_vector_store
+    test_vector_store.cpp
+)
+target_include_directories(test_vector_store PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+target_link_libraries(test_vector_store PRIVATE
+    ${QORNIX_RAG_CORE_LINK_TARGET}
+)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_vector_store PRIVATE
+        ../vector_store.cpp
+    )
+endif()
+add_test(NAME test_vector_store COMMAND test_vector_store)
+
 add_executable(test_embedding_config
     test_embedding_config.cpp
 )
@@ -210,6 +227,45 @@ if(SQLITE3_LIBRARY)
 endif()
 find_yaml_cpp_for(test_rag_service)
 add_test(NAME test_rag_service COMMAND test_rag_service)
+
+add_executable(test_rag_quality_eval
+    test_rag_quality_eval.cpp
+)
+target_include_directories(test_rag_quality_eval PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${QORNIX_WEB_CORE_INCLUDE}
+)
+target_link_libraries(test_rag_quality_eval PRIVATE
+    ${QORNIX_RAG_CORE_LINK_TARGET}
+    ${QORNIX_WEB_CORE_LINK_TARGET}
+    ${QORNIX_WEB_CORE_LIB}
+    Boost::json
+)
+target_compile_definitions(test_rag_quality_eval PRIVATE
+    QORNIX_RAG_TEST_EVAL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/eval"
+)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_rag_quality_eval PRIVATE
+        ../rag_service.cpp
+        ../rag_config.cpp
+        ../llm_client.cpp
+        ../llm_cache.cpp
+        ../rate_limiter.cpp
+        ../file_source.cpp
+        ../qa_source.cpp
+        ../text_source.cpp
+        ../memory_source.cpp
+        ../sqlite_source.cpp
+    )
+endif()
+if(SQLITE3_LIBRARY)
+    target_link_libraries(test_rag_quality_eval PRIVATE ${SQLITE3_LIBRARY})
+    target_include_directories(test_rag_quality_eval PRIVATE ${SQLITE3_INCLUDE_DIR})
+    target_compile_definitions(test_rag_quality_eval PRIVATE QORNIX_HAS_SQLITE=1)
+endif()
+find_yaml_cpp_for(test_rag_quality_eval)
+add_test(NAME test_rag_quality_eval COMMAND test_rag_quality_eval)
 
 # Graceful degradation tests
 add_rag_test(test_graceful_degradation test_graceful_degradation.cpp)
@@ -482,8 +538,10 @@ message(STATUS "  - test_llm_client")
 message(STATUS "  - test_rag_api")
 message(STATUS "  - test_ingestion_pipeline")
 message(STATUS "  - test_document_chunker")
+message(STATUS "  - test_vector_store")
 message(STATUS "  - test_embedding_config")
 message(STATUS "  - test_rag_service")
+message(STATUS "  - test_rag_quality_eval")
 message(STATUS "  - test_graceful_degradation")
 message(STATUS "  - test_health_check")
 message(STATUS "  - test_streaming")

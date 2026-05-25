@@ -125,6 +125,8 @@ The script downloads the default BERT-style ONNX text embedding model from Huggi
 
 See `doc/operations.md` for Docker Compose, persistent volumes, diagnostics, metrics, rate limits, backup/restore, and network exposure guidance.
 
+RAG route security is configured under `rag.security` in `config.yaml`. Set `enabled: true` and provide `QORNIX_RAG_ADMIN_TOKEN` to protect admin/write routes with a bearer or `X-Qornix-RAG-Admin-Token` token. Use `mode: host_header` when an upstream app or reverse proxy already performs auth and forwards an admin role header.
+
 Useful options:
 
 ```bash

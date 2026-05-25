@@ -30,7 +30,14 @@ Milestone B: done
 Milestone C: done
 Milestone D: done
 Milestone E: done
-Next: Stabilization review / commit current roadmap work
+Post-stabilization 1: done
+Post-stabilization 2: done
+Post-stabilization 3: done
+Post-stabilization 4: done
+Post-stabilization 5: done
+Post-stabilization 6: done
+Post-stabilization 7: done
+Next: select the next backlog item before implementation
 ```
 
 ## 1. Product split
@@ -675,9 +682,20 @@ curl -fsS -X POST http://127.0.0.1:8008/api/rag/ask -H 'Content-Type: applicatio
 
 ## 8. Milestone E: production RAG expansion
 
-Status: `in progress`
+Status: `done` for the E1-E6 production RAG baseline.
 
 This milestone starts only after standalone stabilization, reusable core separation, and template integration are clear.
+
+Completed baseline:
+
+- E1 persistent document/chunk/embedding storage through SQLite-backed metadata;
+- E2 text/Markdown/code/HTML ingestion pipeline with durable job records and delete flow;
+- E3 chunk-level retrieval and persistence for text, Markdown, and code;
+- E4 embedding model metadata, ONNX output handling, and stable embedding model ids;
+- E5 citation, confidence, and grounding metadata in Ask/Search responses;
+- E6 diagnostics, metrics, generated operations docs, and deployment guidance.
+
+The remaining work after E6 is tracked as deferred follow-ups in section 11 and should be planned as post-stabilization work, not as unfinished stabilization.
 
 ### E1. Persistent knowledge and vector storage
 
@@ -774,13 +792,17 @@ Completed baseline:
 - added durable SQLite ingestion job records in `rag_ingestion_jobs`;
 - added `RagService::ingestProject()` as a job-oriented indexing entrypoint;
 - added `/api/rag/ingest`, `/api/rag/ingest/jobs`, and `/api/rag/ingest/{id}` for ingestion job execution/history/status;
+- added background ingestion through `POST /api/rag/ingest` with `async: true` or `background: true`;
+- added in-memory running job status and progress polling while background ingestion is active;
+- added incremental in-memory reindexing that reuses unchanged chunk embeddings by embedding model id, chunk path, and content hash;
+- exposed incremental counters for indexed chunks, reused embeddings, generated embeddings, and stale embeddings;
 - added persisted document delete flow through `SQLiteSource::deletePersistedDocument()`, `RagService::deletePersistedDocument()`, and `/api/rag/documents/delete`;
 - added service and SQLite tests for durable ingestion jobs and persisted document delete;
 - added focused ingestion pipeline tests and kept existing data source, service, and SQLite persistence tests passing.
 
 Remaining E2 follow-ups:
 
-- asynchronous/background ingestion with live progress streaming instead of synchronous job completion;
+- live progress streaming instead of polling-only background ingestion;
 - full incremental runtime indexing by modified time and content hash instead of rebuilding the in-memory index;
 - parser plugins for PDF, DOCX, XLSX/CSV, PPTX, and images/OCR; see backlog 11.6.
 
@@ -939,7 +961,7 @@ Remaining E6 follow-ups:
 
 ## 9. Suggested implementation order
 
-Completed order through Milestone D:
+Completed order through Milestone E:
 
 1. Close A5: configuration, route ownership, and integration boundary hardening.
 2. Close A6: build separation and reusable-target preparation.
@@ -948,15 +970,26 @@ Completed order through Milestone D:
 5. Start Milestone B: reusable RAG core.
 6. Add `qornix_web/templates/rag_app`.
 7. Add `--with-rag` option for existing templates.
+8. Add E1 persistent document/chunk/embedding storage baseline.
+9. Add E2 ingestion pipeline and durable ingestion job baseline.
+10. Add E3 chunking strategies and chunk-level persistence.
+11. Add E4 embedding model metadata and ONNX expansion baseline.
+12. Add E5 citation, confidence, and grounding metadata.
+13. Add E6 diagnostics, metrics, and generated-app operations baseline.
 
-Recommended next order:
+Recommended post-stabilization order:
 
-1. Add E3 chunking strategies so persisted chunks are not only whole-document chunks.
-2. Add HNSW save/load or a replaceable vector backend that can use persisted vectors.
-3. Add deeper E2 follow-ups such as asynchronous ingestion and full incremental in-memory reindexing.
-4. Improve retrieval quality, citations, reranking, and evaluation after persisted chunks and vectors exist.
+1. Done baseline: add a dedicated `VectorStore` interface and local HNSW save/load so retrieval can reuse a persisted local vector index across restarts.
+2. Done baseline: add vector index metadata validation, stale-index detection, and explicit rebuild behavior.
+3. Done baseline: add asynchronous/background ingestion with progress polling.
+4. Done baseline: add incremental in-memory reindexing by content hash with unchanged chunk embedding reuse.
+5. Done baseline: add reranking and query expansion after persisted vector retrieval is stable.
+6. Done baseline: add evaluation datasets and regression tests for retrieval quality, citation correctness, and refusal behavior.
+7. Done baseline: add admin UI and host-application auth/RBAC integration for generated full web apps.
 
 ## 10. Definition of done for the current phase
+
+Status: `done` for the stabilization and E1-E6 baseline described in this roadmap.
 
 The current phase is complete when these statements are true:
 
@@ -993,7 +1026,7 @@ Future direction:
 - Improve ranking so integration docs and user QA entries are preferred over loosely related source files when they match the question.
 - Add configurable project vocabulary or aliases, owned by config/templates/project data rather than hardcoded in the RAG engine.
 - Consider an optional query rewrite step later, but show or log rewritten queries instead of silently changing user intent.
-- Add reranking after first-stage retrieval.
+- Improve beyond the current deterministic first-stage reranking with evaluation-backed ranking rules, project vocabularies, or a model-based reranker.
 
 ### 11.2 LLM response robustness
 
@@ -1076,15 +1109,10 @@ Target dynamic API / ORM requirements:
 
 ### 11.5 Production vector backend adapters
 
-Status: deferred after E1 SQLite persistence baseline.
+Status: partially implemented after the first two post-stabilization vector-store baselines.
 
-E1 established persistent document/chunk/embedding metadata and a `PersistentIndexStore` boundary. The following planned vector backend capabilities are not implemented by the E1 baseline and must not be considered closed:
+E1 established persistent document/chunk/embedding metadata and a `PersistentIndexStore` boundary. The first post-stabilization baselines added the retrieval-time `VectorStore` boundary, local HNSW save/load, vector index metadata sidecars, stale-index detection, and rebuild-on-stale behavior. The following vector backend capabilities are still not complete:
 
-- Add a dedicated `VectorStore` interface for retrieval-time vector search, separate from metadata persistence.
-- Add local HNSW save/load support so the current in-memory HNSW index can survive restart when the persisted document/chunk snapshot is still valid.
-- Store and validate vector index metadata such as backend name, model id, embedding dimension, document/chunk snapshot hash, build time, and index file path.
-- Load a persisted local vector index at startup when metadata matches the current persisted embedding snapshot.
-- Rebuild the vector index automatically or explicitly when metadata is stale.
 - Keep SQLite-backed metadata as the local default, but avoid coupling retrieval to raw SQLite BLOB scans.
 - Add optional Faiss backend adapter after the local HNSW backend contract is stable.
 - Add optional Qdrant backend adapter for deployment scenarios that use an external vector database.
@@ -1110,8 +1138,8 @@ E2 established the ingestion pipeline, parser interface, parser registry, durabl
 - Add table-aware spreadsheet chunking after XLSX/CSV parser plugins expose sheets, ranges, headers, and row/column metadata.
 - Add parser-to-chunker metadata contracts so headings, symbols, pages, tables, captions, and source offsets survive ingestion, retrieval, persistence, and citation rendering.
 - Add chunk quality tests for overlap boundaries, metadata preservation, duplicate/near-duplicate chunks, very small sections, very large sections, and mixed Markdown/code documents.
-- Add asynchronous/background ingestion with progress streaming or polling against in-flight jobs.
-- Add full incremental in-memory reindexing by modified time and content hash instead of rebuilding the current in-memory index.
+- Add live progress streaming for background ingestion jobs beyond the current polling baseline.
+- Add deeper source-level modified-time shortcuts beyond the current chunk-hash embedding reuse baseline.
 - Document dependency requirements, fallback behavior, and parser-specific error reporting.
 - Add parser adapter tests using small fixture files for each supported format.
 
@@ -1136,17 +1164,17 @@ E4 added active-model metadata, stable effective model ids, embedding namespaces
 
 Status: deferred after E5 citation/confidence/grounding metadata baseline.
 
-E5 added citation ids, source path preservation, normalized confidence fields, response-level retrieval confidence, grounding status, prompt citation hints, API metadata, UI rendering, and service-level regression coverage. The following quality capabilities are intentionally not implemented by the E5 baseline and must not be considered closed:
+E5 added citation ids, source path preservation, normalized confidence fields, response-level retrieval confidence, grounding status, prompt citation hints, API metadata, UI rendering, and service-level regression coverage. Post-stabilization 5 added the first actual deterministic query expansion and reranking baseline. The following quality capabilities are intentionally not complete and must not be considered closed:
 
-- Add an actual reranker after first-stage retrieval, with configurable top-N input and top-K output.
-- Add query rewriting and multi-query retrieval, while exposing rewritten/expanded queries in diagnostics.
+- Add model-based or learned reranking beyond the current deterministic path/metadata/exact-phrase boost baseline.
+- Add query rewriting and multi-query retrieval beyond the current deterministic lexical query expansion baseline, while exposing rewritten/expanded queries in diagnostics.
 - Add conversation history with rules for when previous sources can or cannot ground a new answer.
 - Add generated-answer grounding checks that validate claims against cited context.
 - Add citation post-processing that verifies generated answers cite only known source ids such as `S1` or `Q1`.
 - Add user feedback capture for answer helpfulness, citation usefulness, missing context, and wrong answers.
 - Add retrieval and answer-quality analytics tied to feedback and query metadata.
-- Add evaluation datasets for local docs, QA pairs, chunked documents, and generated template apps.
-- Add regression tests for retrieval quality, citation correctness, hallucination refusal, and answer completeness.
+- Expand evaluation datasets beyond the first local docs/QA/refusal baseline to include chunked long documents and generated template apps.
+- Expand regression tests beyond the first retrieval/citation/no-context refusal baseline to cover answer completeness and generated-answer claim checking.
 - Add UI affordances for reporting bad answers, missing sources, and irrelevant sources.
 
 ### 11.9 QA/wiki quality improvements
@@ -1165,14 +1193,14 @@ Future QA improvements:
 
 Status: deferred after E6 generated-app operations baseline.
 
-E6 added diagnostics, metrics, generated operations docs, Docker Compose volume updates, and file-based backup/restore guidance. The following operations capabilities are intentionally not implemented by the E6 baseline and must not be considered closed:
+E6 added diagnostics, metrics, generated operations docs, Docker Compose volume updates, and file-based backup/restore guidance. Post-stabilization 7 added the first admin UI and optional RAG route auth guard baseline. The following operations capabilities are intentionally not complete and must not be considered closed:
 
-- Add host-application auth/RBAC integration for diagnostics, metrics, Ask, QA write, ingestion, and delete routes.
+- Expand beyond the current token/header baseline into full host-application auth/RBAC policy integration for diagnostics, metrics, Ask, QA write, ingestion, and delete routes.
 - Add TLS and reverse-proxy examples for nginx, Caddy, or an equivalent edge proxy.
 - Add structured tracing with request ids across host app routing, RAG retrieval, LLM calls, SQLite persistence, and ingestion jobs.
 - Add first-class backup and restore commands instead of documentation-only file backup examples.
 - Add upload endpoints, upload allowlists, MIME checks, and upload-size enforcement beyond current indexing file-size limits.
-- Add an admin UI for diagnostics, ingestion job history/status, reindexing, delete flows, and backup/export.
+- Expand the first Admin tab beyond diagnostics, metrics, and ingestion job history into reindexing, delete flows, and backup/export.
 - Add production container hardening such as non-root runtime validation, healthcheck directives, read-only filesystem options, and secret mounting examples.
 - Add metrics alert examples for LLM failures, rate-limit rejections, stale indexes, failed ingestion jobs, and storage growth.
 - Add deploy smoke tests for generated `rag_app` and `--with-rag` Docker Compose flows.
