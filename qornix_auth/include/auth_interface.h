@@ -10,6 +10,7 @@
 #include <string>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace qornix_auth {
     enum class AuthStatus {
@@ -28,13 +29,25 @@ namespace qornix_auth {
         AuthStatus status;
         std::string message;
         std::string userId;
+        std::string username;
+        std::string sessionId;
+        std::string token;
+        std::vector<std::string> roles;
+        std::vector<std::string> permissions;
 
         static AuthResult success(const std::string& user_id) {
-            return {AuthStatus::SUCCESS, "Authentication successful", user_id};
+            AuthResult result;
+            result.status = AuthStatus::SUCCESS;
+            result.message = "Authentication successful";
+            result.userId = user_id;
+            return result;
         }
 
         static AuthResult failure(AuthStatus status, const std::string& message) {
-            return {status, message, ""};
+            AuthResult result;
+            result.status = status;
+            result.message = message;
+            return result;
         }
     };
 

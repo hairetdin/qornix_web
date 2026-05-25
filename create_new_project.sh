@@ -272,6 +272,37 @@ if [ "$with_rag" = "true" ]; then
 install(DIRECTORY knowledge_base models DESTINATION .)
 install(DIRECTORY DESTINATION data)"
     with_rag_config="
+auth:
+  enabled: false
+  mode: session
+  registration_enabled: false
+  secure_cookies: false
+  auto_migrate: true
+  min_password_length: 12
+  session_duration_minutes: 30
+  jwt_duration_minutes: 60
+  jwt_secret: change-this-secret-key-in-production
+  jwt_issuer: qornix-auth
+  default_roles: user
+  default_permissions: rag:read
+  required_roles:
+  required_permissions:
+  admin_permissions: auth:admin
+  rag_read_permissions: rag:read
+  rag_write_permissions: rag:write
+  rag_admin_permissions: rag:admin
+  exclude_paths: /auth/login,/auth/register,/health,/static
+  database:
+    driver: sqlite
+    path: data/auth.db
+  bootstrap_admin:
+    enabled: false
+    username: admin
+    email:
+    password_env: QORNIX_ADMIN_PASSWORD
+    roles: admin
+    permissions: rag:read,rag:write,rag:admin,auth:admin
+
 rag:
   route:
     ui_path: /rag

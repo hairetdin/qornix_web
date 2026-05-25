@@ -37,6 +37,12 @@ Post-stabilization 4: done
 Post-stabilization 5: done
 Post-stabilization 6: done
 Post-stabilization 7: done
+Post-stabilization 8: done
+Post-stabilization 9: done
+Post-stabilization 10: done
+Post-stabilization 11: done
+Post-stabilization 12: done
+Post-stabilization 13: done
 Next: select the next backlog item before implementation
 ```
 
@@ -986,6 +992,12 @@ Recommended post-stabilization order:
 5. Done baseline: add reranking and query expansion after persisted vector retrieval is stable.
 6. Done baseline: add evaluation datasets and regression tests for retrieval quality, citation correctness, and refusal behavior.
 7. Done baseline: add admin UI and host-application auth/RBAC integration for generated full web apps.
+8. Done baseline: stabilize `qornix_auth` before replacing RAG's token/header guard with full host-application authentication.
+9. Done baseline: add `qornix_orm`-backed `AuthStore` so durable auth can use SQLite, PostgreSQL, or MySQL through the configured ORM driver.
+10. Done baseline: wire generated `rag_app` and `--with-rag` applications to `qornix_auth` plus `QornixOrmAuthStore`.
+11. Done baseline: add route-level auth policies for generated RAG apps using `rag:read`, `rag:write`, and `rag:admin`.
+12. Done baseline: add generated-app login/logout UI plus `auth:admin` user-management API and Admin-tab controls.
+13. Done baseline: harden auth/RBAC checks so active sessions and bearer tokens re-check the current user record, permission changes take effect without re-login, disabled users lose access, and route/cookie matching avoids prefix-substring bypasses.
 
 ## 10. Definition of done for the current phase
 
@@ -1191,11 +1203,15 @@ Future QA improvements:
 
 ### 11.10 Operations, deployment, and security follow-ups
 
-Status: deferred after E6 generated-app operations baseline.
+Status: partially completed through Post-stabilization 13; remaining production hardening is deferred.
 
-E6 added diagnostics, metrics, generated operations docs, Docker Compose volume updates, and file-based backup/restore guidance. Post-stabilization 7 added the first admin UI and optional RAG route auth guard baseline. The following operations capabilities are intentionally not complete and must not be considered closed:
+E6 added diagnostics, metrics, generated operations docs, Docker Compose volume updates, and file-based backup/restore guidance. Post-stabilization 7-13 added generated-app auth/RBAC baselines: `qornix_auth`, durable `QornixOrmAuthStore`, generated app auth wiring, route-level RAG permissions, login/user-management UI, and current-user validation for sessions/JWTs. The following operations and security capabilities are intentionally not complete and must not be considered closed:
 
-- Expand beyond the current token/header baseline into full host-application auth/RBAC policy integration for diagnostics, metrics, Ask, QA write, ingestion, and delete routes.
+- Add CSRF protection for cookie-authenticated browser write/admin routes.
+- Add session rotation after login and privilege-sensitive user updates.
+- Add auth/security audit events for login, logout, failed login, user-management changes, permission changes, and denied access.
+- Add password reset, invite, and account recovery flows for generated networked applications.
+- Add optional stricter cookie settings such as configurable `SameSite`, `Secure`, domain, and session lifetime policy.
 - Add TLS and reverse-proxy examples for nginx, Caddy, or an equivalent edge proxy.
 - Add structured tracing with request ids across host app routing, RAG retrieval, LLM calls, SQLite persistence, and ingestion jobs.
 - Add first-class backup and restore commands instead of documentation-only file backup examples.

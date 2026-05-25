@@ -28,7 +28,7 @@ set(QORNIX_BUILD_ORM_TESTS OFF CACHE BOOL "Build qornix_orm tests" FORCE)
 
 # Optional framework modules for this application.
 option(@PROJECT_NAME_UPPER@_ENABLE_AUTH "Enable qornix_auth integration" ON)
-option(@PROJECT_NAME_UPPER@_ENABLE_ORM "Enable qornix_orm integration" OFF)
+option(@PROJECT_NAME_UPPER@_ENABLE_ORM "Enable qornix_orm integration" ON)
 option(@PROJECT_NAME_UPPER@_ENABLE_JWT "Enable JWT support in qornix_auth" OFF)
 
 set(ENABLE_AUTH ${@PROJECT_NAME_UPPER@_ENABLE_AUTH} CACHE BOOL "Enable authentication library" FORCE)
@@ -54,6 +54,8 @@ target_link_libraries(@PROJECT_NAME@
 
 target_compile_definitions(@PROJECT_NAME@ PRIVATE
     @PROJECT_NAME_UPPER@_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    $<$<BOOL:${@PROJECT_NAME_UPPER@_ENABLE_AUTH}>:@PROJECT_NAME_UPPER@_ENABLE_AUTH=1>
+    $<$<BOOL:${@PROJECT_NAME_UPPER@_ENABLE_ORM}>:@PROJECT_NAME_UPPER@_ENABLE_ORM=1>
     @WITH_RAG_COMPILE_DEF@
 )
 

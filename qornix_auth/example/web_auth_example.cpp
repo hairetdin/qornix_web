@@ -21,10 +21,16 @@ void setupAuthExample() {
     auth_config.sessionDuration = std::chrono::minutes(30);
     auth_config.jwtDuration = std::chrono::minutes(60);
     auth_config.jwtSecret = "my-super-secret-key-change-in-production";
+    auth_config.minPasswordLength = 12;
 
     auto authManager = std::make_shared<qornix_auth::AuthManager>(auth_config);
 
-    auto regResult = authManager->registerUser("admin", "admin123", "admin@example.com");
+    auto regResult = authManager->registerUser(
+        "admin",
+        "change-this-admin-password",
+        "admin@example.com",
+        {"admin"},
+        {"rag:read", "rag:write", "rag:admin"});
     if (regResult.status == qornix_auth::AuthStatus::SUCCESS) {
         std::cout << "✓ Admin user registered: " << regResult.userId << "\n";
     }

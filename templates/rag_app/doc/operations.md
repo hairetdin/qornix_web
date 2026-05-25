@@ -76,6 +76,33 @@ Then set `QORNIX_RAG_ADMIN_TOKEN` in the runtime environment. Requests can use e
 
 Use `mode: host_header` only behind an authenticated host application or reverse proxy that forwards the configured admin role header.
 
+## qornix_auth Admin UI
+
+Generated RAG apps can use `qornix_auth` as the host application auth layer:
+
+```yaml
+auth:
+  enabled: true
+  admin_permissions: auth:admin
+  bootstrap_admin:
+    enabled: true
+    password_env: QORNIX_ADMIN_PASSWORD
+    permissions: rag:read,rag:write,rag:admin,auth:admin
+```
+
+When auth is enabled, the RAG Admin tab exposes session login/logout controls
+and user management backed by:
+
+```http
+GET /auth/users
+POST /auth/users
+PATCH /auth/users/{id}
+```
+
+Only users with `auth:admin` can access user management. RAG permissions remain
+separate: grant `rag:read`, `rag:write`, and `rag:admin` according to the routes
+the user should operate.
+
 ## Logging
 
 Generated apps use the host application's logging config:
@@ -135,7 +162,9 @@ This rebuilds the in-memory retrieval index from the restored data.
 
 - Keep `server.address: 127.0.0.1` for local-only deployments.
 - Use `0.0.0.0` only behind a trusted network boundary or reverse proxy.
-- Protect `/api/rag/admin/diagnostics`, `/api/rag/metrics`, QA write, ingestion, and document delete endpoints with `rag.security` or an upstream auth layer.
+- Prefer `qornix_auth` for generated apps exposed on a network: set `auth.enabled: true`, configure `auth.database` through `qornix_orm`, and use SQLite/PostgreSQL/MySQL according to the deployment.
+- Use route permissions deliberately: `rag:read` covers read/search/ask, `rag:write` covers indexing/ingestion/QA writes/source writes, `rag:admin` covers diagnostics/metrics/analytics, and `auth:admin` covers user management.
+- Protect `/api/rag/admin/diagnostics`, `/api/rag/metrics`, QA write, ingestion, and document delete endpoints with `qornix_auth`, `rag.security`, or an upstream auth layer.
 - Store LLM API keys outside Git and container images.
 - Review upload/indexing path allowlists before enabling arbitrary user-controlled sources.
 - Keep `rag.indexing.max_file_size_kb` conservative for shared deployments.
