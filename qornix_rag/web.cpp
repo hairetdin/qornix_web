@@ -15,6 +15,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <vector>
+#include <map>
+#include <string_view>
+#include <limits>
 
 namespace http = boost::beast::http;
 namespace urls = boost::urls;
@@ -181,6 +184,86 @@ boost::json::object ingestionJobObject(const RagServiceIngestionJob& job) {
     obj["started_at"] = job.started_at;
     obj["finished_at"] = job.finished_at;
     return obj;
+}
+
+boost::json::object qaPairObject(const QASource::QAPair& pair) {
+    boost::json::object pair_obj;
+    pair_obj["id"] = pair.id;
+    pair_obj["question"] = pair.question;
+    pair_obj["answer"] = pair.answer;
+    pair_obj["category"] = pair.category.empty() ? "general" : pair.category;
+
+    boost::json::array aliases_array;
+    for (const auto& alias : pair.aliases) {
+        aliases_array.emplace_back(alias);
+    }
+    pair_obj["aliases"] = std::move(aliases_array);
+    return pair_obj;
+}
+
+std::string urlDecode(std::string_view value) {
+    std::string decoded;
+    decoded.reserve(value.size());
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '+' ) {
+            decoded.push_back(' ');
+        } else if (value[i] == '%' && i + 2 < value.size()) {
+            const auto hex = value.substr(i + 1, 2);
+            char* end = nullptr;
+            const long code = std::strtol(std::string(hex).c_str(), &end, 16);
+            if (end && *end == '\0') {
+                decoded.push_back(static_cast<char>(code));
+                i += 2;
+            } else {
+                decoded.push_back(value[i]);
+            }
+        } else {
+            decoded.push_back(value[i]);
+        }
+    }
+    return decoded;
+}
+
+std::map<std::string, std::string> parseQueryParams(const urls::url_view& url_view) {
+    std::map<std::string, std::string> params;
+    std::string query = url_view.query();
+    if (!query.empty() && query[0] == '?') {
+        query = query.substr(1);
+    }
+    if (query.empty()) {
+        return params;
+    }
+    std::stringstream ss(query);
+    std::string param;
+    while (std::getline(ss, param, '&')) {
+        const auto eq_pos = param.find('=');
+        if (eq_pos == std::string::npos) {
+            params[urlDecode(param)] = "";
+        } else {
+            params[urlDecode(std::string_view(param).substr(0, eq_pos))] =
+                urlDecode(std::string_view(param).substr(eq_pos + 1));
+        }
+    }
+    return params;
+}
+
+size_t querySize(const std::map<std::string, std::string>& params,
+                 const std::string& key,
+                 size_t fallback,
+                 size_t max_value) {
+    auto it = params.find(key);
+    if (it == params.end() || it->second.empty()) {
+        return fallback;
+    }
+    try {
+        const size_t value = static_cast<size_t>(std::stoull(it->second));
+        if (value == 0) {
+            return fallback;
+        }
+        return std::min(value, max_value);
+    } catch (const std::exception&) {
+        return fallback;
+    }
 }
 
 } // namespace
@@ -1982,121 +2065,84 @@ void RagApiHandler::handleGet(
 
             buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
 
-        } else if (apiPathMatches(path, "/api/qa") || apiPathMatches(path, "/api/qa/list")) {
-            std::string source_id;
-            size_t page = 1;
-            size_t per_page = 20;
+        } else if (apiPathMatches(path, "/api/qa/suggest")) {
+            const auto params = parseQueryParams(url_view);
+            const std::string query = params.count("q") ? params.at("q") : "";
+            const std::string source_id = params.count("source_id") ? params.at("source_id") : "";
+            const size_t limit = querySize(params, "limit", 10, 50);
 
-            std::string query = url_view.query();
-            if (!query.empty() && query[0] == '?') {
-                query = query.substr(1);
-            }
-            if (!query.empty()) {
-                std::stringstream ss(query);
-                std::string param;
-                while (std::getline(ss, param, '&')) {
-                    auto eq_pos = param.find('=');
-                    if (eq_pos != std::string::npos) {
-                        std::string key = param.substr(0, eq_pos);
-                        std::string value = param.substr(eq_pos + 1);
-                        if (key == "source_id") {
-                            source_id = value;
-                        } else if (key == "page") {
-                            page = static_cast<size_t>(std::stoi(value));
-                        } else if (key == "per_page") {
-                            per_page = static_cast<size_t>(std::stoi(value));
-                        }
-                    }
+            boost::json::array suggestions_array;
+            if (rag_service_) {
+                for (const auto& item : rag_service_->suggestQaPairs(query, limit, source_id)) {
+                    boost::json::object obj;
+                    obj["id"] = item.id;
+                    obj["question"] = item.question;
+                    obj["category"] = item.category;
+                    suggestions_array.emplace_back(std::move(obj));
                 }
-            }
-
-#if QORNIX_HAS_SQLITE
-            if (sqlite_source_ &&
-                (source_id.empty() || source_id == sqlite_source_->getId() || source_id == sqlite_source_->getSourceId())) {
-                auto pairs = sqlite_source_->getAllPairs(page, per_page);
-                boost::json::array pairs_array;
-                for (const auto& pair : pairs) {
-                    boost::json::object pair_obj;
-                    pair_obj["id"] = pair.id;
-                    pair_obj["question"] = pair.question;
-                    pair_obj["answer"] = pair.answer;
-                    pair_obj["category"] = pair.category;
-
-                    boost::json::array aliases_array;
-                    for (const auto& alias : pair.aliases) {
-                        aliases_array.emplace_back(alias);
-                    }
-                    pair_obj["aliases"] = std::move(aliases_array);
-                    pairs_array.emplace_back(pair_obj);
-                }
-
-                boost::json::object response;
-                response["success"] = true;
-                response["source_id"] = sqlite_source_->getId();
-                response["total"] = static_cast<std::int64_t>(sqlite_source_->count());
-                response["page"] = static_cast<std::int64_t>(page);
-                response["per_page"] = static_cast<std::int64_t>(per_page);
-                response["pairs"] = pairs_array;
-
-                buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
-                return;
-            }
-#endif
-
-            auto sources = rag_engine_->getDataSources();
-            std::shared_ptr<QASource> qa_source = nullptr;
-
-            for (const auto& source : sources) {
-                if (auto qa = std::dynamic_pointer_cast<QASource>(source)) {
-                    if (source_id.empty() || qa->getId() == source_id) {
-                        qa_source = qa;
-                        break;
-                    }
-                }
-            }
-
-            if (!qa_source) {
-                boost::json::object response;
-                response["success"] = true;
-                response["source_id"] = source_id;
-                response["total"] = static_cast<std::int64_t>(0);
-                response["page"] = static_cast<std::int64_t>(page);
-                response["per_page"] = static_cast<std::int64_t>(per_page);
-                response["pairs"] = boost::json::array{};
-                buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
-                return;
-            }
-
-            auto all_pairs = qa_source->getAllPairs();
-            size_t total = all_pairs.size();
-            size_t start = (page - 1) * per_page;
-            size_t end = std::min(start + per_page, total);
-
-            boost::json::array pairs_array;
-            for (size_t i = start; i < end && i < total; i++) {
-                const auto& pair = all_pairs[i];
-                boost::json::object pair_obj;
-                pair_obj["id"] = pair.id;
-                pair_obj["question"] = pair.question;
-                pair_obj["answer"] = pair.answer;
-                pair_obj["category"] = pair.category;
-
-                boost::json::array aliases_array;
-                for (const auto& alias : pair.aliases) {
-                    aliases_array.emplace_back(alias);
-                }
-                pair_obj["aliases"] = std::move(aliases_array);
-                pairs_array.emplace_back(pair_obj);
             }
 
             boost::json::object response;
             response["success"] = true;
-            response["source_id"] = qa_source->getId();
-            response["total"] = static_cast<std::int64_t>(total);
-            response["page"] = static_cast<std::int64_t>(page);
-            response["per_page"] = static_cast<std::int64_t>(per_page);
-            response["pairs"] = pairs_array;
+            response["query"] = query;
+            response["suggestions"] = suggestions_array;
+            response["count"] = static_cast<std::int64_t>(suggestions_array.size());
+            buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
 
+        } else if (apiPathMatches(path, "/api/qa/categories")) {
+            const auto params = parseQueryParams(url_view);
+            const std::string query = params.count("q") ? params.at("q") : "";
+            const std::string source_id = params.count("source_id") ? params.at("source_id") : "";
+            const size_t limit = querySize(params, "limit", 50, 200);
+
+            boost::json::array categories_array;
+            if (rag_service_) {
+                for (const auto& category : rag_service_->listQaCategories(query, limit, source_id)) {
+                    categories_array.emplace_back(category);
+                }
+            }
+
+            boost::json::object response;
+            response["success"] = true;
+            response["query"] = query;
+            response["categories"] = categories_array;
+            response["count"] = static_cast<std::int64_t>(categories_array.size());
+            buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+
+        } else if (apiPathMatches(path, "/api/qa") || apiPathMatches(path, "/api/qa/list")) {
+            const auto params = parseQueryParams(url_view);
+            const size_t limit = querySize(params, "limit", querySize(params, "per_page", 25, 500), 500);
+            size_t offset = querySize(params, "offset", 0, std::numeric_limits<size_t>::max());
+            const size_t page = querySize(params, "page", 0, std::numeric_limits<size_t>::max());
+            if (page > 0) {
+                offset = (page - 1) * limit;
+            }
+
+            RagServiceQaListOptions options;
+            options.query = params.count("query") ? params.at("query") : (params.count("q") ? params.at("q") : "");
+            options.category = params.count("category") ? params.at("category") : "";
+            options.source_id = params.count("source_id") ? params.at("source_id") : "";
+            options.limit = limit;
+            options.offset = offset;
+
+            auto listed = rag_service_ ? rag_service_->listQaPairs(options) : RagServiceQaListResponse{};
+
+            boost::json::array pairs_array;
+            for (const auto& pair : listed.items) {
+                pairs_array.emplace_back(qaPairObject(pair));
+            }
+
+            boost::json::object response;
+            response["success"] = true;
+            response["source_id"] = listed.source_id;
+            response["items"] = pairs_array;
+            response["pairs"] = pairs_array;
+            response["total"] = static_cast<std::int64_t>(listed.total);
+            response["limit"] = static_cast<std::int64_t>(listed.limit);
+            response["offset"] = static_cast<std::int64_t>(listed.offset);
+            response["has_more"] = listed.has_more;
+            response["page"] = static_cast<std::int64_t>(listed.limit == 0 ? 1 : (listed.offset / listed.limit) + 1);
+            response["per_page"] = static_cast<std::int64_t>(listed.limit);
             buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
 
         } else if (apiPathMatches(path, "/api/health")) {
@@ -2392,6 +2438,12 @@ void setupRagRoutes(HttpServer& server,
 
     server.add_route(api_route("/qa/list"), qa_handler);
     std::cout << "  ✓ GET  " << api_route("/qa/list") << " - Список QA-пар" << std::endl;
+
+    server.add_route(api_route("/qa/suggest"), qa_handler);
+    std::cout << "  ✓ GET  " << api_route("/qa/suggest") << " - Подсказки QA-пар" << std::endl;
+
+    server.add_route(api_route("/qa/categories"), qa_handler);
+    std::cout << "  ✓ GET  " << api_route("/qa/categories") << " - Категории QA-пар" << std::endl;
 
     server.add_route(api_route("/qa"), qa_handler);
     std::cout << "  ✓ GET/POST " << api_route("/qa") << " - QA REST collection" << std::endl;

@@ -8,6 +8,7 @@
 #include "rag_service.h"
 
 #include <cassert>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -91,6 +92,39 @@ int main() {
     assert(sqlite->countPersistedDocuments("project:" + fixture.string()) >= 1);
     assert(sqlite->countPersistedChunks("project:" + fixture.string()) >= 1);
     assert(sqlite->countPersistedEmbeddings("project:" + fixture.string()) >= 1);
+
+    std::string qa1;
+    std::string qa2;
+    std::string qa3;
+    assert(service->addQaPair("How do I configure Ollama?", "Set the Ollama model in config.", "llm", &qa1));
+    assert(service->addQaPair("How do I reindex a project?", "Use the index or ingest endpoint.", "operations", &qa2));
+    assert(service->addQaPair("How do I inspect ingestion jobs?", "Open the Admin tab or call ingest jobs.", "operations", &qa3));
+
+    RagServiceQaListOptions qa_options;
+    qa_options.query = "How";
+    qa_options.category = "operations";
+    qa_options.limit = 1;
+    qa_options.offset = 0;
+    auto qa_page1 = service->listQaPairs(qa_options);
+    assert(qa_page1.success);
+    assert(qa_page1.total == 2);
+    assert(qa_page1.items.size() == 1);
+    assert(qa_page1.has_more);
+
+    qa_options.offset = 1;
+    auto qa_page2 = service->listQaPairs(qa_options);
+    assert(qa_page2.total == 2);
+    assert(qa_page2.items.size() == 1);
+    assert(!qa_page2.has_more);
+    assert(qa_page2.items.front().id != qa_page1.items.front().id);
+
+    auto qa_suggestions = service->suggestQaPairs("ingestion", 5);
+    assert(!qa_suggestions.empty());
+    assert(qa_suggestions.front().question.find("ingestion") != std::string::npos);
+
+    auto qa_categories = service->listQaCategories("", 10);
+    assert(std::find(qa_categories.begin(), qa_categories.end(), "llm") != qa_categories.end());
+    assert(std::find(qa_categories.begin(), qa_categories.end(), "operations") != qa_categories.end());
 #endif
 
     auto ingest = service->ingestProject(fixture.string());

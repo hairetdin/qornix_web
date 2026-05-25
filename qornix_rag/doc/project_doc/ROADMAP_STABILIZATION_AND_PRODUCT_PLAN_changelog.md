@@ -1498,6 +1498,59 @@ Generated rag_app and --with-rag applications built successfully.
 git diff --check passed.
 ```
 
+## 2026-05-25 - Post-stabilization QA server-side pagination baseline completed
+
+Status: `done`
+
+Scope:
+
+- close backlog item 11.4 with a scalable QA list baseline;
+- stop loading the full QA list into the browser for normal standalone/generated UI use;
+- keep existing `/api/qa/list` compatibility while adding the target `items/total/limit/offset/has_more` contract.
+
+Implemented:
+
+- added SQLite-backed QA list filtering by `query` and `category`;
+- added server-side `limit` and `offset` pagination with total counts;
+- added QA question suggestions through `GET /api/qa/suggest?q=...&limit=...`;
+- added QA category suggestions through `GET /api/qa/categories?q=...&limit=...`;
+- added reusable `RagService` DTOs for QA list, suggestions, and categories;
+- updated `/api/qa/list` and `/api/rag/qa/list` to return `items`, `total`, `limit`, `offset`, and `has_more`;
+- kept `pairs` as a compatibility alias for older UI/API clients;
+- updated the standalone RAG UI and generated `rag_app` UI to use server-backed pages, filters, categories, and question suggestions;
+- documented the updated QA API shape;
+- updated roadmap backlog 11.4 from deferred to completed baseline with remaining ORM/FTS/tag follow-ups.
+
+Verified:
+
+```bash
+cmake --build build --target test_sqlite_source test_rag_service qornix_rag -j2
+ctest --test-dir build -R 'test_(sqlite_source|rag_service)$' --output-on-failure
+cmake --build build --target test_sqlite_source test_rag_service test_embedding_config test_rag_quality_eval qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_(sqlite_source|rag_service|embedding_config|rag_quality_eval)$' --output-on-failure
+./create_new_project.sh /tmp/qornix_qa_list_rag_app --template rag_app
+./create_new_project.sh /tmp/qornix_qa_list_with_rag_app --with-rag
+cmake -S /tmp/qornix_qa_list_rag_app -B /tmp/qornix_qa_list_rag_app/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_qa_list_rag_app/build -j2
+cmake -S /tmp/qornix_qa_list_with_rag_app -B /tmp/qornix_qa_list_with_rag_app/build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/qornix_qa_list_with_rag_app/build -j2
+./build/qornix_rag/qornix_rag --config qornix_rag/config.yaml --port 8110 --project qornix_rag/doc/project_doc
+curl -fsS 'http://127.0.0.1:8110/api/qa/list?query=smoke&category=qa-scale-smoke&limit=1&offset=0'
+curl -fsS 'http://127.0.0.1:8110/api/qa/suggest?q=paginate&limit=5'
+curl -fsS 'http://127.0.0.1:8110/api/qa/categories?q=qa-scale&limit=5'
+git diff --check
+```
+
+Observed result:
+
+```text
+100% focused tests passed, 0 tests failed out of 4.
+Built qornix_rag, qornix_web, and qornix_rag_route_extension.
+Generated rag_app and --with-rag applications built successfully.
+Standalone smoke returned filtered QA list, QA suggestions, and QA categories.
+git diff --check passed.
+```
+
 ## Current milestone state
 
 - Milestone 0: `done`
@@ -1532,11 +1585,12 @@ git diff --check passed.
 - Post-stabilization 11 - route-level auth policies for generated RAG apps: `done`
 - Post-stabilization 12 - generated-app login and auth admin user management: `done`
 - Post-stabilization 13 - auth/RBAC current-user validation and route/cookie matching hardening: `done`
+- Post-stabilization 14 - QA server-side pagination/filtering/suggestions baseline: `done`
 - Next - select the next backlog item before implementation: `pending`
 
 ## Deferred / known follow-ups
 
-These items are intentionally not closed by A2/A3/A4, the E1 persistence baseline, or the Post-stabilization 13 auth/RBAC baseline:
+These items are intentionally not closed by A2/A3/A4, the E1 persistence baseline, the Post-stabilization 13 auth/RBAC baseline, or the Post-stabilization 14 QA scale baseline:
 
 - replaceable vector backend adapters beyond local HNSW;
 - optional Faiss backend adapter;
@@ -1547,5 +1601,5 @@ These items are intentionally not closed by A2/A3/A4, the E1 persistence baselin
 - PDF/DOCX/XLSX/images/OCR support;
 - production security hardening beyond the generated-app auth/RBAC baseline, such as CSRF, audit events, session rotation, password reset, invite flows, MFA, and stricter cookie policy;
 - retrieval relevance and query normalization;
-- server-side QA pagination/filtering/autocomplete;
+- QA tags, ORM-backed list abstractions, optional FTS, and richer autocomplete beyond the first server-side QA list baseline;
 - model selection UI and additional LLM diagnostics polish.

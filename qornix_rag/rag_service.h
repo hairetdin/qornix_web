@@ -115,6 +115,30 @@ struct RagServiceIngestResponse {
     ProjectStats stats;
 };
 
+struct RagServiceQaListOptions {
+    std::string query;
+    std::string category;
+    std::string source_id;
+    size_t limit = 25;
+    size_t offset = 0;
+};
+
+struct RagServiceQaListResponse {
+    bool success = true;
+    std::string source_id;
+    std::vector<qornix::rag::QASource::QAPair> items;
+    size_t total = 0;
+    size_t limit = 25;
+    size_t offset = 0;
+    bool has_more = false;
+};
+
+struct RagServiceQaSuggestion {
+    std::string id;
+    std::string question;
+    std::string category;
+};
+
 struct RagServiceHealth {
     std::string status = "ok";
     bool indexed = false;
@@ -166,6 +190,13 @@ public:
     std::vector<qornix::rag::QASource::QAPair> listQaPairs(size_t page = 1,
                                                            size_t per_page = 20,
                                                            const std::string& source_id = "") const;
+    RagServiceQaListResponse listQaPairs(const RagServiceQaListOptions& options) const;
+    std::vector<RagServiceQaSuggestion> suggestQaPairs(const std::string& query,
+                                                       size_t limit = 10,
+                                                       const std::string& source_id = "") const;
+    std::vector<std::string> listQaCategories(const std::string& query = "",
+                                              size_t limit = 50,
+                                              const std::string& source_id = "") const;
     bool addQaPair(const std::string& question,
                    const std::string& answer,
                    const std::string& category = "general",

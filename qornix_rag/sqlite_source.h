@@ -54,6 +54,26 @@ public:
         std::string finished_at;
     };
 
+    struct QAListOptions {
+        std::string query;
+        std::string category;
+        size_t limit = 25;
+        size_t offset = 0;
+    };
+
+    struct QAListResult {
+        std::vector<QASource::QAPair> items;
+        size_t total = 0;
+        size_t limit = 25;
+        size_t offset = 0;
+    };
+
+    struct QASuggestion {
+        std::string id;
+        std::string question;
+        std::string category;
+    };
+
     explicit SQLiteSource(Config config);
     ~SQLiteSource() override;
 
@@ -84,6 +104,9 @@ public:
     std::vector<QASource::QAPair> searchByCategory(const std::string& category) const;
     std::vector<QASource::QAPair> searchByQuestion(const std::string& query) const;
     std::vector<QASource::QAPair> getAllPairs(size_t page = 1, size_t per_page = 20) const;
+    QAListResult listQAPairs(const QAListOptions& options) const;
+    std::vector<QASuggestion> suggestQAPairs(const std::string& query, size_t limit = 10) const;
+    std::vector<std::string> listQACategories(const std::string& query = "", size_t limit = 50) const;
 
     // Migration
     bool migrate();

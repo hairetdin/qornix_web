@@ -215,7 +215,39 @@ POST /api/qa/add
 List:
 
 ```http
-GET /api/qa/list?per_page=25&page=1
+GET /api/qa/list?limit=25&offset=0
+GET /api/qa/list?query=rag&category=setup&limit=25&offset=0
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "items": [
+    {
+      "id": "sqlite_kb_qa_...",
+      "question": "How do I run standalone RAG?",
+      "answer": "Use ./qornix_rag/run.sh",
+      "category": "setup",
+      "aliases": []
+    }
+  ],
+  "pairs": [],
+  "total": 42,
+  "limit": 25,
+  "offset": 0,
+  "has_more": true
+}
+```
+
+`pairs` is kept as a compatibility alias for older UI code. New clients should use `items`.
+
+Suggestions:
+
+```http
+GET /api/qa/suggest?q=rag&limit=10
+GET /api/qa/categories?q=set&limit=20
 ```
 
 Update:
