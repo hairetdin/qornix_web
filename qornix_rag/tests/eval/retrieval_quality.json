@@ -1,0 +1,59 @@
+{
+  "name": "post_stabilization_6_retrieval_quality",
+  "documents": [
+    {
+      "path": "doc/rag_routes.md",
+      "content": "# RAG routes\nRagExtension registers the integrated RAG UI at /rag and API routes under /api/rag. The API prefix is configurable so generated host applications keep their existing home page."
+    },
+    {
+      "path": "doc/operations.md",
+      "content": "# Operations\nAdmin diagnostics are available at /api/rag/admin/diagnostics. Prometheus metrics are exposed at /api/rag/metrics for generated RAG applications."
+    },
+    {
+      "path": "knowledge_base/qa_workflow.md",
+      "content": "# QA workflow\nQA wiki pairs are local knowledge entries. They should appear in Ask context with Q citations when the question matches the stored pair."
+    }
+  ],
+  "qa_pairs": [
+    {
+      "question": "How do I rotate backup files?",
+      "answer": "Use the documented file-based backup workflow and rotate files outside the RAG process.",
+      "category": "operations"
+    }
+  ],
+  "cases": [
+    {
+      "id": "route_prefix_retrieval",
+      "type": "search",
+      "query": "How is the configurable API prefix registered?",
+      "top_k": 3,
+      "expected_top_source": "doc/rag_routes.md",
+      "expected_snippet_contains": "API prefix"
+    },
+    {
+      "id": "route_prefix_citation",
+      "type": "ask",
+      "question": "What route prefix does RagExtension use for API routes?",
+      "top_k": 3,
+      "expected_context_source": "doc/rag_routes.md",
+      "expected_citation_prefix": "S",
+      "expected_grounding_status": "grounded"
+    },
+    {
+      "id": "qa_citation",
+      "type": "ask_qa",
+      "question": "How do I rotate backup files?",
+      "top_k": 3,
+      "expected_source_type": "qa",
+      "expected_citation_prefix": "Q"
+    },
+    {
+      "id": "unknown_topic_refusal",
+      "type": "ask_refusal",
+      "question": "What is the launch window for an unrelated Europa spacecraft mission?",
+      "top_k": 3,
+      "expected_grounding_status": "no_context",
+      "expected_llm_status": "unavailable"
+    }
+  ]
+}

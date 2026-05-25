@@ -251,6 +251,8 @@
         .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin-top: 12px; }
         .stat { background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
         .stat strong { display: block; font-size: 24px; color: var(--accent); margin-bottom: 4px; }
+        .admin-grid { grid-template-columns: minmax(360px, .9fr) minmax(560px, 1.2fr); }
+        .admin-pre { max-height: 460px; overflow: auto; white-space: pre-wrap; }
         .notice { border-radius: 14px; padding: 12px; background: #f8fafc; border: 1px solid var(--line); color: var(--muted); line-height: 1.5; }
         .notice.error { background: #fef2f2; color: var(--danger); border-color: #fecaca; }
         .notice.ok { background: #f0fdf4; color: var(--ok); border-color: #bbf7d0; }
@@ -326,6 +328,7 @@
             <button class="tab-btn" data-tab="search">Search</button>
             <button class="tab-btn" data-tab="qa">QA</button>
             <button class="tab-btn" data-tab="sources">Sources / Health</button>
+            <button class="tab-btn" data-tab="admin">Admin</button>
         </nav>
 
         <section id="tab-ask" class="tab-panel active">
@@ -452,6 +455,31 @@
                 </aside>
             </div>
         </section>
+
+        <section id="tab-admin" class="tab-panel">
+            <div class="grid admin-grid">
+                <div class="card">
+                    <h2>Admin</h2>
+                    <label for="admin-token">Admin token</label>
+                    <input id="admin-token" type="password" autocomplete="off" placeholder="Optional token for protected RAG admin/write routes">
+                    <div style="margin-top: 12px;">
+                        <button class="btn secondary" onclick="saveAdminToken()">Save token</button>
+                        <button class="btn secondary" onclick="clearAdminToken()">Clear token</button>
+                    </div>
+                    <h3>Actions</h3>
+                    <div class="item-actions">
+                        <button class="btn" onclick="loadAdminDiagnostics()">Diagnostics</button>
+                        <button class="btn secondary" onclick="loadIngestionJobs()">Ingestion jobs</button>
+                        <button class="btn secondary" onclick="loadMetrics()">Metrics</button>
+                    </div>
+                    <div id="admin-status" style="margin-top: 12px;"></div>
+                </div>
+                <aside class="card">
+                    <h2>Output</h2>
+                    <div id="admin-output" class="list"><div class="notice">Select an admin action.</div></div>
+                </aside>
+            </div>
+        </section>
     </main>
 
     <script>
@@ -463,10 +491,12 @@
         let lastQAPairs = [];
         let qaCurrentPage = 1;
         let qaPageSize = 25;
+        const ADMIN_TOKEN_STORAGE_KEY = 'qornix-rag-admin-token';
 
         window.addEventListener('load', async () => {
             setupTabs();
             setupShortcuts();
+            restoreAdminToken();
             await refreshDashboard();
         });
 
@@ -479,6 +509,7 @@
                     document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
                     if (btn.dataset.tab === 'qa') await loadQAPairs();
                     if (btn.dataset.tab === 'sources') await refreshDashboard();
+                    if (btn.dataset.tab === 'admin') await loadAdminDiagnostics();
                 });
             });
         }
@@ -510,7 +541,7 @@
                 ? `${API_BASE}${path.slice(4)}`
                 : `${API_BASE}${path}`;
             const response = await fetch(targetPath, {
-                headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+                headers: { 'Content-Type': 'application/json', ...adminAuthHeaders(), ...(options.headers || {}) },
                 ...options
             });
             let data = null;
@@ -520,6 +551,21 @@
                 throw new Error(message);
             }
             return data;
+        }
+
+        async function apiText(path, options = {}) {
+            const targetPath = API_BASE && path.startsWith('/api/')
+                ? `${API_BASE}${path.slice(4)}`
+                : `${API_BASE}${path}`;
+            const response = await fetch(targetPath, {
+                headers: { ...adminAuthHeaders(), ...(options.headers || {}) },
+                ...options
+            });
+            const text = await response.text();
+            if (!response.ok) {
+                throw new Error(text || `HTTP ${response.status}`);
+            }
+            return text;
         }
 
         async function refreshDashboard() {
@@ -1306,6 +1352,102 @@ ${label}`)) {
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Переиндексировать проект';
+            }
+        }
+
+        function restoreAdminToken() {
+            const input = document.getElementById('admin-token');
+            if (!input) return;
+            try {
+                input.value = localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || '';
+            } catch (_) {
+                input.value = '';
+            }
+        }
+
+        function currentAdminToken() {
+            const input = document.getElementById('admin-token');
+            return input ? input.value.trim() : '';
+        }
+
+        function adminAuthHeaders() {
+            const token = currentAdminToken();
+            return token ? { 'X-Qornix-RAG-Admin-Token': token, 'Authorization': `Bearer ${token}` } : {};
+        }
+
+        function saveAdminToken() {
+            try { localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, currentAdminToken()); } catch (_) {}
+            document.getElementById('admin-status').innerHTML = renderNotice('Admin token saved locally.', 'ok');
+        }
+
+        function clearAdminToken() {
+            const input = document.getElementById('admin-token');
+            if (input) input.value = '';
+            try { localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY); } catch (_) {}
+            document.getElementById('admin-status').innerHTML = renderNotice('Admin token cleared.', 'ok');
+        }
+
+        async function loadAdminDiagnostics() {
+            const output = document.getElementById('admin-output');
+            try {
+                const data = await api('/api/admin/diagnostics');
+                const auth = data.auth || {};
+                output.innerHTML = `
+                    <div class="item">
+                        <div class="item-title">Diagnostics</div>
+                        <div class="meta">
+                            <span class="badge ${data.status === 'ok' ? 'ok' : 'warn'}">${escapeHtml(data.status || 'unknown')}</span>
+                            <span>metrics: ${data.metrics_enabled ? 'enabled' : 'disabled'}</span>
+                            <span>auth: ${auth.enabled ? 'enabled' : 'disabled'}</span>
+                            <span>mode: ${escapeHtml(auth.mode || 'none')}</span>
+                        </div>
+                        <div class="snippet admin-pre">${escapeHtml(JSON.stringify(data, null, 2))}</div>
+                    </div>`;
+                document.getElementById('admin-status').innerHTML = renderNotice('Diagnostics loaded.', 'ok');
+            } catch (error) {
+                output.innerHTML = renderNotice(error.message, 'error');
+                document.getElementById('admin-status').innerHTML = renderNotice('Diagnostics request failed.', 'error');
+            }
+        }
+
+        async function loadIngestionJobs() {
+            const output = document.getElementById('admin-output');
+            try {
+                const data = await api('/api/ingest/jobs?limit=10');
+                const jobs = data.jobs || [];
+                output.innerHTML = jobs.length
+                    ? jobs.map((job) => `
+                        <div class="item">
+                            <div class="item-title">${escapeHtml(job.id || 'job')}</div>
+                            <div class="meta">
+                                <span class="badge ${job.status === 'completed' ? 'ok' : (job.status === 'failed' ? 'error' : 'warn')}">${escapeHtml(job.status || 'unknown')}</span>
+                                <span>progress: ${job.progress_percent ?? 0}%</span>
+                                <span>documents: ${job.documents_imported ?? 0}</span>
+                                <span>errors: ${job.errors ?? 0}</span>
+                            </div>
+                            <div class="snippet">${escapeHtml(job.root_path || '')}</div>
+                        </div>`).join('')
+                    : renderNotice('No ingestion jobs found.');
+                document.getElementById('admin-status').innerHTML = renderNotice('Ingestion jobs loaded.', 'ok');
+            } catch (error) {
+                output.innerHTML = renderNotice(error.message, 'error');
+                document.getElementById('admin-status').innerHTML = renderNotice('Ingestion jobs request failed.', 'error');
+            }
+        }
+
+        async function loadMetrics() {
+            const output = document.getElementById('admin-output');
+            try {
+                const text = await apiText('/api/metrics');
+                output.innerHTML = `
+                    <div class="item">
+                        <div class="item-title">Prometheus metrics</div>
+                        <div class="snippet admin-pre">${escapeHtml(text || 'No metrics returned.')}</div>
+                    </div>`;
+                document.getElementById('admin-status').innerHTML = renderNotice('Metrics loaded.', 'ok');
+            } catch (error) {
+                output.innerHTML = renderNotice(error.message, 'error');
+                document.getElementById('admin-status').innerHTML = renderNotice('Metrics request failed.', 'error');
             }
         }
 

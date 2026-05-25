@@ -68,6 +68,59 @@ bool apiPathMatches(const std::string& path, const std::string& legacy_path) {
     return endsWith(path, suffix);
 }
 
+std::string headerValue(const http::request<http::string_body>& req, const std::string& name) {
+    auto it = req.find(name);
+    if (it == req.end()) {
+        return "";
+    }
+    return std::string(it->value().data(), it->value().size());
+}
+
+std::string bearerToken(const std::string& authorization) {
+    constexpr const char* prefix = "Bearer ";
+    if (authorization.rfind(prefix, 0) != 0) {
+        return "";
+    }
+    return authorization.substr(std::char_traits<char>::length(prefix));
+}
+
+std::string configuredAdminToken(const RagRouteAuthOptions& options) {
+    if (!options.admin_token.empty()) {
+        return options.admin_token;
+    }
+    if (!options.admin_token_env.empty()) {
+        if (const char* value = std::getenv(options.admin_token_env.c_str())) {
+            return value;
+        }
+    }
+    return "";
+}
+
+bool isAdminRoute(const std::string& path) {
+    return apiPathMatches(path, "/api/admin/diagnostics") ||
+           apiPathMatches(path, "/api/metrics") ||
+           apiPathMatches(path, "/api/ingest/jobs") ||
+           path.find("/ingest/") != std::string::npos;
+}
+
+bool isWriteRoute(const std::string& path, const std::string& method) {
+    if (method == "GET" || method == "HEAD" || method == "OPTIONS") {
+        return false;
+    }
+    if ((method == "PUT" || method == "DELETE") && path.find("/qa/") != std::string::npos) {
+        return true;
+    }
+    return apiPathMatches(path, "/api/index") ||
+           apiPathMatches(path, "/api/ingest") ||
+           apiPathMatches(path, "/api/documents/delete") ||
+           apiPathMatches(path, "/api/sources/add") ||
+           apiPathMatches(path, "/api/sources/remove") ||
+           apiPathMatches(path, "/api/qa") ||
+           apiPathMatches(path, "/api/qa/add") ||
+           apiPathMatches(path, "/api/qa/update") ||
+           apiPathMatches(path, "/api/qa/delete");
+}
+
 std::string makeQaPairId(const std::string& source_id) {
     const auto now = std::chrono::system_clock::now().time_since_epoch();
     const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
@@ -122,6 +175,8 @@ boost::json::object ingestionJobObject(const RagServiceIngestionJob& job) {
     obj["duplicates_found"] = static_cast<std::int64_t>(job.duplicates_found);
     obj["skipped"] = static_cast<std::int64_t>(job.skipped);
     obj["errors"] = static_cast<std::int64_t>(job.errors);
+    obj["progress_percent"] = static_cast<std::int64_t>(job.progress_percent);
+    obj["background"] = job.background;
     obj["error_message"] = job.error_message;
     obj["started_at"] = job.started_at;
     obj["finished_at"] = job.finished_at;
@@ -229,6 +284,53 @@ RagApiHandler::RagApiHandler(std::shared_ptr<RagEngine> engine)
     rag_service_ = std::make_shared<RagService>(rag_engine_);
 }
 
+void RagApiHandler::setAuthOptions(const RagRouteAuthOptions& options) {
+    auth_options_ = options;
+}
+
+bool RagApiHandler::authorizeRequest(
+    const http::request<http::string_body>& req,
+    http::response<http::string_body>& res,
+    const urls::url_view& url_view,
+    const std::string& method
+) const {
+    if (!auth_options_.enabled) {
+        return true;
+    }
+
+    const std::string path = url_view.path();
+    const bool needs_admin = auth_options_.protect_admin_routes && isAdminRoute(path);
+    const bool needs_write = auth_options_.protect_write_routes && isWriteRoute(path, method);
+    if (!needs_admin && !needs_write) {
+        return true;
+    }
+
+    if (auth_options_.mode == "host_header") {
+        const std::string role = headerValue(req, auth_options_.role_header);
+        if (!role.empty() && role == auth_options_.admin_role) {
+            return true;
+        }
+        buildErrorResponse(res, http::status::forbidden, "RAG admin permission required");
+        return false;
+    }
+
+    const std::string expected = configuredAdminToken(auth_options_);
+    if (expected.empty()) {
+        buildErrorResponse(res, http::status::service_unavailable, "RAG admin token is not configured");
+        return false;
+    }
+
+    const std::string header_token = headerValue(req, auth_options_.token_header);
+    const std::string auth_token = bearerToken(headerValue(req, "Authorization"));
+    if (header_token == expected || auth_token == expected) {
+        return true;
+    }
+
+    buildErrorResponse(res, http::status::unauthorized, "RAG admin token required");
+    res.set(http::field::www_authenticate, "Bearer realm=\"qornix-rag-admin\"");
+    return false;
+}
+
 // ============================================================================
 // RagWebHandler constructor
 // ============================================================================
@@ -248,6 +350,9 @@ void RagApiHandler::handlePost(
     const urls::url_view &url_view,
     const std::map<std::string, std::string> &) {
     try {
+        if (!authorizeRequest(req, res, url_view, "POST")) {
+            return;
+        }
         // Determine request type by URL
         std::string path = url_view.path();
 
@@ -276,6 +381,10 @@ void RagApiHandler::handlePost(
                 {"total_files", indexed.stats.total_files},
                 {"total_lines", indexed.stats.total_lines},
                 {"total_size_kb", indexed.stats.total_size_bytes / 1024},
+                {"indexed_chunks", indexed.stats.indexed_chunks},
+                {"reused_embeddings", indexed.stats.reused_embeddings},
+                {"generated_embeddings", indexed.stats.generated_embeddings},
+                {"stale_embeddings", indexed.stats.stale_embeddings},
                 {"index_duration_ms", static_cast<std::int64_t>(indexed.stats.index_duration_ms)}
             };
 
@@ -296,6 +405,23 @@ void RagApiHandler::handlePost(
                         project_path = requested_path;
                     }
                 }
+                bool background = false;
+                if (obj.contains("async") && obj.at("async").is_bool()) {
+                    background = obj.at("async").as_bool();
+                }
+                if (obj.contains("background") && obj.at("background").is_bool()) {
+                    background = obj.at("background").as_bool();
+                }
+                if (background) {
+                    auto queued = rag_service_->startBackgroundIngestProject(project_path);
+                    boost::json::object response;
+                    response["success"] = queued.success;
+                    response["message"] = queued.message;
+                    response["job"] = ingestionJobObject(queued.job);
+                    buildJsonResponse(res, queued.success ? http::status::accepted : http::status::internal_server_error,
+                                      boost::json::serialize(response));
+                    return;
+                }
             }
 
             auto ingested = rag_service_->ingestProject(project_path);
@@ -307,6 +433,10 @@ void RagApiHandler::handlePost(
                 {"total_files", ingested.stats.total_files},
                 {"total_lines", ingested.stats.total_lines},
                 {"total_size_kb", ingested.stats.total_size_bytes / 1024},
+                {"indexed_chunks", ingested.stats.indexed_chunks},
+                {"reused_embeddings", ingested.stats.reused_embeddings},
+                {"generated_embeddings", ingested.stats.generated_embeddings},
+                {"stale_embeddings", ingested.stats.stale_embeddings},
                 {"index_duration_ms", static_cast<std::int64_t>(ingested.stats.index_duration_ms)}
             };
 
@@ -428,6 +558,9 @@ void RagApiHandler::handlePost(
             boost::json::object response;
             response["success"] = search_response.success;
             response["query"] = query;
+            response["expanded_query"] = search_response.expanded_query;
+            response["query_expansion_applied"] = search_response.query_expansion_applied;
+            response["reranking_applied"] = search_response.reranking_applied;
             response["results"] = results_array;
             response["count"] = static_cast<std::int64_t>(results_array.size());
 
@@ -504,6 +637,9 @@ void RagApiHandler::handlePost(
                 boost::json::object response;
                 response["success"] = ask_response.success;
                 response["question"] = ask_response.question;
+                response["expanded_query"] = ask_response.expanded_query;
+                response["query_expansion_applied"] = ask_response.query_expansion_applied;
+                response["reranking_applied"] = ask_response.reranking_applied;
                 response["context"] = context_array;
                 response["sources"] = sources_array;
                 response["citations"] = citations_array;
@@ -1583,6 +1719,9 @@ void RagApiHandler::handlePut(
     const urls::url_view &url_view,
     const std::map<std::string, std::string> &path_params) {
     try {
+        if (!authorizeRequest(req, res, url_view, "PUT")) {
+            return;
+        }
         const std::string path = url_view.path();
         if (!path_params.count("id") || path.find("/qa/") == std::string::npos) {
             buildErrorResponse(res, http::status::not_found, "Endpoint not found");
@@ -1624,11 +1763,14 @@ void RagApiHandler::handlePut(
 }
 
 void RagApiHandler::handleDelete(
-    const http::request<http::string_body> &,
+    const http::request<http::string_body> &req,
     http::response<http::string_body> &res,
     const urls::url_view &url_view,
     const std::map<std::string, std::string> &path_params) {
     try {
+        if (!authorizeRequest(req, res, url_view, "DELETE")) {
+            return;
+        }
         const std::string path = url_view.path();
         if (!path_params.count("id") || path.find("/qa/") == std::string::npos) {
             buildErrorResponse(res, http::status::not_found, "Endpoint not found");
@@ -1660,9 +1802,10 @@ void RagApiHandler::handleGet(
     http::response<http::string_body> &res,
     const urls::url_view &url_view,
     const std::map<std::string, std::string> &path_params) {
-    (void)req;
-
     try {
+        if (!authorizeRequest(req, res, url_view, "GET")) {
+            return;
+        }
         std::string path = url_view.path();
 
         if (apiPathMatches(path, "/api/metrics")) {
@@ -1684,10 +1827,18 @@ void RagApiHandler::handleGet(
             rag_obj["project_root"] = rag_engine_ ? rag_engine_->get_indexed_project_root() : "";
             rag_obj["files"] = static_cast<std::int64_t>(stats.total_files);
             rag_obj["lines"] = static_cast<std::int64_t>(stats.total_lines);
+            rag_obj["indexed_chunks"] = static_cast<std::int64_t>(stats.indexed_chunks);
+            rag_obj["reused_embeddings"] = static_cast<std::int64_t>(stats.reused_embeddings);
+            rag_obj["generated_embeddings"] = static_cast<std::int64_t>(stats.generated_embeddings);
+            rag_obj["stale_embeddings"] = static_cast<std::int64_t>(stats.stale_embeddings);
             rag_obj["index_duration_ms"] = static_cast<std::int64_t>(stats.index_duration_ms);
             rag_obj["embedding_backend"] = health.embedding_backend;
             rag_obj["embedding_model_id"] = health.embedding_model_id;
             rag_obj["embedding_dim"] = static_cast<std::int64_t>(health.embedding_dim);
+            rag_obj["vector_store_backend"] = health.vector_store_backend;
+            rag_obj["vector_store_status"] = health.vector_store_status;
+            rag_obj["query_expansion"] = health.query_expansion;
+            rag_obj["reranking"] = health.reranking;
             rag_obj["grounding_api"] = true;
 
             boost::json::object llm_obj;
@@ -1753,8 +1904,19 @@ void RagApiHandler::handleGet(
             response["rate_limit"] = rate_obj;
             response["storage"] = storage_obj;
             response["metrics_enabled"] = static_cast<bool>(metrics_);
-            response["auth_required_by_rag"] = false;
-            response["network_exposure_note"] = "Protect this endpoint with the host app auth/proxy layer before exposing it outside a trusted network.";
+            boost::json::object auth_obj;
+            auth_obj["enabled"] = auth_options_.enabled;
+            auth_obj["mode"] = auth_options_.mode;
+            auth_obj["protect_admin_routes"] = auth_options_.protect_admin_routes;
+            auth_obj["protect_write_routes"] = auth_options_.protect_write_routes;
+            auth_obj["token_header"] = auth_options_.token_header;
+            auth_obj["role_header"] = auth_options_.role_header;
+            auth_obj["admin_role"] = auth_options_.admin_role;
+            response["auth"] = auth_obj;
+            response["auth_required_by_rag"] = auth_options_.enabled;
+            response["network_exposure_note"] = auth_options_.enabled
+                ? "RAG admin/write routes are protected by the configured route auth baseline. Keep host app/proxy auth in front of exposed deployments."
+                : "Protect this endpoint with the host app auth/proxy layer before exposing it outside a trusted network.";
             buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
 
         } else if (apiPathMatches(path, "/api/ingest/jobs")) {
@@ -1945,10 +2107,18 @@ void RagApiHandler::handleGet(
             rag_obj["indexed"] = rag_engine_->is_indexed();
             rag_obj["files"] = stats.total_files;
             rag_obj["lines"] = stats.total_lines;
+            rag_obj["indexed_chunks"] = stats.indexed_chunks;
+            rag_obj["reused_embeddings"] = stats.reused_embeddings;
+            rag_obj["generated_embeddings"] = stats.generated_embeddings;
+            rag_obj["stale_embeddings"] = stats.stale_embeddings;
             rag_obj["embedding_backend"] = rag_engine_->get_embedding_backend();
             rag_obj["embedding_model_id"] = rag_engine_->get_embedding_model_id();
             rag_obj["embedding_dim"] = static_cast<std::int64_t>(rag_engine_->get_embedding_dim());
+            rag_obj["vector_store_backend"] = rag_engine_->get_vector_store_backend();
+            rag_obj["vector_store_status"] = rag_engine_->get_vector_store_status();
             rag_obj["hybrid_search"] = true; // Default to true
+            rag_obj["query_expansion"] = rag_engine_->is_query_expansion_enabled();
+            rag_obj["reranking"] = rag_engine_->is_reranking_enabled();
 
             boost::json::object llm_obj;
             if (llm_client_ && llm_client_->is_enabled()) {
@@ -2002,6 +2172,10 @@ void RagApiHandler::handleGet(
             response["embedding_backend"] = rag_engine_->get_embedding_backend();
             response["embedding_model_id"] = rag_engine_->get_embedding_model_id();
             response["embedding_dim"] = static_cast<std::int64_t>(rag_engine_->get_embedding_dim());
+            response["vector_store_backend"] = rag_engine_->get_vector_store_backend();
+            response["vector_store_status"] = rag_engine_->get_vector_store_status();
+            response["query_expansion"] = rag_engine_->is_query_expansion_enabled();
+            response["reranking"] = rag_engine_->is_reranking_enabled();
             response["onnx_ready"] = rag_engine_->is_onnx_ready();
             response["onnx_status"] = rag_engine_->get_onnx_status_message();
             response["project_root"] = rag_engine_->get_indexed_project_root();
@@ -2010,6 +2184,10 @@ void RagApiHandler::handleGet(
             stats_obj["total_files"] = stats.total_files;
             stats_obj["total_lines"] = stats.total_lines;
             stats_obj["total_size_kb"] = stats.total_size_bytes / 1024;
+            stats_obj["indexed_chunks"] = stats.indexed_chunks;
+            stats_obj["reused_embeddings"] = stats.reused_embeddings;
+            stats_obj["generated_embeddings"] = stats.generated_embeddings;
+            stats_obj["stale_embeddings"] = stats.stale_embeddings;
             stats_obj["index_duration_ms"] = static_cast<std::int64_t>(stats.index_duration_ms);
 
             boost::json::object files_by_type;
@@ -2148,6 +2326,7 @@ void setupRagRoutes(HttpServer& server,
         rag_engine, llm_client, cache, limiter, batch, pcache, metrics, analytics,
         markdown, dedup);
 #endif
+    full_handler->setAuthOptions(options.auth);
 
     const auto api_route = [&](const std::string& suffix) {
         return joinRoute(options.api_prefix, suffix);

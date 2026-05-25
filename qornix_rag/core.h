@@ -32,32 +32,17 @@
 #include <cctype>
 #include <cstdint>
 #include <atomic>
+#include <optional>
 
 // Include xapian first
 #include <xapian.h>
 #include <boost/json.hpp>
 
 #include "ingestion_pipeline.h"
+#include "vector_store.h"
 
 #ifdef QORNIX_HAS_ONNX
 #include <onnxruntime_cxx_api.h>
-#endif
-
-// HNSWLIB requires SSE intrinsics. We suppress clangd warnings about _mm_prefetch
-// by disabling the specific diagnostic just for this include
-#ifdef __clang__
-    #pragma clang diagnostic push
-    #pragma clang diagnostic ignored "-Wunknown-pragmas"
-    #pragma clang diagnostic ignored "-Wbuiltin-macro-redefined"
-    #pragma clang diagnostic ignored "-Wmacro-redefined"
-#endif
-
-// HNSWLIB - header-only library for approximate nearest-neighbor search
-// This library uses _mm_prefetch intrinsics which may conflict with system headers
-#include <hnswlib/hnswlib.h>
-
-#ifdef __clang__
-    #pragma clang diagnostic pop
 #endif
 
 // Hybrid search configuration
@@ -67,6 +52,12 @@ struct HybridSearchConfig {
     size_t top_k = 10; // Number of results from each method
     float min_score_threshold = 0.1f; // Minimum score for inclusion in result
     bool use_hybrid = true; // Hybrid search usage flag
+    bool use_query_expansion = true;
+    bool use_reranking = true;
+    size_t rerank_input_multiplier = 3;
+    float rerank_path_boost = 0.15f;
+    float rerank_metadata_boost = 0.10f;
+    float rerank_exact_content_boost = 0.05f;
 };
 
 struct EmbeddingConfig {
@@ -101,9 +92,18 @@ struct EmbeddingModelInfo {
     std::string status;
 };
 
+struct VectorStoreConfig {
+    std::string backend = "local_hnsw"; // local_hnsw
+    std::string index_path;
+    std::string metadata_path;
+    bool auto_load = true;
+    bool auto_save = false;
+};
+
 struct RagEngineConfig {
     HybridSearchConfig search;
     EmbeddingConfig embedding;
+    VectorStoreConfig vector_store;
     size_t max_file_size_kb = 512;
 };
 
@@ -203,6 +203,10 @@ struct ProjectStats {
     size_t total_lines;
     size_t total_size_bytes;
     size_t index_duration_ms = 0;
+    size_t indexed_chunks = 0;
+    size_t reused_embeddings = 0;
+    size_t generated_embeddings = 0;
+    size_t stale_embeddings = 0;
     std::map<std::string, size_t> files_by_type;
     std::map<std::string, size_t> files_by_directory;
     std::string last_indexed;
@@ -411,12 +415,12 @@ private:
     std::unordered_map<std::string, size_t> path_to_index_;
     TfidfVectorizer vectorizer_;
 
-    hnswlib::HierarchicalNSW<float>* hnsw_index_ = nullptr;
-    hnswlib::L2Space* space_ = nullptr;
+    std::unique_ptr<VectorStore> vector_store_;
 
     std::unique_ptr<Xapian::WritableDatabase> xapian_db_;
     HybridSearchConfig search_config_;
     EmbeddingConfig embedding_config_;
+    VectorStoreConfig vector_store_config_;
     size_t max_file_size_bytes_ = 512 * 1024;
     bool is_hybrid_indexed_ = false;
     mutable std::mutex mutex_;
@@ -424,6 +428,9 @@ private:
     std::string indexed_project_root_ = ".";
     const std::atomic<bool>* stop_flag_ = nullptr;
     size_t last_index_duration_ms_ = 0;
+    size_t last_reused_embeddings_ = 0;
+    size_t last_generated_embeddings_ = 0;
+    size_t last_stale_embeddings_ = 0;
     qornix::rag::IngestionJobResult last_ingestion_result_;
 
     // ============================================
@@ -440,6 +447,7 @@ private:
     bool onnx_ready_ = false;
     std::string onnx_status_message_ = "not initialized";
     EmbeddingModelInfo embedding_model_;
+    std::string last_vector_store_status_ = "not initialized";
 
 #ifdef QORNIX_HAS_ONNX
     std::unique_ptr<Ort::Env> ort_env_;
@@ -617,16 +625,14 @@ public:
     explicit RagEngine(const RagEngineConfig &config = RagEngineConfig())
         : search_config_(config.search),
           embedding_config_(config.embedding),
+          vector_store_config_(config.vector_store),
           max_file_size_bytes_(config.max_file_size_kb * 1024) {
         initialize_embedding_backend();
     }
 
     ~RagEngine() {
-        if (hnsw_index_) {
-            delete hnsw_index_;
-        }
-        if (space_) {
-            delete space_;
+        if (vector_store_) {
+            vector_store_->clear();
         }
     }
 
@@ -713,6 +719,66 @@ public:
         return get_embedding_model_id();
     }
 
+    std::string get_vector_store_backend() const {
+        return vector_store_ ? vector_store_->backendName() : "none";
+    }
+
+    std::string get_vector_store_status() const {
+        return last_vector_store_status_;
+    }
+
+    bool is_query_expansion_enabled() const {
+        return search_config_.use_query_expansion;
+    }
+
+    bool is_reranking_enabled() const {
+        return search_config_.use_reranking;
+    }
+
+    std::string expand_query(const std::string& query) const {
+        if (!search_config_.use_query_expansion) {
+            return query;
+        }
+        auto terms = expand_query_terms(query);
+        if (terms.empty()) {
+            return query;
+        }
+
+        std::ostringstream expanded;
+        expanded << query;
+        for (const auto& term : terms) {
+            if (query.find(term) == std::string::npos) {
+                expanded << ' ' << term;
+            }
+        }
+        return expanded.str();
+    }
+
+    bool save_vector_index(const std::string& path) const {
+        if (!vector_store_ || !vector_store_->isReady() || !vector_store_->save(path)) {
+            return false;
+        }
+        return write_vector_index_metadata(collect_vector_records());
+    }
+
+    bool load_vector_index(const std::string& path) {
+        const auto records = collect_vector_records();
+        std::string metadata_reason;
+        if (!vector_index_metadata_matches(records, metadata_reason)) {
+            last_vector_store_status_ = "load skipped: " + metadata_reason;
+            return false;
+        }
+        auto store = create_vector_store();
+        if (!store->load(path, embedding_dim_, documents_.size())) {
+            last_vector_store_status_ = "load failed: " + path;
+            return false;
+        }
+        vector_store_ = std::move(store);
+        is_hybrid_indexed_ = true;
+        last_vector_store_status_ = "loaded: " + path;
+        return true;
+    }
+
     bool is_onnx_ready() const {
         return onnx_ready_;
     }
@@ -738,6 +804,8 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         auto index_start = std::chrono::steady_clock::now();
         indexed_project_root_ = project_root;
+        auto reusable_embeddings = collect_reusable_embeddings();
+        reset_incremental_stats(reusable_embeddings.size());
 
         documents_.clear();
         path_to_index_.clear();
@@ -795,7 +863,7 @@ public:
             }
 
             for (auto& chunk : chunks) {
-                chunk.embedding = generate_embedding(chunk.content);
+                assign_incremental_embedding(chunk, reusable_embeddings);
 
                 if (stop_flag_ && !stop_flag_->load()) {
                     std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
@@ -821,6 +889,10 @@ public:
                   << ", пропущено: " << ingestion.skipped
                   << ", дубликатов: " << ingestion.duplicates_found
                   << ", ошибок: " << ingestion.errors << std::endl;
+        std::cout << "   Chunks: " << stats.indexed_chunks
+                  << ", reused embeddings: " << stats.reused_embeddings
+                  << ", generated embeddings: " << stats.generated_embeddings
+                  << ", stale embeddings: " << stats.stale_embeddings << std::endl;
         std::cout << "   Всего строк: " << stats.total_lines << std::endl;
         std::cout << "   Размер: " << (stats.total_size_bytes / 1024) << " KB" << std::endl;
 
@@ -833,6 +905,197 @@ public:
     }
 
 private:
+    std::unique_ptr<VectorStore> create_vector_store() const {
+        if (search_config_.use_hybrid &&
+            (vector_store_config_.backend == "local_hnsw" || vector_store_config_.backend == "hnsw")) {
+            return std::make_unique<LocalHnswVectorStore>();
+        }
+        return nullptr;
+    }
+
+    std::vector<VectorRecord> collect_vector_records() const {
+        std::vector<VectorRecord> records;
+        records.reserve(documents_.size());
+        for (size_t i = 0; i < documents_.size(); ++i) {
+            const auto& doc = documents_[i];
+            if (!doc.embedding.empty() && doc.embedding.size() == embedding_dim_) {
+                records.push_back(VectorRecord{i, doc.embedding});
+            }
+        }
+        return records;
+    }
+
+    std::string reusable_embedding_key(const Document& document) const {
+        return get_embedding_model_id() + "|" + document.relative_path + "|" + document.hash;
+    }
+
+    std::unordered_map<std::string, std::vector<float>> collect_reusable_embeddings() const {
+        std::unordered_map<std::string, std::vector<float>> reusable;
+        reusable.reserve(documents_.size());
+        for (const auto& document : documents_) {
+            if (!document.embedding.empty() && document.embedding.size() == embedding_dim_) {
+                reusable[reusable_embedding_key(document)] = document.embedding;
+            }
+        }
+        return reusable;
+    }
+
+    void reset_incremental_stats(size_t previous_embedding_count) {
+        last_reused_embeddings_ = 0;
+        last_generated_embeddings_ = 0;
+        last_stale_embeddings_ = previous_embedding_count;
+    }
+
+    void assign_incremental_embedding(
+        Document& chunk,
+        const std::unordered_map<std::string, std::vector<float>>& reusable_embeddings) {
+        auto reusable = reusable_embeddings.find(reusable_embedding_key(chunk));
+        if (reusable != reusable_embeddings.end() && reusable->second.size() == embedding_dim_) {
+            chunk.embedding = reusable->second;
+            ++last_reused_embeddings_;
+            if (last_stale_embeddings_ > 0) {
+                --last_stale_embeddings_;
+            }
+            return;
+        }
+
+        chunk.embedding = generate_embedding(chunk.content);
+        ++last_generated_embeddings_;
+    }
+
+    std::string vector_index_metadata_path() const {
+        if (!vector_store_config_.metadata_path.empty()) {
+            return vector_store_config_.metadata_path;
+        }
+        if (!vector_store_config_.index_path.empty()) {
+            return vector_store_config_.index_path + ".meta.json";
+        }
+        return "";
+    }
+
+    std::string compute_vector_snapshot_hash(const std::vector<VectorRecord>& records) const {
+        std::stringstream ss;
+        ss << get_embedding_model_id() << "|" << embedding_dim_ << "|" << records.size() << "\n";
+        for (const auto& record : records) {
+            if (record.label >= documents_.size()) {
+                continue;
+            }
+            const auto& doc = documents_[record.label];
+            ss << record.label << "|"
+               << doc.relative_path << "|"
+               << doc.hash << "|"
+               << doc.content.size() << "|";
+            auto chunk_index = doc.metadata.find("chunk_index");
+            if (chunk_index != doc.metadata.end()) {
+                ss << chunk_index->second;
+            }
+            ss << "\n";
+        }
+        return HashCalculator::compute_md5(ss.str());
+    }
+
+    bool write_vector_index_metadata(const std::vector<VectorRecord>& records) const {
+        const auto metadata_path = vector_index_metadata_path();
+        if (metadata_path.empty()) {
+            return false;
+        }
+
+        try {
+            boost::json::object metadata;
+            metadata["backend"] = vector_store_config_.backend;
+            metadata["index_path"] = vector_store_config_.index_path;
+            metadata["embedding_model_id"] = get_embedding_model_id();
+            metadata["embedding_backend"] = get_embedding_backend();
+            metadata["embedding_dimension"] = static_cast<std::int64_t>(embedding_dim_);
+            metadata["vector_count"] = static_cast<std::int64_t>(records.size());
+            metadata["snapshot_hash"] = compute_vector_snapshot_hash(records);
+            auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+            metadata["build_time"] = std::string(std::ctime(&now));
+
+            const std::filesystem::path path(metadata_path);
+            if (path.has_parent_path()) {
+                std::filesystem::create_directories(path.parent_path());
+            }
+            std::ofstream out(metadata_path);
+            out << boost::json::serialize(metadata) << "\n";
+            return out.good();
+        } catch (const std::exception& e) {
+            std::cerr << "Error writing vector index metadata: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    bool vector_index_metadata_matches(const std::vector<VectorRecord>& records, std::string& reason) const {
+        const auto metadata_path = vector_index_metadata_path();
+        if (metadata_path.empty()) {
+            reason = "metadata path is not configured";
+            return false;
+        }
+        if (!std::filesystem::exists(metadata_path)) {
+            reason = "metadata file is missing";
+            return false;
+        }
+
+        try {
+            std::ifstream in(metadata_path);
+            std::stringstream buffer;
+            buffer << in.rdbuf();
+            auto parsed = boost::json::parse(buffer.str());
+            if (!parsed.is_object()) {
+                reason = "metadata root is not an object";
+                return false;
+            }
+
+            const auto& object = parsed.as_object();
+            auto get_string = [&object](const char* key) -> std::optional<std::string> {
+                auto it = object.find(key);
+                if (it == object.end() || !it->value().is_string()) {
+                    return std::nullopt;
+                }
+                return std::string(it->value().as_string().c_str());
+            };
+            auto get_int = [&object](const char* key) -> std::optional<std::int64_t> {
+                auto it = object.find(key);
+                if (it == object.end() || !it->value().is_int64()) {
+                    return std::nullopt;
+                }
+                return it->value().as_int64();
+            };
+
+            const auto backend = get_string("backend");
+            const auto model_id = get_string("embedding_model_id");
+            const auto dimension = get_int("embedding_dimension");
+            const auto vector_count = get_int("vector_count");
+            const auto snapshot_hash = get_string("snapshot_hash");
+
+            if (!backend || *backend != vector_store_config_.backend) {
+                reason = "backend mismatch";
+                return false;
+            }
+            if (!model_id || *model_id != get_embedding_model_id()) {
+                reason = "embedding model mismatch";
+                return false;
+            }
+            if (!dimension || static_cast<size_t>(*dimension) != embedding_dim_) {
+                reason = "embedding dimension mismatch";
+                return false;
+            }
+            if (!vector_count || static_cast<size_t>(*vector_count) != records.size()) {
+                reason = "vector count mismatch";
+                return false;
+            }
+            if (!snapshot_hash || *snapshot_hash != compute_vector_snapshot_hash(records)) {
+                reason = "snapshot hash mismatch";
+                return false;
+            }
+
+            return true;
+        } catch (const std::exception& e) {
+            reason = std::string("metadata parse failed: ") + e.what();
+            return false;
+        }
+    }
+
     static std::string trim(const std::string &value) {
         size_t start = 0;
         while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start]))) {
@@ -843,6 +1106,134 @@ private:
             --end;
         }
         return value.substr(start, end - start);
+    }
+
+    static std::string lower_copy(std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        return value;
+    }
+
+    static std::vector<std::string> split_identifier_terms(const std::string& value) {
+        std::vector<std::string> terms;
+        std::string current;
+
+        auto flush = [&]() {
+            if (current.size() >= 2) {
+                terms.push_back(lower_copy(current));
+            }
+            current.clear();
+        };
+
+        for (size_t i = 0; i < value.size(); ++i) {
+            const unsigned char ch = static_cast<unsigned char>(value[i]);
+            if (!std::isalnum(ch)) {
+                flush();
+                continue;
+            }
+
+            if (!current.empty() && std::isupper(ch)) {
+                const unsigned char prev = static_cast<unsigned char>(value[i - 1]);
+                const bool prev_lower_or_digit = std::islower(prev) || std::isdigit(prev);
+                const bool next_lower = i + 1 < value.size() &&
+                    std::islower(static_cast<unsigned char>(value[i + 1]));
+                if (prev_lower_or_digit || next_lower) {
+                    flush();
+                }
+            }
+            current.push_back(static_cast<char>(ch));
+        }
+        flush();
+        return terms;
+    }
+
+    std::vector<std::string> expand_query_terms(const std::string& query) const {
+        std::vector<std::string> expanded;
+        std::set<std::string> seen;
+
+        auto add_term = [&](const std::string& raw) {
+            auto term = trim(lower_copy(raw));
+            if (term.size() < 2 || seen.count(term) > 0) {
+                return;
+            }
+            seen.insert(term);
+            expanded.push_back(std::move(term));
+        };
+
+        for (const auto& term : vectorizer_.tokenize(query)) {
+            add_term(term);
+            if (term.size() > 3 && term.back() == 's') {
+                add_term(term.substr(0, term.size() - 1));
+            }
+        }
+
+        for (const auto& term : split_identifier_terms(query)) {
+            add_term(term);
+        }
+
+        std::istringstream stream(query);
+        std::string raw;
+        while (stream >> raw) {
+            for (const auto& term : split_identifier_terms(raw)) {
+                add_term(term);
+            }
+            std::filesystem::path path(raw);
+            add_term(path.stem().string());
+            add_term(path.extension().string());
+        }
+
+        return expanded;
+    }
+
+    double rerank_boost_for_document(const Document& doc,
+                                     const std::string& original_query,
+                                     const std::vector<std::string>& query_terms) const {
+        double boost = 0.0;
+        const auto path = lower_copy(doc.relative_path);
+        const auto content = lower_copy(doc.content);
+        const auto phrase = lower_copy(original_query);
+
+        for (const auto& term : query_terms) {
+            if (term.empty()) {
+                continue;
+            }
+            if (path.find(term) != std::string::npos) {
+                boost += search_config_.rerank_path_boost;
+            }
+            for (const auto& [key, value] : doc.metadata) {
+                const auto metadata_text = lower_copy(key + " " + value);
+                if (metadata_text.find(term) != std::string::npos) {
+                    boost += search_config_.rerank_metadata_boost;
+                    break;
+                }
+            }
+        }
+
+        if (!phrase.empty() && content.find(phrase) != std::string::npos) {
+            boost += search_config_.rerank_exact_content_boost;
+        }
+
+        return boost;
+    }
+
+    void rerank_results(std::vector<SearchResult>& results,
+                        const std::string& original_query,
+                        const std::vector<std::string>& query_terms) const {
+        if (!search_config_.use_reranking || results.empty()) {
+            return;
+        }
+
+        for (auto& result : results) {
+            const double base = result.fused_score > 0.0 ? result.fused_score : result.score;
+            const double boosted = base + rerank_boost_for_document(result.document, original_query, query_terms);
+            result.score = boosted;
+            result.fused_score = boosted;
+        }
+
+        std::stable_sort(results.begin(), results.end(), [](const SearchResult& a, const SearchResult& b) {
+            return a.score > b.score;
+        });
     }
 
     static std::string path_stem_or_value(const std::string &path) {
@@ -1277,40 +1668,62 @@ public:
         }
 
         std::cout << "🔨 Построение гибридного индекса..." << std::endl;
-        bool hnsw_ready = false;
+        bool vector_ready = false;
         bool xapian_ready = false;
+        const auto vector_records = collect_vector_records();
 
         try {
-            if (hnsw_index_) {
-                delete hnsw_index_;
-                hnsw_index_ = nullptr;
-            }
+            vector_store_.reset();
+            last_vector_store_status_ = "not built";
 
-            if (space_) {
-                delete space_;
-                space_ = nullptr;
-            }
-
-            space_ = new hnswlib::L2Space(embedding_dim_);
-
-            hnsw_index_ = new hnswlib::HierarchicalNSW<float>(
-                space_,
-                documents_.size(),
-                16,
-                200
-            );
-
-            for (size_t i = 0; i < documents_.size(); ++i) {
-                const auto& doc = documents_[i];
-                if (!doc.embedding.empty() && doc.embedding.size() == embedding_dim_) {
-                    hnsw_index_->addPoint(doc.embedding.data(), static_cast<hnswlib::labeltype>(i));
+            if (vector_store_config_.auto_load && !vector_store_config_.index_path.empty()) {
+                auto loaded_store = create_vector_store();
+                std::string metadata_reason;
+                if (!vector_index_metadata_matches(vector_records, metadata_reason)) {
+                    last_vector_store_status_ = "load skipped: " + metadata_reason;
+                    std::cout << "⚠️  Persisted vector index ignored: " << metadata_reason << std::endl;
+                } else if (loaded_store && loaded_store->load(vector_store_config_.index_path,
+                                                              embedding_dim_,
+                                                              std::max(vector_records.size(), documents_.size()))) {
+                    if (loaded_store->size() == vector_records.size()) {
+                        vector_store_ = std::move(loaded_store);
+                        vector_ready = true;
+                        last_vector_store_status_ = "loaded: " + vector_store_config_.index_path;
+                        std::cout << "✅ Vector index loaded from " << vector_store_config_.index_path
+                                  << " (" << vector_records.size() << " vectors)" << std::endl;
+                    } else {
+                        last_vector_store_status_ = "load rejected: vector count mismatch";
+                        std::cout << "⚠️  Persisted vector index ignored: vector count mismatch" << std::endl;
+                    }
                 }
             }
 
-            std::cout << "✅ HNSW индекс построен (" << documents_.size() << " векторов)" << std::endl;
-            hnsw_ready = true;
+            if (!vector_ready) {
+                auto store = create_vector_store();
+                if (store && store->build(vector_records, embedding_dim_)) {
+                    vector_store_ = std::move(store);
+                    vector_ready = true;
+                    last_vector_store_status_ = "built";
+
+                    if (vector_store_config_.auto_save && !vector_store_config_.index_path.empty()) {
+                        if (vector_store_->save(vector_store_config_.index_path)) {
+                            write_vector_index_metadata(vector_records);
+                            last_vector_store_status_ = "built and saved: " + vector_store_config_.index_path;
+                            std::cout << "✅ Vector index saved to " << vector_store_config_.index_path << std::endl;
+                        } else {
+                            last_vector_store_status_ = "built; save failed: " + vector_store_config_.index_path;
+                        }
+                    }
+                }
+            }
+
+            if (vector_ready) {
+                std::cout << "✅ Vector index ready: " << get_vector_store_backend()
+                          << " (" << vector_records.size() << " vectors)" << std::endl;
+            }
         } catch (const std::exception& e) {
-            std::cerr << "❌ Error building HNSW index: " << e.what() << std::endl;
+            last_vector_store_status_ = std::string("error: ") + e.what();
+            std::cerr << "❌ Error building vector index: " << e.what() << std::endl;
         }
 
 
@@ -1353,10 +1766,10 @@ public:
             std::cerr << "❌ Error building Xapian index: " << e.get_description() << std::endl;
         }
 
-        is_hybrid_indexed_ = hnsw_ready;
-        if (hnsw_ready && xapian_ready) {
+        is_hybrid_indexed_ = vector_ready;
+        if (vector_ready && xapian_ready) {
             std::cout << "✅ Гибридный индекс построен: HNSW + Xapian" << std::endl;
-        } else if (hnsw_ready) {
+        } else if (vector_ready) {
             std::cout << "⚠️  Гибридный индекс частично готов: только HNSW" << std::endl;
         } else {
             std::cout << "❌ Гибридный индекс не построен" << std::endl;
@@ -1381,25 +1794,20 @@ public:
             return search(query, top_k);
         }
 
-        std::unordered_map<size_t, double> combined_scores;
+        const std::string expanded_query = expand_query(query);
+        const size_t requested_top_k = std::max<size_t>(1, top_k);
+        const size_t first_stage_top_k = requested_top_k * std::max<size_t>(1, search_config_.rerank_input_multiplier);
+
         std::unordered_map<size_t, double> hnsw_scores;
         std::unordered_map<size_t, double> xapian_scores;
 
         try {
-            if (hnsw_index_ && !query_embedding.empty()) {
-                auto result = hnsw_index_->searchKnn(query_embedding.data(), top_k * 2);
-
-                while (!result.empty()) {
-                    auto top = result.top();
-                    size_t doc_id = static_cast<size_t>(top.second);
-                    float distance = top.first;
-
-                    double score = 1.0 / (1.0 + distance);
-                    if (score > 0.0) {
-                        hnsw_scores[doc_id] = score;
+            if (vector_store_ && vector_store_->isReady() && !query_embedding.empty()) {
+                auto hits = vector_store_->search(query_embedding, first_stage_top_k * 2);
+                for (const auto& hit : hits) {
+                    if (hit.score > 0.0) {
+                        hnsw_scores[hit.label] = hit.score;
                     }
-
-                    result.pop();
                 }
 
                 std::cout << "📊 HNSW нашел: " << hnsw_scores.size() << " результатов" << std::endl;
@@ -1412,7 +1820,7 @@ public:
             if (xapian_db_) {
                 Xapian::Enquire enquire(*xapian_db_);
 
-                std::vector<std::string> query_terms = vectorizer_.tokenize(query);
+                std::vector<std::string> query_terms = vectorizer_.tokenize(expanded_query);
                 Xapian::QueryParser parser;
                 parser.set_database(*xapian_db_);
                 parser.set_default_op(Xapian::Query::op::OP_OR);
@@ -1423,7 +1831,7 @@ public:
                 }
 
                 enquire.set_query(query_obj);
-                auto matches = enquire.get_mset(0, top_k * 2);
+                auto matches = enquire.get_mset(0, first_stage_top_k * 2);
 
                 for (auto it = matches.begin(); it != matches.end(); ++it) {
                     std::string data = it.get_document().get_data();
@@ -1473,10 +1881,10 @@ public:
                   [](const auto &a, const auto &b) { return a.second > b.second; });
 
         std::vector<SearchResult> final_results;
-        auto query_terms = vectorizer_.tokenize(query);
+        auto query_terms = vectorizer_.tokenize(expanded_query);
 
         for (const auto &[doc_idx, score]: sorted_results) {
-            if (final_results.size() >= top_k) break;
+            if (final_results.size() >= first_stage_top_k) break;
             if (score < search_config_.min_score_threshold) continue;
 
             if (doc_idx < documents_.size()) {
@@ -1498,6 +1906,11 @@ public:
             }
         }
 
+        rerank_results(final_results, query, query_terms);
+        if (final_results.size() > requested_top_k) {
+            final_results.resize(requested_top_k);
+        }
+
         std::cout << "✅ Гибридный поиск вернул: " << final_results.size() << " результатов" << std::endl;
         return final_results;
     }
@@ -1512,7 +1925,8 @@ public:
             return hybrid_search(query, query_embedding, top_k);
         }
 
-        std::vector<std::string> query_terms = vectorizer_.tokenize(query);
+        const std::string expanded_query = expand_query(query);
+        std::vector<std::string> query_terms = vectorizer_.tokenize(expanded_query);
         std::vector<SearchResult> results;
 
         for (const auto &doc: documents_) {
@@ -1547,6 +1961,8 @@ public:
                   [](const SearchResult &a, const SearchResult &b) {
                       return a.score > b.score;
                   });
+
+        rerank_results(results, query, query_terms);
 
         if (results.size() > top_k) {
             results.resize(top_k);
@@ -1638,6 +2054,10 @@ public:
             stats.files_by_directory[dir]++;
         }
         stats.total_files = unique_files.size();
+        stats.indexed_chunks = documents_.size();
+        stats.reused_embeddings = last_reused_embeddings_;
+        stats.generated_embeddings = last_generated_embeddings_;
+        stats.stale_embeddings = last_stale_embeddings_;
 
         auto now = std::chrono::system_clock::now();
         auto time = std::chrono::system_clock::to_time_t(now);
@@ -1730,6 +2150,8 @@ public:
     void indexSources() {
         std::lock_guard<std::mutex> lock(mutex_);
         auto index_start = std::chrono::steady_clock::now();
+        auto reusable_embeddings = collect_reusable_embeddings();
+        reset_incremental_stats(reusable_embeddings.size());
 
         documents_.clear();
         path_to_index_.clear();
@@ -1772,7 +2194,7 @@ public:
                 }
 
                 for (auto& chunk : chunks) {
-                    chunk.embedding = generate_embedding(chunk.content);
+                    assign_incremental_embedding(chunk, reusable_embeddings);
 
                     if (stop_flag_ && !stop_flag_->load()) {
                         std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
@@ -1803,6 +2225,10 @@ public:
         auto stats = get_statistics();
         std::cout << "✅ Indexed " << total_docs << " documents from " << data_sources_.size() << " sources" << std::endl;
         std::cout << "   Total lines: " << stats.total_lines << std::endl;
+        std::cout << "   Chunks: " << stats.indexed_chunks
+                  << ", reused embeddings: " << stats.reused_embeddings
+                  << ", generated embeddings: " << stats.generated_embeddings
+                  << ", stale embeddings: " << stats.stale_embeddings << std::endl;
         std::cout << "   Index duration: " << last_index_duration_ms_ << " ms" << std::endl;
     }
 

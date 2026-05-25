@@ -22,6 +22,7 @@
 #include "analytics_service.h"
 #include "markdown_source.h"
 #include "deduplication_service.h"
+#include "rag_auth.h"
 #if QORNIX_HAS_SQLITE
 #include "sqlite_source.h"
 #endif
@@ -33,6 +34,7 @@
 #include <boost/json.hpp>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace http = boost::beast::http;
@@ -57,6 +59,7 @@ protected:
 #if QORNIX_HAS_SQLITE
     std::shared_ptr<SQLiteSource> sqlite_source_;
 #endif
+    RagRouteAuthOptions auth_options_;
 
 public:
    explicit RagApiHandler(std::shared_ptr<RagService> service);
@@ -80,6 +83,8 @@ public:
      * Simple constructor for routes that only need rag_engine.
      */
     explicit RagApiHandler(std::shared_ptr<RagEngine> engine);
+
+    void setAuthOptions(const RagRouteAuthOptions& options);
 
     /**
      * POST /api/index and /api/search - handle POST requests
@@ -114,12 +119,21 @@ public:
         const urls::url_view &url_view,
         const std::map<std::string, std::string> &path_params
     ) override;
+
+private:
+    bool authorizeRequest(
+        const http::request<http::string_body>& req,
+        http::response<http::string_body>& res,
+        const urls::url_view& url_view,
+        const std::string& method
+    ) const;
 };
 
 struct RagRouteOptions {
     bool expose_root_ui = true;
     std::string ui_path = "/";
     std::string api_prefix = "/api";
+    RagRouteAuthOptions auth;
 };
 
 /**

@@ -31,7 +31,7 @@ Admin diagnostics:
 GET /api/rag/admin/diagnostics
 ```
 
-Diagnostics include RAG index state, embedding model identity, LLM status, cache statistics, rate-limit counters, and SQLite persistence counts. Protect this endpoint with host-app auth, an internal network, or a reverse proxy rule before exposing it outside a trusted environment.
+Diagnostics include RAG index state, embedding model identity, LLM status, cache statistics, rate-limit counters, SQLite persistence counts, and RAG route auth status. Protect this endpoint with host-app auth, an internal network, or a reverse proxy rule before exposing it outside a trusted environment.
 
 Prometheus-style RAG metrics:
 
@@ -57,6 +57,24 @@ rag:
 ```
 
 Use stricter limits when LLM calls are enabled or the app is exposed beyond localhost.
+
+## RAG Route Security
+
+Enable the baseline route guard for generated apps that expose RAG admin or write routes:
+
+```yaml
+rag:
+  security:
+    enabled: true
+    mode: admin_token
+    admin_token_env: QORNIX_RAG_ADMIN_TOKEN
+    protect_admin_routes: true
+    protect_write_routes: true
+```
+
+Then set `QORNIX_RAG_ADMIN_TOKEN` in the runtime environment. Requests can use either `Authorization: Bearer <token>` or `X-Qornix-RAG-Admin-Token: <token>`.
+
+Use `mode: host_header` only behind an authenticated host application or reverse proxy that forwards the configured admin role header.
 
 ## Logging
 
@@ -117,7 +135,7 @@ This rebuilds the in-memory retrieval index from the restored data.
 
 - Keep `server.address: 127.0.0.1` for local-only deployments.
 - Use `0.0.0.0` only behind a trusted network boundary or reverse proxy.
-- Protect `/api/rag/admin/diagnostics`, `/api/rag/metrics`, Ask, QA write, ingestion, and document delete endpoints.
+- Protect `/api/rag/admin/diagnostics`, `/api/rag/metrics`, QA write, ingestion, and document delete endpoints with `rag.security` or an upstream auth layer.
 - Store LLM API keys outside Git and container images.
 - Review upload/indexing path allowlists before enabling arbitrary user-controlled sources.
 - Keep `rag.indexing.max_file_size_kb` conservative for shared deployments.

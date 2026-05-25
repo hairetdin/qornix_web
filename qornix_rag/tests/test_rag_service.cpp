@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <thread>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
@@ -32,6 +33,14 @@ int main() {
     RagEngineConfig config;
     config.embedding.backend = "tfidf";
     config.embedding.enable_fallback = true;
+    auto vector_index_path = fs::temp_directory_path() / ("qornix_rag_service_hnsw_" + std::to_string(::getpid()) + ".bin");
+    auto vector_metadata_path = fs::temp_directory_path() / ("qornix_rag_service_hnsw_" + std::to_string(::getpid()) + ".meta.json");
+    fs::remove(vector_index_path);
+    fs::remove(vector_metadata_path);
+    config.vector_store.index_path = vector_index_path.string();
+    config.vector_store.metadata_path = vector_metadata_path.string();
+    config.vector_store.auto_load = true;
+    config.vector_store.auto_save = true;
 
     auto engine = std::make_shared<RagEngine>(config);
 #if QORNIX_HAS_SQLITE
@@ -51,6 +60,33 @@ int main() {
     auto index = service->indexProject(fixture.string());
     assert(index.success);
     assert(index.stats.total_files >= 1);
+    assert(index.stats.indexed_chunks >= 1);
+    assert(index.stats.generated_embeddings >= 1);
+    assert(index.stats.reused_embeddings == 0);
+    assert(fs::exists(vector_index_path));
+    assert(fs::exists(vector_metadata_path));
+
+    auto unchanged = service->indexProject(fixture.string());
+    assert(unchanged.success);
+    assert(unchanged.stats.indexed_chunks == index.stats.indexed_chunks);
+    assert(unchanged.stats.reused_embeddings == unchanged.stats.indexed_chunks);
+    assert(unchanged.stats.generated_embeddings == 0);
+
+    auto loaded_engine = std::make_shared<RagEngine>(config);
+    loaded_engine->index_project(fixture.string());
+    assert(loaded_engine->get_vector_store_status().find("loaded:") != std::string::npos);
+
+    std::ofstream(fixture / "new_doc.md") << "# New doc\nThis changes the vector snapshot.\n";
+    auto changed = service->indexProject(fixture.string());
+    assert(changed.success);
+    assert(changed.stats.indexed_chunks > unchanged.stats.indexed_chunks);
+    assert(changed.stats.reused_embeddings >= unchanged.stats.reused_embeddings);
+    assert(changed.stats.generated_embeddings >= 1);
+    assert(changed.stats.stale_embeddings == 0);
+
+    auto stale_engine = std::make_shared<RagEngine>(config);
+    stale_engine->index_project(fixture.string());
+    assert(stale_engine->get_vector_store_status().find("loaded:") == std::string::npos);
 #if QORNIX_HAS_SQLITE
     assert(sqlite->countPersistedDocuments("project:" + fixture.string()) >= 1);
     assert(sqlite->countPersistedChunks("project:" + fixture.string()) >= 1);
@@ -71,14 +107,42 @@ int main() {
     assert(!jobs.empty());
 #endif
 
+    auto background = service->startBackgroundIngestProject(fixture.string());
+    assert(background.success);
+    assert(background.job.background);
+    assert(background.job.status == "queued" || background.job.status == "running");
+    bool saw_background_job = false;
+    bool saw_terminal_status = false;
+    for (int i = 0; i < 50; ++i) {
+        auto found = service->findIngestionJob(background.job.id);
+        if (found) {
+            saw_background_job = true;
+            assert(found->progress_percent >= 0);
+            assert(found->progress_percent <= 100);
+            if (found->status == "completed" || found->status == "failed") {
+                saw_terminal_status = true;
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    assert(saw_background_job);
+    assert(saw_terminal_status);
+
     auto search = service->search("configurable API prefix", 5);
     assert(search.success);
+    assert(search.query_expansion_applied);
+    assert(search.reranking_applied);
+    assert(search.expanded_query.find("configurable") != std::string::npos);
     assert(!search.results.empty());
     assert(search.results.front().path.find("routing.md") != std::string::npos);
     assert(search.results.front().confidence >= 0.0);
 
     auto ask = service->ask("How are RAG routes registered?", 5);
     assert(ask.success);
+    assert(ask.query_expansion_applied);
+    assert(ask.reranking_applied);
+    assert(ask.expanded_query.find("routes") != std::string::npos);
     assert(ask.llm_status == "unavailable");
     assert(ask.answer.find("LLM") != std::string::npos);
     assert(!ask.context.empty());
@@ -97,6 +161,8 @@ int main() {
     assert(sources.empty());
 
     fs::remove_all(fixture);
+    fs::remove(vector_index_path);
+    fs::remove(vector_metadata_path);
 #if QORNIX_HAS_SQLITE
     sqlite->cleanup();
     fs::remove(db_path);

@@ -26,6 +26,12 @@ Important fields:
 - `rag.indexed`
 - `rag.files`
 - `rag.embedding_backend`
+- `rag.embedding_model_id`
+- `rag.embedding_dim`
+- `rag.vector_store_backend`
+- `rag.vector_store_status`
+- `rag.query_expansion`
+- `rag.reranking`
 - `llm.status`
 - `llm.provider`
 - `llm.model`
@@ -44,7 +50,16 @@ Integrated mode uses the configured prefix, for example:
 GET /api/rag/admin/diagnostics
 ```
 
-Returns read-only operational diagnostics: RAG index state, embedding model id/dimension, LLM status, cache stats, prompt-cache stats, rate-limit counters, SQLite persistence counts, and whether metrics are enabled.
+Returns read-only operational diagnostics: RAG index state, embedding model id/dimension, vector store status, query expansion/reranking flags, LLM status, cache stats, prompt-cache stats, rate-limit counters, SQLite persistence counts, route auth status, and whether metrics are enabled.
+
+When `rag.security.enabled` is true, admin routes and write routes are protected by the configured baseline guard:
+
+```http
+Authorization: Bearer <token>
+X-Qornix-RAG-Admin-Token: <token>
+```
+
+For `mode: host_header`, the host application or reverse proxy must provide the configured admin role header.
 
 Protect this endpoint with host-application auth, an internal network, or a reverse proxy rule before exposing it outside a trusted environment.
 
@@ -69,6 +84,45 @@ Lists registered data sources.
 ```http
 POST /api/index
 ```
+
+## Ingestion
+
+```http
+POST /api/ingest
+```
+
+Runs a synchronous ingestion/indexing job by default:
+
+```json
+{
+  "project_path": "/path/to/project"
+}
+```
+
+For background ingestion, pass `async: true` or `background: true`:
+
+```json
+{
+  "project_path": "/path/to/project",
+  "async": true
+}
+```
+
+The async response returns `202 Accepted` with a job object. Poll:
+
+```http
+GET /api/ingest/{id}
+GET /api/ingest/jobs
+```
+
+Job fields include `status`, `progress_percent`, `files_seen`, `documents_imported`, `skipped`, `errors`, and timestamps when persisted storage is enabled.
+
+Index and ingestion stats include incremental embedding counters:
+
+- `indexed_chunks`
+- `reused_embeddings`
+- `generated_embeddings`
+- `stale_embeddings`
 
 Request:
 
@@ -96,7 +150,12 @@ Request:
 }
 ```
 
-Response includes ranked project snippets and matching QA/wiki entries.
+Response includes ranked project snippets and matching QA/wiki entries. Retrieval quality metadata includes:
+
+- `expanded_query`
+- `query_expansion_applied`
+- `reranking_applied`
+- per-result `confidence`, `vector_score`, `text_score`, and `fused_score`
 
 ## Ask
 
@@ -119,6 +178,9 @@ Response:
 {
   "success": true,
   "question": "...",
+  "expanded_query": "...",
+  "query_expansion_applied": true,
+  "reranking_applied": true,
   "answer": "...",
   "context": [],
   "sources": [],

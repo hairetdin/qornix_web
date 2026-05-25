@@ -8,6 +8,7 @@
 #include "qa_source.h"
 #include <iostream>
 #include <algorithm>
+#include <numeric>
 #include <sstream>
 
 namespace qornix {

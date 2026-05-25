@@ -51,6 +51,29 @@ rag:
     use_hybrid: true
     top_k: 5
     min_score_threshold: 0.0
+    use_query_expansion: true
+    use_reranking: true
+    rerank_input_multiplier: 3
+    rerank_path_boost: 0.15
+    rerank_metadata_boost: 0.10
+    rerank_exact_content_boost: 0.05
+
+  vector_store:
+    backend: local_hnsw
+    index_path: data/hnsw_index.bin
+    metadata_path: data/hnsw_index.meta.json
+    auto_load: true
+    auto_save: true
+
+  security:
+    enabled: false
+    mode: admin_token
+    admin_token_env: QORNIX_RAG_ADMIN_TOKEN
+    token_header: X-Qornix-RAG-Admin-Token
+    role_header: X-Qornix-Role
+    admin_role: admin
+    protect_admin_routes: true
+    protect_write_routes: true
 
   indexing:
     max_file_size_kb: 1024

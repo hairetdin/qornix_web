@@ -17,6 +17,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(QORNIX_RAG_CORE_SOURCES
     rag_config.cpp
     rag_service.cpp
+    vector_store.cpp
     ingestion_pipeline.cpp
     document_chunker.cpp
     llm_client.cpp
@@ -37,8 +38,10 @@ set(QORNIX_RAG_CORE_SOURCES
 
 set(QORNIX_RAG_CORE_HEADERS
     core.h
+    rag_auth.h
     rag_config.h
     rag_service.h
+    vector_store.h
     ingestion_pipeline.h
     document_chunker.h
     llm_client.h

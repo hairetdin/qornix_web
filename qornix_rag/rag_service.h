@@ -15,8 +15,10 @@
 #endif
 
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct RagServiceSourceInfo {
@@ -48,6 +50,9 @@ struct RagServiceSearchItem {
 struct RagServiceSearchResponse {
     bool success = true;
     std::string query;
+    std::string expanded_query;
+    bool query_expansion_applied = false;
+    bool reranking_applied = false;
     std::vector<RagServiceSearchItem> results;
     long long response_time_ms = 0;
 };
@@ -67,6 +72,9 @@ struct RagServiceAskContextItem {
 struct RagServiceAskResponse {
     bool success = true;
     std::string question;
+    std::string expanded_query;
+    bool query_expansion_applied = false;
+    bool reranking_applied = false;
     std::string answer;
     std::vector<RagServiceAskContextItem> context;
     std::vector<std::string> sources;
@@ -93,6 +101,8 @@ struct RagServiceIngestionJob {
     size_t duplicates_found = 0;
     size_t skipped = 0;
     size_t errors = 0;
+    int progress_percent = 0;
+    bool background = false;
     std::string error_message;
     std::string started_at;
     std::string finished_at;
@@ -114,7 +124,11 @@ struct RagServiceHealth {
     std::string embedding_model_id;
     std::string embedding_model_name;
     size_t embedding_dim = 0;
+    std::string vector_store_backend;
+    std::string vector_store_status;
     bool hybrid_search = true;
+    bool query_expansion = true;
+    bool reranking = true;
     bool llm_available = false;
     std::string llm_provider = "not_configured";
     std::string llm_model = "not_configured";
@@ -139,6 +153,7 @@ public:
 
     RagServiceIndexResponse indexProject(const std::optional<std::string>& project_path = std::nullopt);
     RagServiceIngestResponse ingestProject(const std::optional<std::string>& project_path = std::nullopt);
+    RagServiceIngestResponse startBackgroundIngestProject(const std::optional<std::string>& project_path = std::nullopt);
     std::optional<RagServiceIngestionJob> findIngestionJob(const std::string& job_id) const;
     std::vector<RagServiceIngestionJob> listIngestionJobs(size_t limit = 20) const;
     bool deletePersistedDocument(const std::string& relative_path,
@@ -169,4 +184,10 @@ private:
 #endif
 
     std::vector<qornix::rag::QASource::QAPair> searchQa(const std::string& query, size_t limit) const;
+    RagServiceIngestResponse runIngestionJob(RagServiceIngestionJob job, const std::string& path);
+    void updateActiveIngestionJob(const RagServiceIngestionJob& job);
+    void removeActiveIngestionJob(const std::string& job_id);
+
+    mutable std::mutex ingestion_jobs_mutex_;
+    std::unordered_map<std::string, RagServiceIngestionJob> active_ingestion_jobs_;
 };

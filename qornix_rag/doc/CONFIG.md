@@ -98,6 +98,73 @@ For portable bundles, paths are rewritten to `models/semantic_model.onnx` and `m
 
 If ONNX Runtime is not available or the model cannot be loaded, the build uses TF-IDF fallback when `enable_fallback` is true. In fallback mode, persisted embeddings use the TF-IDF model id rather than the requested ONNX id. See `qornix_rag/models/README.md` for where to get model files and the current compatibility limits.
 
+## Vector Store
+
+Hybrid search uses a retrieval-time vector store in addition to Xapian text search. The current local backend is HNSW:
+
+```yaml
+vector_store:
+  backend: local_hnsw
+  index_path: "qornix_rag/data/hnsw_index.bin"
+  metadata_path: "qornix_rag/data/hnsw_index.meta.json"
+  auto_load: true
+  auto_save: true
+```
+
+When `index_path` is set, Qornix tries to load the local HNSW index before rebuilding it and saves the rebuilt index after successful indexing. The metadata sidecar validates backend, embedding model id, embedding dimension, vector count, and document/chunk snapshot hash before a saved index is reused.
+
+For generated `rag_app` or `--with-rag` projects, use app-relative paths such as `data/hnsw_index.bin`.
+
+## Retrieval Quality
+
+Search can expand the user query with deterministic lexical variants and rerank first-stage vector/text results:
+
+```yaml
+search:
+  use_query_expansion: true
+  use_reranking: true
+  rerank_input_multiplier: 3
+  rerank_path_boost: 0.15
+  rerank_metadata_boost: 0.10
+  rerank_exact_content_boost: 0.05
+```
+
+Query expansion is local and non-LLM-based. It adds normalized tokens, simple singular variants, identifier splits, and path-like stems. API responses expose `expanded_query` and `query_expansion_applied` so rewritten retrieval input is visible.
+
+Reranking applies after first-stage vector/Xapian retrieval. It boosts results with matching paths, chunk metadata, or exact content phrases, then returns the requested `top_k`.
+
+## Route Security
+
+Standalone keeps route security disabled by default because it is intended for a local single-user process bound to `127.0.0.1`.
+
+Generated or integrated applications can enable a lightweight RAG route guard:
+
+```yaml
+rag:
+  security:
+    enabled: true
+    mode: admin_token
+    admin_token_env: QORNIX_RAG_ADMIN_TOKEN
+    token_header: X-Qornix-RAG-Admin-Token
+    protect_admin_routes: true
+    protect_write_routes: true
+```
+
+`mode: admin_token` accepts either `Authorization: Bearer <token>` or the configured token header. The token is read from `admin_token` first, then `admin_token_env`.
+
+`mode: host_header` is for applications or reverse proxies that already authenticate users and forward a role header:
+
+```yaml
+rag:
+  security:
+    enabled: true
+    mode: host_header
+    role_header: X-Qornix-Role
+    admin_role: admin
+```
+
+This guard is a baseline for RAG admin/write routes. It does not replace full application auth/RBAC, session management, TLS, or proxy hardening.
+
 ## LLM
 
 Default local Ollama-style config:
