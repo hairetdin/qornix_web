@@ -57,6 +57,8 @@ GET  /api/rag/admin/diagnostics
 GET  /api/rag/metrics
 GET  /api/rag/sources
 GET  /api/rag/qa/list
+GET  /api/rag/qa/suggest
+GET  /api/rag/qa/categories
 ```
 
 Protect diagnostics, metrics, QA write, ingestion, and delete routes with `rag.security` or the host application's auth/proxy layer before exposing a generated app outside a trusted network. See generated `doc/operations.md` for the deployment checklist.

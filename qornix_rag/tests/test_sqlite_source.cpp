@@ -318,6 +318,61 @@ TEST(sqlite_source_pagination) {
 #endif
 }
 
+TEST(sqlite_source_server_side_qa_list_and_suggest) {
+#if QORNIX_HAS_SQLITE
+    std::string db_path = "/tmp/test_sqlite_source_qa_list.db";
+    cleanup_test_db(db_path);
+
+    SQLiteSource::Config config;
+    config.db_path = db_path;
+    config.source_id = "test_qa_list";
+    config.auto_migrate = true;
+
+    auto source = std::make_shared<SQLiteSource>(config);
+    source->initialize();
+
+    source->addQAPair("qa_001", "How to configure Ollama?", "Set llm.provider to ollama.", "llm");
+    source->addQAPair("qa_002", "How to rebuild the vector index?", "Run ingestion or indexing again.", "operations");
+    source->addQAPair("qa_003", "How to change the RAG port?", "Pass --port to the launcher.", "operations");
+    source->addQAPair("qa_004", "Where are QA pairs stored?", "SQLite stores QA pairs locally.", "storage");
+
+    SQLiteSource::QAListOptions options;
+    options.query = "How";
+    options.category = "operations";
+    options.limit = 1;
+    options.offset = 0;
+    auto page1 = source->listQAPairs(options);
+    ASSERT_EQ(2, page1.total, "Filtered total counts all matching operations rows");
+    ASSERT_EQ(1, page1.items.size(), "Filtered page size is enforced");
+    ASSERT_EQ(1, page1.limit, "Limit is echoed");
+    ASSERT_EQ(0, page1.offset, "Offset is echoed");
+
+    options.offset = 1;
+    auto page2 = source->listQAPairs(options);
+    ASSERT_EQ(2, page2.total, "Filtered total stable on page 2");
+    ASSERT_EQ(1, page2.items.size(), "Second page has one row");
+    ASSERT_TRUE(page2.items[0].id != page1.items[0].id, "Second page returns a different row");
+
+    auto suggestions = source->suggestQAPairs("vector", 5);
+    ASSERT_EQ(1, suggestions.size(), "Suggestion finds vector question");
+    ASSERT_STR_EQ("qa_002", suggestions[0].id, "Suggestion id matches");
+
+    auto categories = source->listQACategories("", 10);
+    ASSERT_TRUE(std::find(categories.begin(), categories.end(), "llm") != categories.end(), "Category list includes llm");
+    ASSERT_TRUE(std::find(categories.begin(), categories.end(), "operations") != categories.end(), "Category list includes operations");
+    ASSERT_TRUE(std::find(categories.begin(), categories.end(), "storage") != categories.end(), "Category list includes storage");
+
+    auto filtered_categories = source->listQACategories("oper", 10);
+    ASSERT_EQ(1, filtered_categories.size(), "Category suggestion filters by query");
+    ASSERT_STR_EQ("operations", filtered_categories[0], "Filtered category matches");
+
+    source->cleanup();
+    cleanup_test_db(db_path);
+#else
+    std::cout << "SKIPPED (SQLite not available)";
+#endif
+}
+
 TEST(sqlite_source_migrate) {
 #if QORNIX_HAS_SQLITE
     std::string db_path = "/tmp/test_sqlite_source_migrate.db";
@@ -618,6 +673,7 @@ int main() {
     RUN_TEST(sqlite_source_delete_pair);
     RUN_TEST(sqlite_source_search_by_category);
     RUN_TEST(sqlite_source_pagination);
+    RUN_TEST(sqlite_source_server_side_qa_list_and_suggest);
     RUN_TEST(sqlite_source_migrate);
     RUN_TEST(sqlite_source_hash_uniqueness);
     RUN_TEST(sqlite_source_persistence);

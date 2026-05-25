@@ -43,6 +43,7 @@ Post-stabilization 10: done
 Post-stabilization 11: done
 Post-stabilization 12: done
 Post-stabilization 13: done
+Post-stabilization 14: done
 Next: select the next backlog item before implementation
 ```
 
@@ -1064,22 +1065,28 @@ Current standalone UI shows provider/model diagnostics on the main page and in S
 
 ### 11.4 QA/wiki scale: server-side pagination, filtering, and autocomplete
 
-Status: deferred, not blocking A4.
+Status: `done` for the first server-side QA pagination/filtering/suggestion baseline.
 
-A4 currently provides a local QA/wiki workflow and may use client-side table pagination/filtering in the standalone UI. This is acceptable for a local MVP with a small or medium QA base, but it is not a scalable design for very large datasets.
+A4 originally provided a local QA/wiki workflow with client-side table pagination/filtering. Post-stabilization 14 moved the default SQLite-backed QA list flow to server-side pagination, filtering, and suggestions so the UI no longer needs to load the full QA list.
 
-Known limitation:
+Completed baseline:
 
-- Client-side pagination loads the full QA list into the browser and only paginates visually.
-- This is not suitable for hundreds of thousands or millions of QA records.
+- added `GET /api/qa/list?limit=25&offset=0`;
+- added `GET /api/qa/list?query=...&category=...&limit=25&offset=0`;
+- added `GET /api/qa/suggest?q=...&limit=10`;
+- added `GET /api/qa/categories?q=...&limit=10`;
+- returned `items`, `total`, `limit`, `offset`, and `has_more` from QA list responses;
+- kept `pairs` as a compatibility alias for older callers;
+- updated the standalone/generated RAG UI to use server-backed pages, search, categories, and question suggestions;
+- added SQLite and service regression coverage.
 
-Future direction:
+Remaining follow-ups:
 
-- Implement server-side pagination and filtering for QA list/search.
-- Implement autocomplete for questions, categories, and possibly tags.
 - Prefer the `qornix_web` dynamic API approach for list/filter/sort/page operations.
 - Use `qornix_orm` models/query abstractions for data access instead of documenting or baking raw SQL into the roadmap.
-- Keep the API contract reusable by the future `qornix_web/templates/rag_app` template and by `--with-rag` integrations.
+- Add tags and tag autocomplete after QA tags exist.
+- Add optional FTS/search adapter when the ORM/data layer supports it.
+- Add updated-time sorting/filtering once QA updated timestamps are exposed in the service DTO.
 
 Target API shape:
 

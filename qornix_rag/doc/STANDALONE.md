@@ -116,11 +116,11 @@ The script downloads a default ONNX embedding model and changes `embedding.backe
 The QA tab supports:
 
 - add QA pair;
-- list QA pairs;
+- list QA pairs with server-side pagination;
 - edit QA pair;
 - delete QA pair;
-- filter by text/category;
-- client-side pagination.
+- filter by text/category through the QA API;
+- use question and category suggestions.
 
 QA entries are included in Ask context and Search results. This lets local wiki knowledge override or complement project snippets.
 

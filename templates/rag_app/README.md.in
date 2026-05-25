@@ -52,7 +52,8 @@ DEL  /api/rag/qa/{id}
 ```
 
 Compatibility QA routes are also available as `/api/rag/qa/list`,
-`/api/rag/qa/add`, `/api/rag/qa/update`, and `/api/rag/qa/delete`.
+`/api/rag/qa/suggest`, `/api/rag/qa/categories`, `/api/rag/qa/add`,
+`/api/rag/qa/update`, and `/api/rag/qa/delete`.
 
 ## Local LLM
 

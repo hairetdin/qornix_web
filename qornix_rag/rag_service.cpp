@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -591,6 +592,158 @@ std::vector<QASource::QAPair> RagService::listQaPairs(size_t page, size_t per_pa
         }
     }
     return {};
+}
+
+RagServiceQaListResponse RagService::listQaPairs(const RagServiceQaListOptions& options) const {
+    RagServiceQaListResponse response;
+    response.limit = options.limit == 0 ? 25 : std::min<size_t>(options.limit, 500);
+    response.offset = options.offset;
+    response.source_id = options.source_id;
+
+#if QORNIX_HAS_SQLITE
+    if (sqlite_source_ && (options.source_id.empty() ||
+                           options.source_id == sqlite_source_->getId() ||
+                           options.source_id == sqlite_source_->getSourceId())) {
+        SQLiteSource::QAListOptions sqlite_options;
+        sqlite_options.query = options.query;
+        sqlite_options.category = options.category;
+        sqlite_options.limit = response.limit;
+        sqlite_options.offset = response.offset;
+        auto listed = sqlite_source_->listQAPairs(sqlite_options);
+        response.source_id = sqlite_source_->getId();
+        response.items = std::move(listed.items);
+        response.total = listed.total;
+        response.limit = listed.limit;
+        response.offset = listed.offset;
+        response.has_more = response.offset + response.items.size() < response.total;
+        return response;
+    }
+#endif
+
+    if (!rag_engine_) {
+        return response;
+    }
+
+    auto lower = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return value;
+    };
+    const std::string query = lower(options.query);
+    const std::string category = options.category;
+
+    for (const auto& source : rag_engine_->getDataSources()) {
+        if (auto qa = std::dynamic_pointer_cast<QASource>(source)) {
+            if (!options.source_id.empty() && qa->getId() != options.source_id) {
+                continue;
+            }
+
+            response.source_id = qa->getId();
+            auto pairs = qa->getAllPairs();
+            std::vector<QASource::QAPair> filtered;
+            for (const auto& pair : pairs) {
+                const std::string pair_category = pair.category.empty() ? "general" : pair.category;
+                if (!category.empty() && pair_category != category) {
+                    continue;
+                }
+                if (!query.empty()) {
+                    const std::string haystack = lower(pair.id + " " + pair.question + " " + pair.answer + " " + pair_category);
+                    if (haystack.find(query) == std::string::npos) {
+                        continue;
+                    }
+                }
+                filtered.push_back(pair);
+            }
+
+            response.total = filtered.size();
+            if (response.offset < filtered.size()) {
+                const size_t end = std::min(response.offset + response.limit, filtered.size());
+                response.items.assign(filtered.begin() + static_cast<std::ptrdiff_t>(response.offset),
+                                      filtered.begin() + static_cast<std::ptrdiff_t>(end));
+            }
+            response.has_more = response.offset + response.items.size() < response.total;
+            return response;
+        }
+    }
+
+    return response;
+}
+
+std::vector<RagServiceQaSuggestion> RagService::suggestQaPairs(const std::string& query,
+                                                               size_t limit,
+                                                               const std::string& source_id) const {
+    std::vector<RagServiceQaSuggestion> suggestions;
+    if (query.empty()) {
+        return suggestions;
+    }
+    limit = limit == 0 ? 10 : std::min<size_t>(limit, 50);
+
+#if QORNIX_HAS_SQLITE
+    if (sqlite_source_ && (source_id.empty() || source_id == sqlite_source_->getId() || source_id == sqlite_source_->getSourceId())) {
+        for (const auto& item : sqlite_source_->suggestQAPairs(query, limit)) {
+            suggestions.push_back(RagServiceQaSuggestion{item.id, item.question, item.category});
+        }
+        return suggestions;
+    }
+#endif
+
+    RagServiceQaListOptions options;
+    options.query = query;
+    options.source_id = source_id;
+    options.limit = limit;
+    auto listed = listQaPairs(options);
+    for (const auto& pair : listed.items) {
+        suggestions.push_back(RagServiceQaSuggestion{pair.id, pair.question, pair.category});
+    }
+    return suggestions;
+}
+
+std::vector<std::string> RagService::listQaCategories(const std::string& query,
+                                                      size_t limit,
+                                                      const std::string& source_id) const {
+    limit = limit == 0 ? 50 : std::min<size_t>(limit, 200);
+#if QORNIX_HAS_SQLITE
+    if (sqlite_source_ && (source_id.empty() || source_id == sqlite_source_->getId() || source_id == sqlite_source_->getSourceId())) {
+        return sqlite_source_->listQACategories(query, limit);
+    }
+#endif
+
+    std::vector<std::string> categories;
+    if (!rag_engine_) {
+        return categories;
+    }
+    auto contains = [](const std::vector<std::string>& values, const std::string& value) {
+        return std::find(values.begin(), values.end(), value) != values.end();
+    };
+    auto lower = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return value;
+    };
+    const std::string lowered_query = lower(query);
+    for (const auto& source : rag_engine_->getDataSources()) {
+        if (auto qa = std::dynamic_pointer_cast<QASource>(source)) {
+            if (!source_id.empty() && qa->getId() != source_id) {
+                continue;
+            }
+            for (const auto& pair : qa->getAllPairs()) {
+                const std::string category = pair.category.empty() ? "general" : pair.category;
+                if (!lowered_query.empty() && lower(category).find(lowered_query) == std::string::npos) {
+                    continue;
+                }
+                if (!contains(categories, category)) {
+                    categories.push_back(category);
+                    if (categories.size() >= limit) {
+                        return categories;
+                    }
+                }
+            }
+        }
+    }
+    std::sort(categories.begin(), categories.end());
+    return categories;
 }
 
 bool RagService::addQaPair(const std::string& question,

@@ -662,6 +662,184 @@ std::vector<QASource::QAPair> SQLiteSource::getAllPairs(size_t page, size_t per_
     return pairs;
 }
 
+SQLiteSource::QAListResult SQLiteSource::listQAPairs(const QAListOptions& options) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    QAListResult result;
+    result.limit = options.limit == 0 ? 25 : std::min<size_t>(options.limit, 500);
+    result.offset = options.offset;
+
+#if !QORNIX_HAS_SQLITE
+    return result;
+#endif
+
+    if (!db_) {
+        return result;
+    }
+
+    auto addFilters = [](std::string& sql, const QAListOptions& opts) {
+        if (!opts.category.empty()) {
+            sql += " AND category = ?";
+        }
+        if (!opts.query.empty()) {
+            sql += " AND (id LIKE ? OR question LIKE ? OR answer LIKE ? OR category LIKE ?)";
+        }
+    };
+
+    std::string count_sql = "SELECT COUNT(*) FROM qa_pairs WHERE source_id = ?";
+    addFilters(count_sql, options);
+
+    sqlite3_stmt* count_stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, count_sql.c_str(), -1, &count_stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return result;
+    }
+
+    int bind_index = 1;
+    sqlite3_bind_text(count_stmt, bind_index++, config_.source_id.c_str(), -1, SQLITE_STATIC);
+    if (!options.category.empty()) {
+        sqlite3_bind_text(count_stmt, bind_index++, options.category.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    const std::string like_query = "%" + options.query + "%";
+    if (!options.query.empty()) {
+        for (int i = 0; i < 4; ++i) {
+            sqlite3_bind_text(count_stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+        }
+    }
+
+    if (sqlite3_step(count_stmt) == SQLITE_ROW) {
+        result.total = static_cast<size_t>(sqlite3_column_int64(count_stmt, 0));
+    }
+    sqlite3_finalize(count_stmt);
+
+    std::string list_sql = "SELECT id, question, answer, category, aliases, metadata "
+                           "FROM qa_pairs WHERE source_id = ?";
+    addFilters(list_sql, options);
+    list_sql += " ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    rc = sqlite3_prepare_v2(db_, list_sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return result;
+    }
+
+    bind_index = 1;
+    sqlite3_bind_text(stmt, bind_index++, config_.source_id.c_str(), -1, SQLITE_STATIC);
+    if (!options.category.empty()) {
+        sqlite3_bind_text(stmt, bind_index++, options.category.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    if (!options.query.empty()) {
+        for (int i = 0; i < 4; ++i) {
+            sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+        }
+    }
+    sqlite3_bind_int64(stmt, bind_index++, static_cast<sqlite3_int64>(result.limit));
+    sqlite3_bind_int64(stmt, bind_index++, static_cast<sqlite3_int64>(result.offset));
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        result.items.push_back(rowToQAPair(stmt));
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+std::vector<SQLiteSource::QASuggestion> SQLiteSource::suggestQAPairs(const std::string& query, size_t limit) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<QASuggestion> suggestions;
+
+#if !QORNIX_HAS_SQLITE
+    return suggestions;
+#endif
+
+    if (!db_ || query.empty()) {
+        return suggestions;
+    }
+
+    limit = limit == 0 ? 10 : std::min<size_t>(limit, 50);
+    const std::string sql = "SELECT id, question, category FROM qa_pairs "
+                            "WHERE source_id = ? AND (question LIKE ? OR answer LIKE ? OR category LIKE ? OR id LIKE ?) "
+                            "ORDER BY CASE WHEN question LIKE ? THEN 0 ELSE 1 END, updated_at DESC "
+                            "LIMIT ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return suggestions;
+    }
+
+    const std::string like_query = "%" + query + "%";
+    const std::string prefix_query = query + "%";
+    int bind_index = 1;
+    sqlite3_bind_text(stmt, bind_index++, config_.source_id.c_str(), -1, SQLITE_STATIC);
+    for (int i = 0; i < 4; ++i) {
+        sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    sqlite3_bind_text(stmt, bind_index++, prefix_query.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, bind_index++, static_cast<sqlite3_int64>(limit));
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        QASuggestion item;
+        const auto text = [stmt](int column) -> std::string {
+            const unsigned char* value = sqlite3_column_text(stmt, column);
+            return value ? reinterpret_cast<const char*>(value) : "";
+        };
+        item.id = text(0);
+        item.question = text(1);
+        item.category = text(2);
+        suggestions.push_back(std::move(item));
+    }
+
+    sqlite3_finalize(stmt);
+    return suggestions;
+}
+
+std::vector<std::string> SQLiteSource::listQACategories(const std::string& query, size_t limit) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<std::string> categories;
+
+#if !QORNIX_HAS_SQLITE
+    return categories;
+#endif
+
+    if (!db_) {
+        return categories;
+    }
+
+    limit = limit == 0 ? 50 : std::min<size_t>(limit, 200);
+    std::string sql = "SELECT DISTINCT category FROM qa_pairs WHERE source_id = ? AND category != ''";
+    if (!query.empty()) {
+        sql += " AND category LIKE ?";
+    }
+    sql += " ORDER BY category COLLATE NOCASE ASC LIMIT ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return categories;
+    }
+
+    int bind_index = 1;
+    sqlite3_bind_text(stmt, bind_index++, config_.source_id.c_str(), -1, SQLITE_STATIC);
+    const std::string like_query = "%" + query + "%";
+    if (!query.empty()) {
+        sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    sqlite3_bind_int64(stmt, bind_index++, static_cast<sqlite3_int64>(limit));
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        const unsigned char* value = sqlite3_column_text(stmt, 0);
+        if (value) {
+            categories.emplace_back(reinterpret_cast<const char*>(value));
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return categories;
+}
+
 PersistedIndexStats SQLiteSource::persistIndexedDocuments(
     const std::vector<Document>& documents,
     const std::string& source_id,

@@ -401,11 +401,12 @@
                 </div>
                 <aside class="card">
                     <h2>QA pairs</h2>
-                    <p class="muted">Поиск и выбор QA-пары для редактирования. Таблица фильтруется локально по загруженному списку.</p>
+                    <p class="muted">Поиск, категории и страницы загружаются с сервера, поэтому список остаётся быстрым на больших QA-базах.</p>
                     <div class="qa-list-tools">
                         <div>
                             <label for="qa-filter">Search QA</label>
-                            <input id="qa-filter" placeholder="Вопрос, ответ, категория или id">
+                            <input id="qa-filter" list="qa-suggestions" placeholder="Вопрос, ответ, категория или id">
+                            <datalist id="qa-suggestions"></datalist>
                         </div>
                         <div>
                             <label for="qa-category-filter">Category</label>
@@ -419,7 +420,7 @@
                                 <option value="25" selected>25</option>
                                 <option value="50">50</option>
                                 <option value="100">100</option>
-                                <option value="0">All</option>
+                                <option value="200">200</option>
                             </select>
                         </div>
                         <div>
@@ -517,6 +518,8 @@
         let lastQAPairs = [];
         let qaCurrentPage = 1;
         let qaPageSize = 25;
+        let qaTotal = 0;
+        let qaListDebounce = null;
         let currentAuthUser = null;
         const ADMIN_TOKEN_STORAGE_KEY = 'qornix-rag-admin-token';
 
@@ -554,16 +557,20 @@
             });
             document.getElementById('qa-filter').addEventListener('input', () => {
                 qaCurrentPage = 1;
-                renderQATable();
+                window.clearTimeout(qaListDebounce);
+                qaListDebounce = window.setTimeout(() => {
+                    loadQASuggestions();
+                    loadQAPairs();
+                }, 250);
             });
             document.getElementById('qa-category-filter').addEventListener('change', () => {
                 qaCurrentPage = 1;
-                renderQATable();
+                loadQAPairs();
             });
             document.getElementById('qa-page-size').addEventListener('change', () => {
                 qaPageSize = Number(document.getElementById('qa-page-size').value || 25);
                 qaCurrentPage = 1;
-                renderQATable();
+                loadQAPairs();
             });
         }
 
@@ -1154,10 +1161,24 @@ Available models: ${escapeHtml(modelsText)}</div>
             summary.textContent = 'Загрузка QA...';
             container.innerHTML = '<div class="notice">Загрузка QA...</div>';
             try {
-                const data = await api('/api/qa/list?per_page=500');
-                lastQAPairs = data.pairs || [];
-                qaCurrentPage = 1;
-                populateQACategoryFilter();
+                qaPageSize = Number(document.getElementById('qa-page-size').value || qaPageSize || 25);
+                const query = document.getElementById('qa-filter').value.trim();
+                const category = document.getElementById('qa-category-filter').value;
+                const offset = Math.max(0, (qaCurrentPage - 1) * qaPageSize);
+                const params = new URLSearchParams({
+                    limit: String(qaPageSize),
+                    offset: String(offset)
+                });
+                if (query) params.set('query', query);
+                if (category) params.set('category', category);
+                const data = await api(`/api/qa/list?${params.toString()}`);
+                lastQAPairs = data.items || data.pairs || [];
+                qaTotal = Number(data.total || 0);
+                if (!lastQAPairs.length && qaTotal > 0 && offset >= qaTotal) {
+                    qaCurrentPage = Math.max(1, Math.ceil(qaTotal / qaPageSize));
+                    return loadQAPairs();
+                }
+                await populateQACategoryFilter();
                 renderQATable();
             } catch (error) {
                 summary.textContent = 'Ошибка загрузки QA.';
@@ -1165,65 +1186,71 @@ Available models: ${escapeHtml(modelsText)}</div>
             }
         }
 
-        function populateQACategoryFilter() {
+        async function populateQACategoryFilter() {
             const select = document.getElementById('qa-category-filter');
             const current = select.value;
-            const categories = Array.from(new Set(lastQAPairs.map((pair) => pair.category || 'general'))).sort((a, b) => a.localeCompare(b));
-            select.innerHTML = '<option value="">All categories</option>' + categories.map((category) =>
-                `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`
-            ).join('');
-            if (categories.includes(current)) {
-                select.value = current;
+            try {
+                const data = await api('/api/qa/categories?limit=200');
+                const categories = data.categories || [];
+                select.innerHTML = '<option value="">All categories</option>' + categories.map((category) =>
+                    `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`
+                ).join('');
+                if (categories.includes(current)) {
+                    select.value = current;
+                }
+            } catch (error) {
+                const categories = Array.from(new Set(lastQAPairs.map((pair) => pair.category || 'general'))).sort((a, b) => a.localeCompare(b));
+                select.innerHTML = '<option value="">All categories</option>' + categories.map((category) =>
+                    `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`
+                ).join('');
+                if (categories.includes(current)) {
+                    select.value = current;
+                }
+            }
+        }
+
+        async function loadQASuggestions() {
+            const query = document.getElementById('qa-filter').value.trim();
+            const datalist = document.getElementById('qa-suggestions');
+            if (query.length < 2) {
+                datalist.innerHTML = '';
+                return;
+            }
+            try {
+                const data = await api(`/api/qa/suggest?q=${encodeURIComponent(query)}&limit=10`);
+                const suggestions = data.suggestions || [];
+                datalist.innerHTML = suggestions.map((item) =>
+                    `<option value="${escapeHtml(item.question || '')}" label="${escapeHtml(item.category || 'general')}"></option>`
+                ).join('');
+            } catch (error) {
+                datalist.innerHTML = '';
             }
         }
 
         function getFilteredQAPairs() {
-            const query = document.getElementById('qa-filter').value.trim().toLowerCase();
-            const category = document.getElementById('qa-category-filter').value;
-            return lastQAPairs.filter((pair) => {
-                const pairCategory = pair.category || 'general';
-                if (category && pairCategory !== category) return false;
-                if (!query) return true;
-                const haystack = [pair.id, pair.question, pair.answer, pairCategory]
-                    .filter(Boolean)
-                    .join(' ')
-                    .toLowerCase();
-                return haystack.includes(query);
-            });
+            return lastQAPairs;
         }
 
         function renderQATable() {
             const container = document.getElementById('qa-list');
             const summary = document.getElementById('qa-list-summary');
             const pagination = document.getElementById('qa-pagination');
-            if (!lastQAPairs.length) {
+            if (!qaTotal && !lastQAPairs.length) {
                 summary.textContent = '0 QA pairs';
                 pagination.classList.add('hidden');
                 pagination.innerHTML = '';
-                container.innerHTML = renderNotice('QA-пары пока не добавлены. Добавьте первую пару слева, затем задайте похожий вопрос во вкладке Ask.', 'warn');
+                container.innerHTML = renderNotice('QA-пары по текущему фильтру не найдены. Добавьте первую пару слева или сбросьте фильтр.', 'warn');
                 return;
             }
 
-            const filtered = getFilteredQAPairs();
-            if (!filtered.length) {
-                summary.textContent = `Показано 0 из ${lastQAPairs.length} QA-пар.`;
-                pagination.classList.add('hidden');
-                pagination.innerHTML = '';
-                container.innerHTML = renderNotice('По текущему фильтру QA-пары не найдены.', 'warn');
-                return;
-            }
-
-            qaPageSize = Number(document.getElementById('qa-page-size').value || qaPageSize || 25);
-            const showAll = qaPageSize === 0;
-            const totalPages = showAll ? 1 : Math.max(1, Math.ceil(filtered.length / qaPageSize));
+            const pageItems = lastQAPairs;
+            const totalPages = Math.max(1, Math.ceil(qaTotal / qaPageSize));
             qaCurrentPage = Math.min(Math.max(1, qaCurrentPage), totalPages);
-            const startIndex = showAll ? 0 : (qaCurrentPage - 1) * qaPageSize;
-            const endIndex = showAll ? filtered.length : Math.min(startIndex + qaPageSize, filtered.length);
-            const pageItems = filtered.slice(startIndex, endIndex);
-            const rangeText = showAll
-                ? `Показано все ${filtered.length} из ${lastQAPairs.length} QA-пар.`
-                : `Показано ${startIndex + 1}–${endIndex} из ${filtered.length} найденных QA-пар. Всего: ${lastQAPairs.length}.`;
-            summary.textContent = rangeText;
+            const startIndex = qaTotal === 0 ? 0 : (qaCurrentPage - 1) * qaPageSize;
+            const endIndex = Math.min(startIndex + pageItems.length, qaTotal);
+            summary.textContent = pageItems.length
+                ? `Показано ${startIndex + 1}–${endIndex} из ${qaTotal} QA-пар.`
+                : `Показано 0 из ${qaTotal} QA-пар.`;
 
             container.innerHTML = `
                 <table class="qa-table">
@@ -1251,7 +1278,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                     </tbody>
                 </table>`;
 
-            renderQAPagination(filtered.length, totalPages, showAll);
+            renderQAPagination(qaTotal, totalPages, false);
         }
 
         function renderQAPagination(filteredCount, totalPages, showAll) {
@@ -1292,7 +1319,7 @@ Available models: ${escapeHtml(modelsText)}</div>
 
         function setQAPage(page) {
             qaCurrentPage = page;
-            renderQATable();
+            loadQAPairs();
             document.getElementById('qa-list').scrollTop = 0;
         }
 
@@ -1300,7 +1327,7 @@ Available models: ${escapeHtml(modelsText)}</div>
             document.getElementById('qa-filter').value = '';
             document.getElementById('qa-category-filter').value = '';
             qaCurrentPage = 1;
-            renderQATable();
+            loadQAPairs();
         }
 
         function startQAEdit(pairId) {
