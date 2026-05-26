@@ -90,6 +90,8 @@ mkdir -p docker/config logs
 cp build/deploy/@PROJECT_NAME@/config.yaml docker/config/config.yaml
 sudo chown -R 10001:10001 logs
 docker run -d --name @PROJECT_NAME@ \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
   -p 8008:8008 \
   -v "$PWD/docker/config/config.yaml:/app/config.yaml:ro" \
   -v "$PWD/logs:/logs" \
@@ -97,6 +99,23 @@ docker run -d --name @PROJECT_NAME@ \
 ```
 
 Use `logging.to_file: true` and `logging.file_path: /logs/server` in the mounted config. To move the app to another machine, run `docker save @PROJECT_NAME@:runtime -o @PROJECT_NAME@-runtime.tar`, copy the tar file and external config/log directories, then run `docker load -i @PROJECT_NAME@-runtime.tar` on the target.
+
+Run the generated smoke check after deploy:
+
+```bash
+./deploy_smoke.sh http://127.0.0.1:8008
+```
+
+For internet-facing deployments, terminate TLS in a reverse proxy or platform
+load balancer, keep the app port on an internal network, and enable secure auth
+cookies:
+
+```yaml
+auth:
+  enabled: true
+  secure_cookies: true
+  cookie_same_site: Strict
+```
 
 The Dockerfile copies `build/deploy/@PROJECT_NAME@/` into `/app`, sets `QORNIX_APP_ROOT=/app` and changes the container config to listen on `0.0.0.0` so published ports work. If you change enabled modules or database drivers, check `ldd build/deploy/@PROJECT_NAME@/@PROJECT_NAME@` and adjust the package list.
 

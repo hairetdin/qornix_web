@@ -237,6 +237,7 @@ public:
 
         if (authenticationRequired && !authContext.authenticated) {
             logMessage("ERROR", "Authentication required for path: " + path);
+            authManager_->recordAuditEvent("access_denied", "", "", "failure", method + " " + path + " authentication_required");
 
             res.result(http::status::unauthorized);
             res.set(http::field::content_type, "application/json");
@@ -258,6 +259,7 @@ public:
             isUnsafeMethod(method) &&
             !authManager_->validateCsrfToken(authContext.sessionId, csrfToken(req))) {
             logMessage("ERROR", "CSRF token validation failed for path: " + path);
+            authManager_->recordAuditEvent("access_denied", authContext.userId, authContext.username, "failure", method + " " + path + " csrf");
 
             res.result(http::status::forbidden);
             res.set(http::field::content_type, "application/json");
@@ -277,6 +279,7 @@ public:
             (!hasAny(authContext.roles, requiredRoles) ||
              !hasAny(authContext.permissions, requiredPermissions))) {
             logMessage("ERROR", "Authorization failed for path: " + path);
+            authManager_->recordAuditEvent("access_denied", authContext.userId, authContext.username, "failure", method + " " + path + " authorization");
 
             res.result(http::status::forbidden);
             res.set(http::field::content_type, "application/json");

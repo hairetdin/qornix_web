@@ -66,10 +66,17 @@ Registered routes:
 - `GET /auth/users` for admin user listing;
 - `POST /auth/users` for admin user creation;
 - `PATCH /auth/users/{id}` for admin role, permission, active-state, profile, and password updates;
+- `POST /auth/invites` for admin-created invite tokens;
+- `POST /auth/invites/accept` for invite-token account creation;
+- `POST /auth/password-reset/request` for password reset token creation;
+- `POST /auth/password-reset/confirm` for password reset confirmation;
+- `GET /auth/audit` for recent auth audit events;
 - `POST /auth/register` when registration is explicitly enabled.
 
-Successful session login sets a `session_id` HTTP-only cookie. JWT tokens are
-included in the JSON response when JWT support is compiled and enabled.
+Successful session login sets a `session_id` HTTP-only cookie. Generated apps
+can set `auth.secure_cookies`, `auth.cookie_same_site`, and `auth.cookie_path`.
+JWT tokens are included in the JSON response when JWT support is compiled and
+enabled.
 
 The `/auth/users` admin routes are regular auth-protected routes. Generated
 applications protect them with `auth.admin_permissions`, which defaults to
@@ -108,6 +115,12 @@ sessions and JWTs, and disabling a user blocks further session and bearer-token
 access. Non-exact route policies and excluded paths match only whole path
 segments, so a policy for `/api/rag/admin` does not match
 `/api/rag/administrator`.
+
+Login rotates browser sessions by invalidating the user's older sessions after
+creating a new one. Password changes, password resets, and admin updates
+invalidate sessions for the affected user. Invite/password-reset delivery is a
+manual-token baseline; connect an email or notification provider before enabling
+self-service account recovery for public users.
 
 Authenticated responses expose downstream headers:
 

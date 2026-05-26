@@ -57,6 +57,7 @@ public:
     struct QAListOptions {
         std::string query;
         std::string category;
+        std::string tag;
         size_t limit = 25;
         size_t offset = 0;
     };
@@ -98,7 +99,8 @@ public:
                    const std::string& aliases = "[]", const std::string& metadata = "{}");
     bool updateQAPair(const std::string& id, const std::string& answer = "",
                       const std::string& category = "", const std::string& aliases = "",
-                      const std::string& question = "");
+                      const std::string& question = "",
+                      const std::string& metadata = "");
     bool deleteQAPair(const std::string& id);
     std::optional<QASource::QAPair> findQAPair(const std::string& id) const;
     std::vector<QASource::QAPair> searchByCategory(const std::string& category) const;

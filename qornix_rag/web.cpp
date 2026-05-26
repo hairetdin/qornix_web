@@ -115,13 +115,16 @@ bool isWriteRoute(const std::string& path, const std::string& method) {
     }
     return apiPathMatches(path, "/api/index") ||
            apiPathMatches(path, "/api/ingest") ||
+           apiPathMatches(path, "/api/embedding/switch") ||
            apiPathMatches(path, "/api/documents/delete") ||
            apiPathMatches(path, "/api/sources/add") ||
            apiPathMatches(path, "/api/sources/remove") ||
            apiPathMatches(path, "/api/qa") ||
            apiPathMatches(path, "/api/qa/add") ||
            apiPathMatches(path, "/api/qa/update") ||
-           apiPathMatches(path, "/api/qa/delete");
+           apiPathMatches(path, "/api/qa/delete") ||
+           apiPathMatches(path, "/api/qa/import") ||
+           apiPathMatches(path, "/api/qa/export");
 }
 
 std::string makeQaPairId(const std::string& source_id) {
@@ -138,6 +141,96 @@ std::string qaContextSnippet(const QASource::QAPair& pair) {
     return "Q: " + pair.question + "\nA: " + pair.answer;
 }
 
+boost::json::array stringArrayJson(const std::vector<std::string>& values) {
+    boost::json::array array;
+    for (const auto& value : values) {
+        if (!value.empty()) {
+            array.emplace_back(value);
+        }
+    }
+    return array;
+}
+
+std::vector<std::string> jsonStringArray(const boost::json::object& obj, const char* key) {
+    std::vector<std::string> values;
+    if (!obj.contains(key) || !obj.at(key).is_array()) {
+        return values;
+    }
+    for (const auto& value : obj.at(key).as_array()) {
+        if (value.is_string()) {
+            values.emplace_back(value.as_string().c_str());
+        }
+    }
+    return values;
+}
+
+std::map<std::string, std::string> jsonStringMap(const boost::json::object& obj, const char* key) {
+    std::map<std::string, std::string> values;
+    if (!obj.contains(key) || !obj.at(key).is_object()) {
+        return values;
+    }
+    for (const auto& entry : obj.at(key).as_object()) {
+        if (entry.value().is_string()) {
+            values[std::string(entry.key())] = entry.value().as_string().c_str();
+        }
+    }
+    return values;
+}
+
+std::string htmlEscape(const std::string& input) {
+    std::string output;
+    output.reserve(input.size());
+    for (char ch : input) {
+        switch (ch) {
+            case '&': output += "&amp;"; break;
+            case '<': output += "&lt;"; break;
+            case '>': output += "&gt;"; break;
+            case '"': output += "&quot;"; break;
+            default: output.push_back(ch); break;
+        }
+    }
+    return output;
+}
+
+std::string renderMarkdownLite(const std::string& markdown) {
+    std::ostringstream html;
+    std::istringstream in(markdown);
+    std::string line;
+    bool in_list = false;
+    while (std::getline(in, line)) {
+        if (line.empty()) {
+            if (in_list) {
+                html << "</ul>";
+                in_list = false;
+            }
+            continue;
+        }
+        if (line.rfind("# ", 0) == 0) {
+            if (in_list) { html << "</ul>"; in_list = false; }
+            html << "<h1>" << htmlEscape(line.substr(2)) << "</h1>";
+        } else if (line.rfind("## ", 0) == 0) {
+            if (in_list) { html << "</ul>"; in_list = false; }
+            html << "<h2>" << htmlEscape(line.substr(3)) << "</h2>";
+        } else if (line.rfind("- ", 0) == 0) {
+            if (!in_list) {
+                html << "<ul>";
+                in_list = true;
+            }
+            html << "<li>" << htmlEscape(line.substr(2)) << "</li>";
+        } else {
+            if (in_list) {
+                html << "</ul>";
+                in_list = false;
+            }
+            html << "<p>" << htmlEscape(line) << "</p>";
+        }
+    }
+    if (in_list) {
+        html << "</ul>";
+    }
+    return html.str();
+}
+
 boost::json::object qaContextObject(const QASource::QAPair& pair, double score) {
     boost::json::object obj;
     obj["path"] = qaContextPath(pair);
@@ -146,6 +239,9 @@ boost::json::object qaContextObject(const QASource::QAPair& pair, double score) 
     obj["source_type"] = "qa";
     obj["category"] = pair.category;
     obj["pair_id"] = pair.id;
+    obj["tags"] = stringArrayJson(pair.tags);
+    auto attribution = pair.metadata.find("source");
+    obj["attribution"] = attribution == pair.metadata.end() ? "QA Knowledge Base" : attribution->second;
     return obj;
 }
 
@@ -164,6 +260,9 @@ boost::json::object qaSearchResultObject(const QASource::QAPair& pair, double sc
     obj["source_type"] = "qa";
     obj["category"] = pair.category;
     obj["pair_id"] = pair.id;
+    obj["tags"] = stringArrayJson(pair.tags);
+    auto attribution = pair.metadata.find("source");
+    obj["attribution"] = attribution == pair.metadata.end() ? "QA Knowledge Base" : attribution->second;
     return obj;
 }
 
@@ -186,6 +285,24 @@ boost::json::object ingestionJobObject(const RagServiceIngestionJob& job) {
     return obj;
 }
 
+boost::json::object embeddingModelObject(const RagServiceEmbeddingModelItem& model) {
+    boost::json::object obj;
+    obj["id"] = model.id;
+    obj["backend"] = model.backend;
+    obj["name"] = model.name;
+    obj["version"] = model.version;
+    obj["model_path"] = model.model_path;
+    obj["tokenizer_path"] = model.tokenizer_path;
+    obj["tokenizer_type"] = model.tokenizer_type;
+    obj["pooling"] = model.pooling;
+    obj["dimension"] = static_cast<std::int64_t>(model.dimension);
+    obj["max_seq_len"] = static_cast<std::int64_t>(model.max_seq_len);
+    obj["active"] = model.active;
+    obj["ready"] = model.ready;
+    obj["status"] = model.status;
+    return obj;
+}
+
 boost::json::object qaPairObject(const QASource::QAPair& pair) {
     boost::json::object pair_obj;
     pair_obj["id"] = pair.id;
@@ -193,11 +310,14 @@ boost::json::object qaPairObject(const QASource::QAPair& pair) {
     pair_obj["answer"] = pair.answer;
     pair_obj["category"] = pair.category.empty() ? "general" : pair.category;
 
-    boost::json::array aliases_array;
-    for (const auto& alias : pair.aliases) {
-        aliases_array.emplace_back(alias);
+    pair_obj["answer_html"] = renderMarkdownLite(pair.answer);
+    pair_obj["aliases"] = stringArrayJson(pair.aliases);
+    pair_obj["tags"] = stringArrayJson(pair.tags);
+    boost::json::object metadata_obj;
+    for (const auto& [key, value] : pair.metadata) {
+        metadata_obj[key] = value;
     }
-    pair_obj["aliases"] = std::move(aliases_array);
+    pair_obj["metadata"] = metadata_obj;
     return pair_obj;
 }
 
@@ -526,6 +646,62 @@ void RagApiHandler::handlePost(
             buildJsonResponse(res, ingested.success ? http::status::ok : http::status::internal_server_error,
                               boost::json::serialize(response));
 
+        } else if (apiPathMatches(path, "/api/embedding/switch")) {
+            if (!rag_service_) {
+                buildErrorResponse(res, http::status::service_unavailable, "RAG service is not configured");
+                return;
+            }
+
+            boost::json::value json_req = req.body().empty()
+                ? boost::json::object{}
+                : boost::json::parse(req.body());
+            std::string model_id;
+            std::optional<std::string> project_path;
+            bool reindex = false;
+            bool force_reembed = true;
+
+            if (json_req.if_object()) {
+                const auto& obj = json_req.as_object();
+                if (obj.contains("model_id")) {
+                    model_id = obj.at("model_id").as_string().c_str();
+                }
+                if (obj.contains("project_path")) {
+                    std::string requested_path = obj.at("project_path").as_string().c_str();
+                    if (!requested_path.empty() && requested_path != "." && requested_path != "./") {
+                        project_path = requested_path;
+                    }
+                }
+                if (obj.contains("reindex") && obj.at("reindex").is_bool()) {
+                    reindex = obj.at("reindex").as_bool();
+                }
+                if (obj.contains("force_reembed") && obj.at("force_reembed").is_bool()) {
+                    force_reembed = obj.at("force_reembed").as_bool();
+                }
+            }
+
+            auto switched = rag_service_->switchEmbeddingModel(model_id, reindex, force_reembed, project_path);
+            boost::json::object response;
+            response["success"] = switched.success;
+            response["message"] = switched.message;
+            response["previous_model_id"] = switched.previous_model_id;
+            response["active_model_id"] = switched.active_model_id;
+            response["effective_model_id"] = switched.effective_model_id;
+            response["reindex_required"] = switched.reindex_required;
+            response["reindexed"] = switched.reindexed;
+            response["force_reembed"] = switched.force_reembed;
+            response["stats"] = {
+                {"total_files", switched.stats.total_files},
+                {"total_lines", switched.stats.total_lines},
+                {"total_size_kb", switched.stats.total_size_bytes / 1024},
+                {"indexed_chunks", switched.stats.indexed_chunks},
+                {"reused_embeddings", switched.stats.reused_embeddings},
+                {"generated_embeddings", switched.stats.generated_embeddings},
+                {"stale_embeddings", switched.stats.stale_embeddings},
+                {"index_duration_ms", static_cast<std::int64_t>(switched.stats.index_duration_ms)}
+            };
+            buildJsonResponse(res, switched.success ? http::status::ok : http::status::bad_request,
+                              boost::json::serialize(response));
+
         } else if (apiPathMatches(path, "/api/documents/delete")) {
             boost::json::value json_req = boost::json::parse(req.body());
             std::string relative_path;
@@ -635,6 +811,8 @@ void RagApiHandler::handlePost(
                 };
                 if (!result.category.empty()) result_obj["category"] = result.category;
                 if (!result.pair_id.empty()) result_obj["pair_id"] = result.pair_id;
+                if (!result.tags.empty()) result_obj["tags"] = stringArrayJson(result.tags);
+                if (!result.attribution.empty()) result_obj["attribution"] = result.attribution;
                 results_array.emplace_back(result_obj);
             }
 
@@ -691,10 +869,36 @@ void RagApiHandler::handlePost(
                     }
                 }
 
-                auto ask_response = rag_service_->ask(question, top_k, client_ip);
+                std::vector<RagServiceConversationTurn> history;
+                if (json_req.if_object()) {
+                    auto obj = json_req.as_object();
+                    if (obj.contains("history") && obj.at("history").is_array()) {
+                        for (const auto& value : obj.at("history").as_array()) {
+                            if (!value.is_object()) {
+                                continue;
+                            }
+                            const auto& turn_obj = value.as_object();
+                            RagServiceConversationTurn turn;
+                            if (turn_obj.contains("role") && turn_obj.at("role").is_string()) {
+                                turn.role = turn_obj.at("role").as_string().c_str();
+                            }
+                            if (turn_obj.contains("content") && turn_obj.at("content").is_string()) {
+                                turn.content = turn_obj.at("content").as_string().c_str();
+                            }
+                            if (!turn.role.empty() && !turn.content.empty()) {
+                                history.push_back(std::move(turn));
+                            }
+                        }
+                    }
+                }
+
+                auto ask_response = rag_service_->ask(question, top_k, client_ip, history);
                 boost::json::array context_array;
                 boost::json::array sources_array;
                 boost::json::array citations_array;
+                boost::json::array answer_citations_array;
+                boost::json::array missing_citations_array;
+                boost::json::array uncited_context_citations_array;
 
                 for (const auto& item : ask_response.context) {
                     boost::json::object ctx_obj{
@@ -708,6 +912,8 @@ void RagApiHandler::handlePost(
                     };
                     if (!item.category.empty()) ctx_obj["category"] = item.category;
                     if (!item.pair_id.empty()) ctx_obj["pair_id"] = item.pair_id;
+                    if (!item.tags.empty()) ctx_obj["tags"] = stringArrayJson(item.tags);
+                    if (!item.attribution.empty()) ctx_obj["attribution"] = item.attribution;
                     context_array.emplace_back(ctx_obj);
                 }
                 for (const auto& source : ask_response.sources) {
@@ -715,6 +921,15 @@ void RagApiHandler::handlePost(
                 }
                 for (const auto& citation : ask_response.citations) {
                     citations_array.emplace_back(citation);
+                }
+                for (const auto& citation : ask_response.answer_citations) {
+                    answer_citations_array.emplace_back(citation);
+                }
+                for (const auto& citation : ask_response.missing_citations) {
+                    missing_citations_array.emplace_back(citation);
+                }
+                for (const auto& citation : ask_response.uncited_context_citations) {
+                    uncited_context_citations_array.emplace_back(citation);
                 }
 
                 boost::json::object response;
@@ -726,10 +941,18 @@ void RagApiHandler::handlePost(
                 response["context"] = context_array;
                 response["sources"] = sources_array;
                 response["citations"] = citations_array;
+                response["answer_citations"] = answer_citations_array;
+                response["missing_citations"] = missing_citations_array;
+                response["uncited_context_citations"] = uncited_context_citations_array;
+                response["citations_post_processed"] = ask_response.citations_post_processed;
                 response["retrieval_confidence"] = ask_response.retrieval_confidence;
                 response["grounding_status"] = ask_response.grounding_status;
+                response["conversation_turns_used"] = static_cast<std::int64_t>(ask_response.conversation_turns_used);
                 response["answer"] = ask_response.answer;
                 response["llm_status"] = ask_response.llm_status;
+                response["llm_truncated"] = ask_response.llm_truncated;
+                response["llm_finish_reason"] = ask_response.llm_finish_reason;
+                response["llm_parser_error"] = ask_response.llm_parser_error;
                 response["response_time_ms"] = static_cast<std::int64_t>(ask_response.response_time_ms);
 
                 if (cache_) {
@@ -852,7 +1075,8 @@ void RagApiHandler::handlePost(
                     }
                 }
 
-                answer = llm_client_->ask(question, context, client_ip);
+                const auto llm_result = llm_client_->ask_with_metadata(question, context, client_ip);
+                answer = llm_result.answer;
                 auto end_time = std::chrono::steady_clock::now();
 
                 long long response_time = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -864,9 +1088,21 @@ void RagApiHandler::handlePost(
                     answer.rfind("Ошибка:", 0) == 0;
 
                 response["answer"] = answer;
-                response["llm_status"] = llm_fallback_answer
-                    ? "fallback"
-                    : (llm_client_->is_available() ? "ok" : "unavailable");
+                if (llm_result.status == "parser_error" ||
+                    llm_result.status == "provider_error" ||
+                    llm_result.status == "truncated" ||
+                    llm_result.status == "rate_limited" ||
+                    llm_result.status == "cache_hit" ||
+                    llm_result.status == "unavailable") {
+                    response["llm_status"] = llm_result.status;
+                } else {
+                    response["llm_status"] = llm_fallback_answer
+                        ? "fallback"
+                        : (llm_client_->is_available() ? "ok" : "unavailable");
+                }
+                response["llm_truncated"] = llm_result.truncated;
+                response["llm_finish_reason"] = llm_result.finish_reason;
+                response["llm_parser_error"] = llm_result.parser_error;
                 response["response_time_ms"] = static_cast<std::int64_t>(response_time);
 
                 // Phase 3: Add cache stats
@@ -1158,6 +1394,9 @@ void RagApiHandler::handlePost(
             std::string question;
             std::string answer;
             std::string category = "general";
+            std::vector<std::string> tags;
+            std::vector<std::string> aliases;
+            std::map<std::string, std::string> metadata;
 
             if (json_req.if_object()) {
                 auto obj = json_req.as_object();
@@ -1170,10 +1409,13 @@ void RagApiHandler::handlePost(
                 if (obj.contains("category")) {
                     category = obj.at("category").as_string().c_str();
                 }
+                tags = jsonStringArray(obj, "tags");
+                aliases = jsonStringArray(obj, "aliases");
+                metadata = jsonStringMap(obj, "metadata");
             }
 
             std::string pair_id;
-            const bool added = rag_service_ && rag_service_->addQaPair(question, answer, category, &pair_id);
+            const bool added = rag_service_ && rag_service_->addQaPair(question, answer, category, &pair_id, tags, aliases, metadata);
             if (!added) {
                 buildErrorResponse(res, http::status::bad_request, "question and answer are required");
                 return;
@@ -1192,6 +1434,9 @@ void RagApiHandler::handlePost(
                 std::string question;
                 std::string answer;
                 std::string category = "general";
+                std::vector<std::string> tags;
+                std::vector<std::string> aliases;
+                std::map<std::string, std::string> metadata;
 
                 if (json_req.if_object()) {
                     auto obj = json_req.as_object();
@@ -1207,6 +1452,9 @@ void RagApiHandler::handlePost(
                     if (obj.contains("category")) {
                         category = obj.at("category").as_string().c_str();
                     }
+                    tags = jsonStringArray(obj, "tags");
+                    aliases = jsonStringArray(obj, "aliases");
+                    metadata = jsonStringMap(obj, "metadata");
                 }
 
                 if (question.empty() || answer.empty()) {
@@ -1218,7 +1466,16 @@ void RagApiHandler::handlePost(
                 if (sqlite_source_ &&
                     (source_id.empty() || source_id == sqlite_source_->getId() || source_id == sqlite_source_->getSourceId())) {
                     std::string pair_id = makeQaPairId(sqlite_source_->getId());
-                    if (!sqlite_source_->addQAPair(pair_id, question, answer, category)) {
+                    if (!tags.empty()) {
+                        metadata["tags"] = boost::json::serialize(stringArrayJson(tags));
+                    }
+                    boost::json::object metadata_json;
+                    for (const auto& [key, value] : metadata) {
+                        metadata_json[key] = value;
+                    }
+                    if (!sqlite_source_->addQAPair(pair_id, question, answer, category,
+                                                   boost::json::serialize(stringArrayJson(aliases)),
+                                                   boost::json::serialize(metadata_json))) {
                         buildErrorResponse(res, http::status::internal_server_error, "Failed to add QA pair to SQLite source");
                         return;
                     }
@@ -1261,6 +1518,9 @@ void RagApiHandler::handlePost(
                 new_pair.question = question;
                 new_pair.answer = answer;
                 new_pair.category = category;
+                new_pair.tags = tags;
+                new_pair.aliases = aliases;
+                new_pair.metadata = metadata;
 
                 qa_source->addQAPair(new_pair);
 
@@ -1280,6 +1540,9 @@ void RagApiHandler::handlePost(
                 std::string question;
                 std::string answer;
                 std::string category;
+                std::vector<std::string> tags;
+                std::vector<std::string> aliases;
+                std::map<std::string, std::string> metadata;
 
                 if (json_req.if_object()) {
                     auto obj = json_req.as_object();
@@ -1295,6 +1558,9 @@ void RagApiHandler::handlePost(
                     if (obj.contains("category")) {
                         category = obj.at("category").as_string().c_str();
                     }
+                    tags = jsonStringArray(obj, "tags");
+                    aliases = jsonStringArray(obj, "aliases");
+                    metadata = jsonStringMap(obj, "metadata");
                 }
 
                 if (pair_id.empty()) {
@@ -1309,7 +1575,23 @@ void RagApiHandler::handlePost(
                         std::string updated_question = question.empty() ? opt_pair->question : question;
                         std::string updated_answer = answer.empty() ? opt_pair->answer : answer;
                         std::string updated_category = category.empty() ? opt_pair->category : category;
-                        if (!sqlite_source_->updateQAPair(pair_id, updated_answer, updated_category, "", updated_question)) {
+                        auto updated_metadata = opt_pair->metadata;
+                        for (const auto& [key, value] : metadata) {
+                            updated_metadata[key] = value;
+                        }
+                        if (!tags.empty()) {
+                            updated_metadata["tags"] = boost::json::serialize(stringArrayJson(tags));
+                        }
+                        boost::json::object metadata_json;
+                        for (const auto& [key, value] : updated_metadata) {
+                            metadata_json[key] = value;
+                        }
+                        if (!sqlite_source_->updateQAPair(pair_id,
+                                                          updated_answer,
+                                                          updated_category,
+                                                          aliases.empty() ? "" : boost::json::serialize(stringArrayJson(aliases)),
+                                                          updated_question,
+                                                          boost::json::serialize(metadata_json))) {
                             buildErrorResponse(res, http::status::internal_server_error, "Failed to update QA pair in SQLite source");
                             return;
                         }
@@ -1355,6 +1637,11 @@ void RagApiHandler::handlePost(
                 if (!question.empty()) updated_pair.question = question;
                 if (!answer.empty()) updated_pair.answer = answer;
                 if (!category.empty()) updated_pair.category = category;
+                if (!tags.empty()) updated_pair.tags = tags;
+                if (!aliases.empty()) updated_pair.aliases = aliases;
+                for (const auto& [key, value] : metadata) {
+                    updated_pair.metadata[key] = value;
+                }
 
                 qa_source->updateQAPair(updated_pair);
 
@@ -1582,6 +1869,72 @@ void RagApiHandler::handlePost(
                 res.body() = json_report;
                 res.result(http::status::ok);
             }
+        } else if (apiPathMatches(path, "/api/qa/import")) {
+            if (!rag_service_) {
+                buildErrorResponse(res, http::status::service_unavailable, "RAG service is not configured");
+                return;
+            }
+            boost::json::value json_req = boost::json::parse(req.body());
+            std::string payload = req.body();
+            std::string default_category = "general";
+            if (json_req.is_object()) {
+                const auto& obj = json_req.as_object();
+                if (obj.contains("default_category") && obj.at("default_category").is_string()) {
+                    default_category = obj.at("default_category").as_string().c_str();
+                }
+                if (obj.contains("pairs")) {
+                    payload = boost::json::serialize(json_req);
+                } else if (obj.contains("json") && obj.at("json").is_string()) {
+                    payload = obj.at("json").as_string().c_str();
+                }
+            }
+            auto imported = rag_service_->importQaPairsJson(payload, default_category);
+            boost::json::array ids;
+            for (const auto& id : imported.imported_ids) {
+                ids.emplace_back(id);
+            }
+            boost::json::array errors;
+            for (const auto& error : imported.error_messages) {
+                errors.emplace_back(error);
+            }
+            boost::json::object response;
+            response["success"] = imported.success;
+            response["imported"] = static_cast<std::int64_t>(imported.imported);
+            response["duplicates"] = static_cast<std::int64_t>(imported.duplicates);
+            response["errors"] = static_cast<std::int64_t>(imported.errors);
+            response["imported_ids"] = ids;
+            response["error_messages"] = errors;
+            buildJsonResponse(res, imported.errors == 0 ? http::status::ok : http::status::bad_request,
+                              boost::json::serialize(response));
+
+        } else if (apiPathMatches(path, "/api/qa/export")) {
+            if (!rag_service_) {
+                buildErrorResponse(res, http::status::service_unavailable, "RAG service is not configured");
+                return;
+            }
+            boost::json::value json_req = req.body().empty() ? boost::json::object{} : boost::json::parse(req.body());
+            RagServiceQaListOptions options;
+            options.limit = 500;
+            if (json_req.is_object()) {
+                const auto& obj = json_req.as_object();
+                if (obj.contains("category") && obj.at("category").is_string()) {
+                    options.category = obj.at("category").as_string().c_str();
+                }
+                if (obj.contains("tag") && obj.at("tag").is_string()) {
+                    options.tag = obj.at("tag").as_string().c_str();
+                }
+                if (obj.contains("query") && obj.at("query").is_string()) {
+                    options.query = obj.at("query").as_string().c_str();
+                }
+                if (obj.contains("limit") && obj.at("limit").is_int64()) {
+                    options.limit = static_cast<size_t>(obj.at("limit").as_int64());
+                }
+                if (obj.contains("offset") && obj.at("offset").is_int64()) {
+                    options.offset = static_cast<size_t>(obj.at("offset").as_int64());
+                }
+            }
+            buildJsonResponse(res, http::status::ok, rag_service_->exportQaPairsJson(options));
+
         } else if (apiPathMatches(path, "/api/qa/dedup")) {
             // POST /api/qa/dedup - Find duplicate QA pairs (semantic deduplication)
             {
@@ -1815,6 +2168,9 @@ void RagApiHandler::handlePut(
         std::string question;
         std::string answer;
         std::string category;
+        std::vector<std::string> tags;
+        std::vector<std::string> aliases;
+        std::map<std::string, std::string> metadata;
 
         if (json_req.if_object()) {
             auto obj = json_req.as_object();
@@ -1827,10 +2183,13 @@ void RagApiHandler::handlePut(
             if (obj.contains("category")) {
                 category = obj.at("category").as_string().c_str();
             }
+            tags = jsonStringArray(obj, "tags");
+            aliases = jsonStringArray(obj, "aliases");
+            metadata = jsonStringMap(obj, "metadata");
         }
 
         const std::string pair_id = path_params.at("id");
-        if (!rag_service_ || !rag_service_->updateQaPair(pair_id, question, answer, category)) {
+        if (!rag_service_ || !rag_service_->updateQaPair(pair_id, question, answer, category, tags, aliases, metadata)) {
             buildErrorResponse(res, http::status::not_found, "QA pair not found: " + pair_id);
             return;
         }
@@ -2014,6 +2373,33 @@ void RagApiHandler::handleGet(
                 : "Protect this endpoint with the host app auth/proxy layer before exposing it outside a trusted network.";
             buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
 
+        } else if (apiPathMatches(path, "/api/embedding/models")) {
+            if (!rag_service_) {
+                buildErrorResponse(res, http::status::service_unavailable, "RAG service is not configured");
+                return;
+            }
+            auto models = rag_service_->embeddingModels();
+            boost::json::array model_array;
+            for (const auto& model : models.models) {
+                model_array.emplace_back(embeddingModelObject(model));
+            }
+            boost::json::array warnings_array;
+            for (const auto& warning : models.warnings) {
+                warnings_array.emplace_back(warning);
+            }
+            boost::json::object response;
+            response["success"] = models.success;
+            response["active_model_id"] = models.active_model_id;
+            response["effective_model_id"] = models.effective_model_id;
+            response["backend"] = models.backend;
+            response["models"] = model_array;
+            response["warnings"] = warnings_array;
+            response["switch_endpoint"] = apiPathMatches(path, "/api/rag/embedding/models")
+                ? "/api/rag/embedding/switch"
+                : "/api/embedding/switch";
+            buildJsonResponse(res, models.success ? http::status::ok : http::status::service_unavailable,
+                              boost::json::serialize(response));
+
         } else if (apiPathMatches(path, "/api/ingest/jobs")) {
             size_t limit = 20;
             std::string query = url_view.query();
@@ -2121,6 +2507,38 @@ void RagApiHandler::handleGet(
             response["count"] = static_cast<std::int64_t>(categories_array.size());
             buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
 
+        } else if (apiPathMatches(path, "/api/qa/tags")) {
+            const auto params = parseQueryParams(url_view);
+            const std::string query = params.count("q") ? params.at("q") : "";
+            const std::string source_id = params.count("source_id") ? params.at("source_id") : "";
+            const size_t limit = querySize(params, "limit", 50, 200);
+
+            boost::json::array tags_array;
+            if (rag_service_) {
+                for (const auto& tag : rag_service_->listQaTags(query, limit, source_id)) {
+                    tags_array.emplace_back(tag);
+                }
+            }
+
+            boost::json::object response;
+            response["success"] = true;
+            response["query"] = query;
+            response["tags"] = tags_array;
+            response["count"] = static_cast<std::int64_t>(tags_array.size());
+            buildJsonResponse(res, http::status::ok, boost::json::serialize(response));
+
+        } else if (apiPathMatches(path, "/api/qa/export")) {
+            const auto params = parseQueryParams(url_view);
+            RagServiceQaListOptions options;
+            options.query = params.count("query") ? params.at("query") : (params.count("q") ? params.at("q") : "");
+            options.category = params.count("category") ? params.at("category") : "";
+            options.tag = params.count("tag") ? params.at("tag") : "";
+            options.source_id = params.count("source_id") ? params.at("source_id") : "";
+            options.limit = querySize(params, "limit", 500, 5000);
+            options.offset = querySize(params, "offset", 0, std::numeric_limits<size_t>::max());
+            buildJsonResponse(res, http::status::ok,
+                              rag_service_ ? rag_service_->exportQaPairsJson(options) : "{}");
+
         } else if (apiPathMatches(path, "/api/qa") || apiPathMatches(path, "/api/qa/list")) {
             const auto params = parseQueryParams(url_view);
             const size_t limit = querySize(params, "limit", querySize(params, "per_page", 25, 500), 500);
@@ -2133,6 +2551,7 @@ void RagApiHandler::handleGet(
             RagServiceQaListOptions options;
             options.query = params.count("query") ? params.at("query") : (params.count("q") ? params.at("q") : "");
             options.category = params.count("category") ? params.at("category") : "";
+            options.tag = params.count("tag") ? params.at("tag") : "";
             options.source_id = params.count("source_id") ? params.at("source_id") : "";
             options.limit = limit;
             options.offset = offset;
@@ -2439,6 +2858,12 @@ void setupRagRoutes(HttpServer& server,
     server.add_route(api_route("/admin/diagnostics"), full_handler);
     std::cout << "  ✓ GET  " << api_route("/admin/diagnostics") << " - Admin diagnostics" << std::endl;
 
+    server.add_route(api_route("/embedding/models"), full_handler);
+    std::cout << "  ✓ GET  " << api_route("/embedding/models") << " - Embedding model registry" << std::endl;
+
+    server.add_route(api_route("/embedding/switch"), full_handler);
+    std::cout << "  ✓ POST " << api_route("/embedding/switch") << " - Switch embedding model" << std::endl;
+
     // Phase 4: Data sources management endpoints
     server.add_route(api_route("/sources"), full_handler);
     std::cout << "  \u2713 GET  " << api_route("/sources") << " - \u0421\u043f\u0438\u0441\u043e\u043a \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u043e\u0432 \u0434\u0430\u043d\u043d\u044b\u0445" << std::endl;
@@ -2469,6 +2894,15 @@ void setupRagRoutes(HttpServer& server,
 
     server.add_route(api_route("/qa/categories"), qa_handler);
     std::cout << "  ✓ GET  " << api_route("/qa/categories") << " - Категории QA-пар" << std::endl;
+
+    server.add_route(api_route("/qa/tags"), qa_handler);
+    std::cout << "  ✓ GET  " << api_route("/qa/tags") << " - QA tags" << std::endl;
+
+    server.add_route(api_route("/qa/import"), qa_handler);
+    std::cout << "  ✓ POST " << api_route("/qa/import") << " - Import QA pairs" << std::endl;
+
+    server.add_route(api_route("/qa/export"), qa_handler);
+    std::cout << "  ✓ GET/POST " << api_route("/qa/export") << " - Export QA pairs" << std::endl;
 
     server.add_route(api_route("/qa"), qa_handler);
     std::cout << "  ✓ GET/POST " << api_route("/qa") << " - QA REST collection" << std::endl;

@@ -192,6 +192,44 @@ void test_response_parsing() {
         parsed = llm_client.parse_response(ollama_stream_response);
         test_helpers::assert_contains(parsed, "#include \"rag_extension.h\"", "Should parse streamed escaped quotes");
         test_helpers::assert_contains(parsed, "void register_rag();", "Should join streamed content chunks");
+
+        // Markdown tables, JSON snippets, escaped backslashes, and multiline code
+        // are parsed by Boost.JSON rather than hand-scanned string offsets.
+        std::string complex_openai_response =
+            R"({"choices":[{"message":{"content":"Таблица:\n| key | value |\n| --- | --- |\n| path | C:\\\\qornix\\\\rag |\n\n```json\n{\"enabled\":true,\"name\":\"qornix\"}\n```\n\n```cpp\nstd::string s = \"quoted\";\n```"},"finish_reason":"stop"}]})";
+        auto parsed_result = llm_client.parse_response_result(complex_openai_response);
+        test_helpers::assert_equal("ok", parsed_result.status, "Complex JSON response status");
+        test_helpers::assert_contains(parsed_result.answer, "| key | value |", "Should preserve markdown table");
+        test_helpers::assert_contains(parsed_result.answer, "C:\\\\qornix\\\\rag", "Should preserve escaped backslashes");
+        test_helpers::assert_contains(parsed_result.answer, "{\"enabled\":true,\"name\":\"qornix\"}", "Should preserve JSON snippet");
+        test_helpers::assert_contains(parsed_result.answer, "std::string s = \"quoted\";", "Should preserve quoted C++ code");
+
+        // SSE data lines are still provider JSON payloads; parse each data line.
+        std::string sse_response =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"line 1\\n\"}}]}\n\n"
+            "data: {\"choices\":[{\"delta\":{\"content\":\"line 2\"},\"finish_reason\":\"stop\"}]}\n\n"
+            "data: [DONE]\n";
+        parsed_result = llm_client.parse_response_result(sse_response);
+        test_helpers::assert_equal("ok", parsed_result.status, "SSE response status");
+        test_helpers::assert_contains(parsed_result.answer, "line 1", "Should parse first SSE data chunk");
+        test_helpers::assert_contains(parsed_result.answer, "line 2", "Should parse second SSE data chunk");
+
+        // Truncation metadata must be separate from provider availability.
+        std::string truncated_response =
+            R"({"choices":[{"message":{"content":"partial answer"},"finish_reason":"length"}]})";
+        parsed_result = llm_client.parse_response_result(truncated_response);
+        test_helpers::assert_equal("truncated", parsed_result.status, "Should mark length finish as truncated");
+        test_helpers::assert_true(parsed_result.truncated, "Should expose truncation flag");
+        test_helpers::assert_equal("length", parsed_result.finish_reason, "Should expose finish reason");
+
+        // Parser failures are explicit parser errors, not provider-unavailable answers.
+        parsed_result = llm_client.parse_response_result(R"({"choices":[{"message":{"content":"unterminated})");
+        test_helpers::assert_equal("parser_error", parsed_result.status, "Invalid JSON should be parser_error");
+        test_helpers::assert_contains(parsed_result.answer, "Ошибка парсинга LLM", "Parser error should be user-visible");
+
+        parsed_result = llm_client.parse_response_result(R"({"error":{"message":"model not found"}})");
+        test_helpers::assert_equal("provider_error", parsed_result.status, "Provider errors should be provider_error");
+        test_helpers::assert_contains(parsed_result.answer, "model not found", "Provider error message should be visible");
         
         test_passed("Response parsing");
     } catch (const std::exception& e) {

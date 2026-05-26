@@ -23,7 +23,9 @@ FileSource::FileSource(Config config) : config_(std::move(config)) {
             ".java", ".cs", ".py", ".js", ".ts",
             ".go", ".rs", ".swift", ".kt", ".scala",
             ".txt", ".md", ".rst", ".adoc",
-            ".yaml", ".yml", ".json", ".xml", ".toml", ".ini", ".cfg", ".conf"
+            ".yaml", ".yml", ".json", ".xml", ".html", ".htm",
+            ".toml", ".ini", ".cfg", ".conf", ".pdf", ".docx", ".csv", ".xlsx", ".pptx",
+            ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".pbm", ".pgm", ".ppm", ".pnm"
         };
     }
 
@@ -100,7 +102,13 @@ std::string FileSource::getLanguageFromExtension(const std::string& ext) const {
         {".cs", "C#"}, {".cc", "C++"}, {".cxx", "C++"},
         {".md", "Markdown"}, {".rst", "reStructuredText"},
         {".txt", "Text"}, {".yaml", "YAML"}, {".yml", "YAML"},
-        {".json", "JSON"}, {".xml", "XML"}, {".toml", "TOML"}
+        {".json", "JSON"}, {".xml", "XML"}, {".html", "HTML"},
+        {".htm", "HTML"}, {".toml", "TOML"}, {".pdf", "PDF"},
+        {".docx", "DOCX"}, {".csv", "CSV"}, {".xlsx", "XLSX"},
+        {".pptx", "PPTX"}, {".png", "Image"}, {".jpg", "Image"},
+        {".jpeg", "Image"}, {".tif", "Image"}, {".tiff", "Image"},
+        {".bmp", "Image"}, {".webp", "Image"}, {".pbm", "Image"},
+        {".pgm", "Image"}, {".ppm", "Image"}, {".pnm", "Image"}
     };
 
     auto it = lang_map.find(ext);

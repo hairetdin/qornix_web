@@ -11,8 +11,11 @@
 #include <chrono>
 #include <cctype>
 #include <iostream>
+#include <regex>
+#include <set>
 #include <sstream>
 #include <thread>
+#include <boost/json.hpp>
 
 using qornix::rag::QASource;
 
@@ -57,6 +60,89 @@ std::string qaPath(const QASource::QAPair& pair) {
 
 std::string qaSnippet(const QASource::QAPair& pair) {
     return "Q: " + pair.question + "\nA: " + pair.answer;
+}
+
+std::string qaAttribution(const QASource::QAPair& pair) {
+    auto source_it = pair.metadata.find("source");
+    auto author_it = pair.metadata.find("author");
+    auto updated_it = pair.metadata.find("updated_at");
+    std::string attribution = "QA Knowledge Base";
+    if (source_it != pair.metadata.end() && !source_it->second.empty()) {
+        attribution = source_it->second;
+    }
+    if (author_it != pair.metadata.end() && !author_it->second.empty()) {
+        attribution += " by " + author_it->second;
+    }
+    if (updated_it != pair.metadata.end() && !updated_it->second.empty()) {
+        attribution += " updated " + updated_it->second;
+    }
+    return attribution;
+}
+
+std::string stringArrayJson(const std::vector<std::string>& values) {
+    boost::json::array array;
+    for (const auto& value : values) {
+        if (!value.empty()) {
+            array.emplace_back(value);
+        }
+    }
+    return boost::json::serialize(array);
+}
+
+std::vector<std::string> jsonStringArray(const boost::json::object& object, const char* key) {
+    std::vector<std::string> values;
+    if (!object.contains(key) || !object.at(key).is_array()) {
+        return values;
+    }
+    for (const auto& value : object.at(key).as_array()) {
+        if (value.is_string()) {
+            values.emplace_back(value.as_string().c_str());
+        }
+    }
+    return values;
+}
+
+std::map<std::string, std::string> jsonStringMap(const boost::json::object& object, const char* key) {
+    std::map<std::string, std::string> metadata;
+    if (!object.contains(key) || !object.at(key).is_object()) {
+        return metadata;
+    }
+    for (const auto& entry : object.at(key).as_object()) {
+        if (entry.value().is_string()) {
+            metadata[std::string(entry.key())] = entry.value().as_string().c_str();
+        }
+    }
+    return metadata;
+}
+
+double qaScore(const QASource::QAPair& pair, const std::string& query, size_t rank) {
+    std::string lowered = query;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    auto lower = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return value;
+    };
+    double score = std::max(0.35, 0.98 - static_cast<double>(rank) * 0.04);
+    const std::string question = lower(pair.question);
+    const std::string answer = lower(pair.answer);
+    if (!lowered.empty() && question.find(lowered) != std::string::npos) {
+        score = 1.0;
+    } else if (!lowered.empty() && answer.find(lowered) != std::string::npos) {
+        score = std::max(score, 0.88);
+    }
+    for (const auto& alias : pair.aliases) {
+        if (!lowered.empty() && lower(alias).find(lowered) != std::string::npos) {
+            score = std::max(score, 0.94);
+        }
+    }
+    if (score <= 0.0) {
+        return 0.0;
+    }
+    return score >= 1.0 ? 1.0 : score;
 }
 
 double confidenceFromScore(double score) {
@@ -118,6 +204,8 @@ RagServiceSearchItem qaSearchItem(const QASource::QAPair& pair, double score) {
     item.source_type = "qa";
     item.category = pair.category;
     item.pair_id = pair.id;
+    item.tags = pair.tags;
+    item.attribution = qaAttribution(pair);
     return item;
 }
 
@@ -138,6 +226,140 @@ bool isFallbackAnswer(const std::string& answer) {
     return answer.rfind("LLM недоступен", 0) == 0 ||
            answer.rfind("LLM не настроен", 0) == 0 ||
            answer.rfind("Ошибка:", 0) == 0;
+}
+
+std::vector<std::string> uniqueOrdered(const std::vector<std::string>& values) {
+    std::vector<std::string> output;
+    std::set<std::string> seen;
+    for (const auto& value : values) {
+        if (!value.empty() && seen.insert(value).second) {
+            output.push_back(value);
+        }
+    }
+    return output;
+}
+
+std::vector<std::string> extractCitations(const std::string& text) {
+    std::vector<std::string> citations;
+    const std::regex citation_re(R"(\[((?:S|Q)\d+)\])");
+    auto begin = std::sregex_iterator(text.begin(), text.end(), citation_re);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        if (it->size() > 1) {
+            citations.push_back((*it)[1].str());
+        }
+    }
+    return uniqueOrdered(citations);
+}
+
+bool containsValue(const std::vector<std::string>& values, const std::string& target) {
+    return std::find(values.begin(), values.end(), target) != values.end();
+}
+
+void postProcessGrounding(RagServiceAskResponse& response) {
+    response.citations = uniqueOrdered(response.citations);
+    response.sources = uniqueOrdered(response.sources);
+    response.answer_citations = extractCitations(response.answer);
+    if (response.answer_citations.empty() &&
+        !response.citations.empty() &&
+        response.llm_status != "unavailable" &&
+        response.llm_status != "not_configured" &&
+        response.llm_status != "invalid_request") {
+        response.answer += "\n\nSources: ";
+        for (size_t i = 0; i < response.citations.size(); ++i) {
+            if (i > 0) {
+                response.answer += ", ";
+            }
+            response.answer += "[" + response.citations[i] + "]";
+        }
+        response.citations_post_processed = true;
+        response.answer_citations = extractCitations(response.answer);
+    }
+    response.missing_citations.clear();
+    response.uncited_context_citations.clear();
+
+    for (const auto& citation : response.answer_citations) {
+        if (!containsValue(response.citations, citation)) {
+            response.missing_citations.push_back(citation);
+        }
+    }
+    for (const auto& citation : response.citations) {
+        if (!containsValue(response.answer_citations, citation)) {
+            response.uncited_context_citations.push_back(citation);
+        }
+    }
+
+    if (response.context.empty()) {
+        response.grounding_status = "no_context";
+    } else if (!response.missing_citations.empty()) {
+        response.grounding_status = "unsupported_citations";
+    } else if (response.answer_citations.empty()) {
+        response.grounding_status = response.llm_status == "unavailable" ? response.grounding_status : "uncited";
+    } else {
+        response.grounding_status = groundingStatus(response.retrieval_confidence, response.context.size());
+    }
+}
+
+std::string sanitizeHistoryContent(const std::string& content, size_t max_chars = 700) {
+    std::string output;
+    output.reserve(std::min(content.size(), max_chars));
+    bool previous_space = false;
+    for (unsigned char ch : content) {
+        if (output.size() >= max_chars) {
+            break;
+        }
+        if (std::iscntrl(ch) && ch != '\n' && ch != '\t') {
+            continue;
+        }
+        if (std::isspace(ch)) {
+            if (!previous_space) {
+                output.push_back(' ');
+            }
+            previous_space = true;
+        } else {
+            output.push_back(static_cast<char>(ch));
+            previous_space = false;
+        }
+    }
+    while (!output.empty() && output.back() == ' ') {
+        output.pop_back();
+    }
+    return output;
+}
+
+std::string buildConversationHistoryBlock(const std::vector<RagServiceConversationTurn>& history,
+                                          size_t& turns_used) {
+    turns_used = 0;
+    if (history.empty()) {
+        return {};
+    }
+
+    std::vector<RagServiceConversationTurn> accepted;
+    for (auto it = history.rbegin(); it != history.rend() && accepted.size() < 6; ++it) {
+        if (it->role != "user" && it->role != "assistant") {
+            continue;
+        }
+        const auto content = sanitizeHistoryContent(it->content);
+        if (content.empty()) {
+            continue;
+        }
+        accepted.push_back({it->role, content});
+    }
+    std::reverse(accepted.begin(), accepted.end());
+
+    if (accepted.empty()) {
+        return {};
+    }
+
+    std::ostringstream out;
+    out << "Conversation history is provided only to resolve pronouns and follow-up wording.\n";
+    out << "Do not treat conversation history as a factual source and do not cite it.\n";
+    out << "Only cite bracketed source ids from the retrieved context.\n";
+    for (const auto& turn : accepted) {
+        out << (turn.role == "user" ? "User" : "Assistant") << ": " << turn.content << "\n";
+    }
+    turns_used = accepted.size();
+    return out.str();
 }
 
 } // namespace
@@ -415,7 +637,7 @@ RagServiceSearchResponse RagService::search(const std::string& query, size_t top
 
     const auto qa_pairs = searchQa(query, std::min<size_t>(top_k, 5));
     for (size_t i = 0; i < qa_pairs.size(); ++i) {
-        auto item = qaSearchItem(qa_pairs[i], 1.0 - (static_cast<double>(i) * 0.01));
+        auto item = qaSearchItem(qa_pairs[i], qaScore(qa_pairs[i], query, i));
         item.citation_id = citationId("Q", i);
         response.results.push_back(std::move(item));
     }
@@ -426,6 +648,13 @@ RagServiceSearchResponse RagService::search(const std::string& query, size_t top
 }
 
 RagServiceAskResponse RagService::ask(const std::string& question, size_t top_k, const std::string& client_ip) {
+    return ask(question, top_k, client_ip, {});
+}
+
+RagServiceAskResponse RagService::ask(const std::string& question,
+                                      size_t top_k,
+                                      const std::string& client_ip,
+                                      const std::vector<RagServiceConversationTurn>& history) {
     RagServiceAskResponse response;
     response.question = question;
     if (!rag_engine_ || question.empty()) {
@@ -442,21 +671,24 @@ RagServiceAskResponse RagService::ask(const std::string& question, size_t top_k,
     for (size_t i = 0; i < qa_pairs.size(); ++i) {
         const auto& pair = qa_pairs[i];
         const std::string citation = citationId("Q", i);
+        const double score = qaScore(pair, question, i);
         if (!context_text.empty()) {
             context_text += "\n---\n";
         }
-        context_text += "[" + citation + "] [QA Knowledge Base] " + qaPath(pair) + "\n" + qaSnippet(pair);
+        context_text += "[" + citation + "] [" + qaAttribution(pair) + "] " + qaPath(pair) + "\n" + qaSnippet(pair);
 
         RagServiceAskContextItem item;
         item.path = qaPath(pair);
         item.source_path = item.path;
         item.citation_id = citation;
-        item.score = 1.0 - (static_cast<double>(i) * 0.01);
+        item.score = score;
         item.confidence = confidenceFromScore(item.score);
         item.snippet = qaSnippet(pair);
         item.source_type = "qa";
         item.category = pair.category;
         item.pair_id = pair.id;
+        item.tags = pair.tags;
+        item.attribution = qaAttribution(pair);
         response.context.push_back(std::move(item));
         response.sources.push_back(qaPath(pair));
         response.citations.push_back(citation);
@@ -492,26 +724,47 @@ RagServiceAskResponse RagService::ask(const std::string& question, size_t top_k,
     }
     response.grounding_status = groundingStatus(response.retrieval_confidence, response.context.size());
 
+    size_t history_turns_used = 0;
+    const auto history_block = buildConversationHistoryBlock(history, history_turns_used);
+    response.conversation_turns_used = history_turns_used;
+
     if (!context_text.empty()) {
         context_text =
             "Use the bracketed source ids such as [S1] or [Q1] when citing facts from context.\n"
             "If the context is insufficient, say so explicitly.\n\n" + context_text;
     }
+    if (!history_block.empty()) {
+        context_text = history_block + "\n---\n" + context_text;
+    }
 
     if (llm_client_ && llm_client_->is_enabled()) {
         const auto started = std::chrono::steady_clock::now();
-        response.answer = llm_client_->ask(question, context_text, client_ip);
+        const auto llm_result = llm_client_->ask_with_metadata(question, context_text, client_ip);
         const auto finished = std::chrono::steady_clock::now();
+        response.answer = llm_result.answer;
+        response.llm_parser_error = llm_result.parser_error;
+        response.llm_finish_reason = llm_result.finish_reason;
+        response.llm_truncated = llm_result.truncated;
         response.response_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(finished - started).count();
-        response.llm_status = isFallbackAnswer(response.answer)
-            ? "fallback"
-            : (llm_client_->is_available() ? "ok" : "unavailable");
+        if (llm_result.status == "parser_error" ||
+            llm_result.status == "provider_error" ||
+            llm_result.status == "truncated" ||
+            llm_result.status == "rate_limited" ||
+            llm_result.status == "cache_hit" ||
+            llm_result.status == "unavailable") {
+            response.llm_status = llm_result.status;
+        } else {
+            response.llm_status = isFallbackAnswer(response.answer)
+                ? "fallback"
+                : (llm_client_->is_available() ? "ok" : "unavailable");
+        }
     } else {
         response.answer = "LLM недоступен. Вот релевантные фрагменты:\n" + context_text;
         response.llm_status = "unavailable";
         response.response_time_ms = 0;
     }
 
+    postProcessGrounding(response);
     return response;
 }
 
@@ -572,6 +825,106 @@ std::vector<RagServiceSourceInfo> RagService::sources() const {
     return output;
 }
 
+RagServiceEmbeddingModelsResponse RagService::embeddingModels() const {
+    RagServiceEmbeddingModelsResponse response;
+    if (!rag_engine_) {
+        response.success = false;
+        return response;
+    }
+
+    const auto info = rag_engine_->get_embedding_model_info();
+    response.active_model_id = info.active_model_id;
+    response.effective_model_id = info.id;
+    response.backend = info.backend;
+    response.warnings = info.registry_warnings;
+
+    RagServiceEmbeddingModelItem effective;
+    effective.id = info.id;
+    effective.backend = info.backend;
+    effective.name = info.name;
+    effective.version = info.version;
+    effective.model_path = info.model_path;
+    effective.tokenizer_path = info.tokenizer_path;
+    effective.tokenizer_type = info.tokenizer_type;
+    effective.pooling = info.pooling;
+    effective.dimension = info.dimension;
+    effective.max_seq_len = info.max_seq_len;
+    effective.active = true;
+    effective.ready = info.ready;
+    effective.status = info.status;
+
+    const auto& registry = rag_engine_->get_embedding_model_registry();
+    if (registry.models.empty()) {
+        response.models.push_back(std::move(effective));
+        return response;
+    }
+
+    bool included_active = false;
+    for (const auto& [id, model] : registry.models) {
+        RagServiceEmbeddingModelItem item;
+        item.id = id;
+        item.backend = model.backend;
+        item.name = model.name;
+        item.version = model.version;
+        item.model_path = model.model_path;
+        item.tokenizer_path = model.tokenizer_path;
+        item.tokenizer_type = model.tokenizer_type;
+        item.pooling = model.pooling;
+        item.dimension = model.dimension;
+        item.max_seq_len = model.max_seq_len;
+        item.active = id == response.active_model_id;
+        item.ready = item.active ? info.ready : true;
+        item.status = item.active ? info.status : "installed";
+        included_active = included_active || item.active;
+        response.models.push_back(std::move(item));
+    }
+    if (!included_active) {
+        response.models.push_back(std::move(effective));
+    }
+    return response;
+}
+
+RagServiceEmbeddingSwitchResponse RagService::switchEmbeddingModel(
+    const std::string& model_id,
+    bool reindex,
+    bool force_reembed,
+    const std::optional<std::string>& project_path) {
+    RagServiceEmbeddingSwitchResponse response;
+    response.active_model_id = model_id;
+    response.force_reembed = force_reembed;
+    if (!rag_engine_) {
+        response.message = "RAG engine is not configured";
+        return response;
+    }
+    if (model_id.empty()) {
+        response.message = "Embedding model id is required";
+        return response;
+    }
+
+    response.previous_model_id = rag_engine_->get_embedding_model_id();
+    if (!rag_engine_->switch_active_embedding_model(model_id, force_reembed)) {
+        response.message = "Embedding model not found in registry: " + model_id;
+        return response;
+    }
+
+    response.effective_model_id = rag_engine_->get_embedding_model_id();
+    response.success = true;
+    response.reindex_required = true;
+    response.message = "Embedding model switched; reindex required";
+
+    if (reindex) {
+        auto indexed = indexProject(project_path);
+        response.reindexed = indexed.success;
+        response.stats = indexed.stats;
+        response.reindex_required = !indexed.success;
+        response.message = indexed.success
+            ? "Embedding model switched and project reindexed"
+            : "Embedding model switched but reindex failed: " + indexed.message;
+        response.success = indexed.success;
+    }
+    return response;
+}
+
 std::vector<QASource::QAPair> RagService::listQaPairs(size_t page, size_t per_page, const std::string& source_id) const {
 #if QORNIX_HAS_SQLITE
     if (sqlite_source_ && (source_id.empty() || source_id == sqlite_source_->getId() || source_id == sqlite_source_->getSourceId())) {
@@ -611,6 +964,7 @@ RagServiceQaListResponse RagService::listQaPairs(const RagServiceQaListOptions& 
         SQLiteSource::QAListOptions sqlite_options;
         sqlite_options.query = options.query;
         sqlite_options.category = options.category;
+        sqlite_options.tag = options.tag;
         sqlite_options.limit = response.limit;
         sqlite_options.offset = response.offset;
         auto listed = sqlite_source_->listQAPairs(sqlite_options);
@@ -636,6 +990,7 @@ RagServiceQaListResponse RagService::listQaPairs(const RagServiceQaListOptions& 
     };
     const std::string query = lower(options.query);
     const std::string category = options.category;
+    const std::string tag = lower(options.tag);
 
     for (const auto& source : rag_engine_->getDataSources()) {
         if (auto qa = std::dynamic_pointer_cast<QASource>(source)) {
@@ -650,6 +1005,18 @@ RagServiceQaListResponse RagService::listQaPairs(const RagServiceQaListOptions& 
                 const std::string pair_category = pair.category.empty() ? "general" : pair.category;
                 if (!category.empty() && pair_category != category) {
                     continue;
+                }
+                if (!tag.empty()) {
+                    bool tag_match = false;
+                    for (const auto& value : pair.tags) {
+                        if (lower(value) == tag) {
+                            tag_match = true;
+                            break;
+                        }
+                    }
+                    if (!tag_match) {
+                        continue;
+                    }
                 }
                 if (!query.empty()) {
                     const std::string haystack = lower(pair.id + " " + pair.question + " " + pair.answer + " " + pair_category);
@@ -750,17 +1117,84 @@ std::vector<std::string> RagService::listQaCategories(const std::string& query,
     return categories;
 }
 
+std::vector<std::string> RagService::listQaTags(const std::string& query,
+                                                size_t limit,
+                                                const std::string& source_id) const {
+    limit = limit == 0 ? 50 : std::min<size_t>(limit, 200);
+    std::vector<std::string> tags;
+    auto contains = [](const std::vector<std::string>& values, const std::string& value) {
+        return std::find(values.begin(), values.end(), value) != values.end();
+    };
+    auto lower = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return value;
+    };
+    const std::string lowered_query = lower(query);
+
+    RagServiceQaListOptions options;
+    options.source_id = source_id;
+    options.limit = 500;
+    size_t offset = 0;
+    while (tags.size() < limit) {
+        options.offset = offset;
+        auto page = listQaPairs(options);
+        if (page.items.empty()) {
+            break;
+        }
+        for (const auto& pair : page.items) {
+            for (const auto& tag : pair.tags) {
+                if (tag.empty()) {
+                    continue;
+                }
+                if (!lowered_query.empty() && lower(tag).find(lowered_query) == std::string::npos) {
+                    continue;
+                }
+                if (!contains(tags, tag)) {
+                    tags.push_back(tag);
+                    if (tags.size() >= limit) {
+                        break;
+                    }
+                }
+            }
+            if (tags.size() >= limit) {
+                break;
+            }
+        }
+        if (!page.has_more) {
+            break;
+        }
+        offset += page.items.size();
+    }
+    std::sort(tags.begin(), tags.end());
+    return tags;
+}
+
 bool RagService::addQaPair(const std::string& question,
                            const std::string& answer,
                            const std::string& category,
-                           std::string* pair_id) {
+                           std::string* pair_id,
+                           const std::vector<std::string>& tags,
+                           const std::vector<std::string>& aliases,
+                           const std::map<std::string, std::string>& metadata) {
     if (question.empty() || answer.empty()) {
         return false;
     }
 #if QORNIX_HAS_SQLITE
     if (sqlite_source_) {
         const std::string id = qaPairId(sqlite_source_->getId());
-        if (!sqlite_source_->addQAPair(id, question, answer, category)) {
+        auto metadata_with_tags = metadata;
+        if (!tags.empty()) {
+            metadata_with_tags["tags"] = stringArrayJson(tags);
+        }
+        if (!sqlite_source_->addQAPair(id, question, answer, category, stringArrayJson(aliases), [&]() {
+                boost::json::object object;
+                for (const auto& [key, value] : metadata_with_tags) {
+                    object[key] = value;
+                }
+                return boost::json::serialize(object);
+            }())) {
             return false;
         }
         if (pair_id) {
@@ -775,10 +1209,26 @@ bool RagService::addQaPair(const std::string& question,
 bool RagService::updateQaPair(const std::string& pair_id,
                               const std::string& question,
                               const std::string& answer,
-                              const std::string& category) {
+                              const std::string& category,
+                              const std::vector<std::string>& tags,
+                              const std::vector<std::string>& aliases,
+                              const std::map<std::string, std::string>& metadata) {
 #if QORNIX_HAS_SQLITE
     if (sqlite_source_) {
-        return sqlite_source_->updateQAPair(pair_id, answer, category, "", question);
+        auto metadata_with_tags = metadata;
+        if (!tags.empty()) {
+            metadata_with_tags["tags"] = stringArrayJson(tags);
+        }
+        boost::json::object metadata_json;
+        for (const auto& [key, value] : metadata_with_tags) {
+            metadata_json[key] = value;
+        }
+        return sqlite_source_->updateQAPair(pair_id,
+                                            answer,
+                                            category,
+                                            aliases.empty() ? "" : stringArrayJson(aliases),
+                                            question,
+                                            metadata_with_tags.empty() ? "" : boost::json::serialize(metadata_json));
     }
 #else
     (void)pair_id;
@@ -798,6 +1248,94 @@ bool RagService::deleteQaPair(const std::string& pair_id) {
     (void)pair_id;
 #endif
     return false;
+}
+
+std::string RagService::exportQaPairsJson(const RagServiceQaListOptions& options) const {
+    auto listed = listQaPairs(options);
+    boost::json::array pairs;
+    for (const auto& pair : listed.items) {
+        boost::json::object object;
+        object["id"] = pair.id;
+        object["question"] = pair.question;
+        object["answer"] = pair.answer;
+        object["category"] = pair.category.empty() ? "general" : pair.category;
+        boost::json::array aliases;
+        for (const auto& alias : pair.aliases) {
+            aliases.emplace_back(alias);
+        }
+        object["aliases"] = aliases;
+        boost::json::array tags;
+        for (const auto& tag : pair.tags) {
+            tags.emplace_back(tag);
+        }
+        object["tags"] = tags;
+        boost::json::object metadata;
+        for (const auto& [key, value] : pair.metadata) {
+            metadata[key] = value;
+        }
+        object["metadata"] = metadata;
+        pairs.emplace_back(std::move(object));
+    }
+    boost::json::object root;
+    root["success"] = true;
+    root["source_id"] = listed.source_id;
+    root["total"] = static_cast<std::int64_t>(listed.total);
+    root["exported"] = static_cast<std::int64_t>(pairs.size());
+    root["pairs"] = pairs;
+    return boost::json::serialize(root);
+}
+
+RagServiceQaImportResponse RagService::importQaPairsJson(const std::string& json,
+                                                         const std::string& default_category) {
+    RagServiceQaImportResponse response;
+    try {
+        auto parsed = boost::json::parse(json);
+        const boost::json::array* array = nullptr;
+        if (parsed.is_array()) {
+            array = &parsed.as_array();
+        } else if (parsed.is_object() && parsed.as_object().contains("pairs") && parsed.as_object().at("pairs").is_array()) {
+            array = &parsed.as_object().at("pairs").as_array();
+        }
+        if (!array) {
+            response.errors = 1;
+            response.error_messages.push_back("Expected JSON array or object with pairs array");
+            return response;
+        }
+        for (const auto& value : *array) {
+            if (!value.is_object()) {
+                ++response.errors;
+                response.error_messages.push_back("Skipped non-object QA item");
+                continue;
+            }
+            const auto& object = value.as_object();
+            if (!object.contains("question") || !object.contains("answer")) {
+                ++response.errors;
+                response.error_messages.push_back("Skipped QA item without question/answer");
+                continue;
+            }
+            const std::string question = object.at("question").as_string().c_str();
+            const std::string answer = object.at("answer").as_string().c_str();
+            std::string category = default_category.empty() ? "general" : default_category;
+            if (object.contains("category") && object.at("category").is_string()) {
+                category = object.at("category").as_string().c_str();
+            }
+            auto metadata = jsonStringMap(object, "metadata");
+            const auto tags = jsonStringArray(object, "tags");
+            const auto aliases = jsonStringArray(object, "aliases");
+            std::string id;
+            if (addQaPair(question, answer, category, &id, tags, aliases, metadata)) {
+                ++response.imported;
+                response.imported_ids.push_back(id);
+            } else {
+                ++response.duplicates;
+            }
+        }
+        response.success = response.errors == 0;
+    } catch (const std::exception& e) {
+        response.errors = 1;
+        response.error_messages.push_back(e.what());
+    }
+    return response;
 }
 
 std::vector<QASource::QAPair> RagService::searchQa(const std::string& query, size_t limit) const {

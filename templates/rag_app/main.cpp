@@ -227,7 +227,9 @@ void setupApplicationAuth(HttpServer& httpServer,
         httpServer,
         authManager,
         configBool(flatConfig, "auth.registration_enabled", false),
-        configBool(flatConfig, "auth.secure_cookies", false));
+        configBool(flatConfig, "auth.secure_cookies", false),
+        configValue(flatConfig, "auth.cookie_same_site", "Lax"),
+        configValue(flatConfig, "auth.cookie_path", "/"));
 
     auto middleware = create_auth_middleware(
         authManager,
@@ -246,6 +248,8 @@ void setupApplicationAuth(HttpServer& httpServer,
     const auto adminPermission = configList(flatConfig, "auth.rag_admin_permissions", {"rag:admin"});
     const auto authAdminPermission = configList(flatConfig, "auth.admin_permissions", {"auth:admin"});
     middleware->addRoutePolicy("*", "/auth/users", authAdminPermission);
+    middleware->addRoutePolicy("*", "/auth/invites", authAdminPermission);
+    middleware->addRoutePolicy("GET", "/auth/audit", authAdminPermission, {}, true);
     middleware->addRoutePolicy("GET", "/rag", readPermission, {}, true);
     middleware->addRoutePolicy("GET", "/api/rag/health", readPermission, {}, true);
     middleware->addRoutePolicy("GET", "/api/rag/sources", readPermission, {}, true);
@@ -255,12 +259,19 @@ void setupApplicationAuth(HttpServer& httpServer,
     middleware->addRoutePolicy("POST", "/api/rag/batch", readPermission, {}, true);
     middleware->addRoutePolicy("GET", "/api/rag/metrics", adminPermission, {}, true);
     middleware->addRoutePolicy("GET", "/api/rag/admin", adminPermission);
+    middleware->addRoutePolicy("GET", "/api/rag/embedding/models", readPermission, {}, true);
+    middleware->addRoutePolicy("POST", "/api/rag/embedding/switch", writePermission, {}, true);
     middleware->addRoutePolicy("*", "/api/rag/analytics", adminPermission);
     middleware->addRoutePolicy("*", "/api/rag/import", writePermission);
+    middleware->addRoutePolicy("GET", "/api/rag/ingest/jobs", adminPermission, {}, true);
     middleware->addRoutePolicy("*", "/api/rag/ingest", writePermission);
     middleware->addRoutePolicy("POST", "/api/rag/index", writePermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/documents/delete", writePermission, {}, true);
     middleware->addRoutePolicy("GET", "/api/rag/qa", readPermission);
+    middleware->addRoutePolicy("GET", "/api/rag/qa/tags", readPermission, {}, true);
+    middleware->addRoutePolicy("GET", "/api/rag/qa/export", readPermission, {}, true);
+    middleware->addRoutePolicy("POST", "/api/rag/qa/export", readPermission, {}, true);
+    middleware->addRoutePolicy("POST", "/api/rag/qa/import", writePermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/qa/dedup", writePermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/qa/add", writePermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/qa/update", writePermission, {}, true);

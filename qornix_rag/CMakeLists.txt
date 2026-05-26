@@ -133,6 +133,42 @@ if(NOT HNSWLIB_INCLUDE_DIR)
 endif()
 target_include_directories(qornix_rag_core PRIVATE ${HNSWLIB_INCLUDE_DIR})
 
+option(QORNIX_ENABLE_FAISS "Enable optional Faiss vector-store backend" ON)
+if(QORNIX_ENABLE_FAISS)
+    find_path(FAISS_INCLUDE_DIR faiss/IndexFlat.h
+        PATHS /usr/local/include /usr/include
+    )
+    find_library(FAISS_LIBRARY faiss
+        PATHS /usr/local/lib /usr/lib
+    )
+    if(FAISS_INCLUDE_DIR AND FAISS_LIBRARY)
+        find_package(OpenMP QUIET)
+        find_package(BLAS QUIET)
+        find_package(LAPACK QUIET)
+        target_compile_definitions(qornix_rag_core PUBLIC QORNIX_HAS_FAISS=1)
+        target_include_directories(qornix_rag_core PRIVATE ${FAISS_INCLUDE_DIR})
+        target_link_libraries(qornix_rag_core PRIVATE ${FAISS_LIBRARY})
+        if(OpenMP_CXX_FOUND)
+            target_link_libraries(qornix_rag_core PUBLIC OpenMP::OpenMP_CXX)
+        else()
+            message(WARNING "Faiss found but OpenMP was not found - static Faiss builds may fail to link")
+        endif()
+        if(BLAS_FOUND)
+            target_link_libraries(qornix_rag_core PUBLIC ${BLAS_LIBRARIES})
+        else()
+            message(WARNING "Faiss found but BLAS was not found - static Faiss builds may fail to link")
+        endif()
+        if(LAPACK_FOUND)
+            target_link_libraries(qornix_rag_core PUBLIC ${LAPACK_LIBRARIES})
+        else()
+            message(WARNING "Faiss found but LAPACK was not found - static Faiss builds may fail to link")
+        endif()
+        message(STATUS "Faiss found - faiss vector backend enabled")
+    else()
+        message(WARNING "Faiss not found - faiss vector backend will report dependency_unavailable")
+    endif()
+endif()
+
 option(QORNIX_ENABLE_ONNX "Enable ONNX Runtime semantic embeddings" ON)
 if(QORNIX_ENABLE_ONNX)
     find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime_cxx_api.h
@@ -161,6 +197,48 @@ target_link_libraries(qornix_rag_core PRIVATE
     Boost::json
 )
 
+option(QORNIX_ENABLE_LIBZIP "Enable libzip-backed Office document ingestion" ON)
+if(QORNIX_ENABLE_LIBZIP)
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(LIBZIP QUIET libzip)
+        pkg_check_modules(PUGIXML QUIET pugixml)
+    endif()
+
+    find_path(LIBZIP_INCLUDE_DIR zip.h
+        PATHS ${LIBZIP_INCLUDE_DIRS} /usr/local/include /usr/include
+    )
+    find_library(LIBZIP_LIBRARY zip
+        PATHS ${LIBZIP_LIBRARY_DIRS} /usr/local/lib /usr/lib
+    )
+
+    if(LIBZIP_INCLUDE_DIR AND LIBZIP_LIBRARY)
+        target_compile_definitions(qornix_rag_core PUBLIC QORNIX_HAS_LIBZIP=1)
+        target_include_directories(qornix_rag_core PRIVATE ${LIBZIP_INCLUDE_DIR})
+        target_link_libraries(qornix_rag_core PRIVATE ${LIBZIP_LIBRARY})
+        message(STATUS "libzip found - DOCX ingestion enabled")
+    else()
+        message(WARNING "libzip not found - DOCX/XLSX ingestion will report parser_unavailable")
+    endif()
+
+    find_path(PUGIXML_INCLUDE_DIR pugixml.hpp
+        PATHS ${PUGIXML_INCLUDE_DIRS} /usr/local/include /usr/include
+    )
+    find_library(PUGIXML_LIBRARY pugixml
+        PATHS ${PUGIXML_LIBRARY_DIRS} /usr/local/lib /usr/lib
+    )
+
+    if(LIBZIP_INCLUDE_DIR AND LIBZIP_LIBRARY AND PUGIXML_INCLUDE_DIR AND PUGIXML_LIBRARY)
+        target_compile_definitions(qornix_rag_core PUBLIC QORNIX_HAS_OPENXML=1)
+        target_compile_definitions(qornix_rag_core PUBLIC QORNIX_HAS_XLSX=1)
+        target_include_directories(qornix_rag_core PRIVATE ${PUGIXML_INCLUDE_DIR})
+        target_link_libraries(qornix_rag_core PRIVATE ${PUGIXML_LIBRARY})
+        message(STATUS "libzip + pugixml found - XLSX/PPTX ingestion enabled")
+    else()
+        message(WARNING "libzip + pugixml not found - XLSX/PPTX ingestion will report parser_unavailable")
+    endif()
+endif()
+
 find_package(CURL QUIET)
 if(CURL_FOUND)
     target_link_libraries(qornix_rag_core PRIVATE ${CURL_LIBRARIES})
@@ -169,6 +247,24 @@ if(CURL_FOUND)
     message(STATUS "CURL found - LLM client enabled")
 else()
     message(WARNING "CURL not found - LLM client will be disabled (search-only mode)")
+endif()
+
+option(QORNIX_ENABLE_LIBPQ "Enable optional PostgreSQL pgvector backend" ON)
+if(QORNIX_ENABLE_LIBPQ)
+    find_path(LIBPQ_INCLUDE_DIR libpq-fe.h
+        PATHS /usr/include/postgresql /usr/local/include /usr/include
+    )
+    find_library(LIBPQ_LIBRARY pq
+        PATHS /usr/local/lib /usr/lib
+    )
+    if(LIBPQ_INCLUDE_DIR AND LIBPQ_LIBRARY)
+        target_compile_definitions(qornix_rag_core PUBLIC QORNIX_HAS_LIBPQ=1)
+        target_include_directories(qornix_rag_core PRIVATE ${LIBPQ_INCLUDE_DIR})
+        target_link_libraries(qornix_rag_core PRIVATE ${LIBPQ_LIBRARY})
+        message(STATUS "libpq found - pgvector backend enabled")
+    else()
+        message(WARNING "libpq not found - pgvector backend will report dependency_unavailable")
+    endif()
 endif()
 
 option(QORNIX_ENABLE_SQLITE "Enable SQLite3 persistent storage" ON)

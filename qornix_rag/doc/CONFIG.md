@@ -38,10 +38,16 @@ CLI options override config values:
 ```yaml
 indexing:
   auto_index_on_startup: true
-  max_file_size_kb: 512
+  max_file_size_kb: 4096
 ```
 
 Portable config sets `auto_index_on_startup: false` by default so the bundle can start without indexing itself.
+
+PDF ingestion uses the optional `pdftotext` command when it is available in `PATH`. Image OCR ingestion uses the optional `tesseract` command when it is available in `PATH`. DOCX ingestion uses optional `libzip` support detected at build time. XLSX/PPTX ingestion uses optional `libzip` + `pugixml` support detected at build time. CSV ingestion is built in. If an optional parser dependency is missing or a document contains no extractable text, ingestion records a structured warning and skips that file.
+
+Chunking preserves parser metadata for page-aware PDFs, row-aware spreadsheets, OCR regions, and code symbols. The chunker uses the configured/document token budget when `tokenizer_max_tokens` or `embedding_token_limit` metadata is present; exact model-tokenizer counting remains a later enhancement.
+
+Ask grounding checks run after answer generation. The service extracts bracketed citations from the answer, reports unsupported or unused citation ids, and can append source ids when a generated answer uses retrieved context but omits citations. Conversation history, when supplied to `/api/ask`, is bounded to recent `user`/`assistant` turns and is used only to resolve follow-up wording, not as a citable source.
 
 ## Embeddings
 
@@ -68,7 +74,15 @@ Recommended setup:
 ./qornix_rag/download_onnx_model.sh
 ```
 
-The script downloads the default ONNX embedding model and updates `qornix_rag/config.yaml`.
+The script downloads the default ONNX embedding model, writes an `embedding.registry` entry, and makes it active unless `--no-set-active` is used. Useful install variants:
+
+```bash
+./qornix_rag/download_onnx_model.sh \
+  --model-id mini-lm-l6-v2 \
+  --model-name all-MiniLM-L6-v2 \
+  --dimension 384 \
+  --max-seq-len 256
+```
 
 Then configure:
 
@@ -126,11 +140,21 @@ embedding:
       dimension: 256
 ```
 
-The registry validates backend, ONNX paths, pooling mode, dimensions, tokenizer settings, and license/source metadata. The selected active model is reflected in `/api/health` and admin diagnostics through `embedding_active_model_id`, `embedding_registry_size`, `embedding_registry_model_ids`, and `embedding_registry_warnings`.
+The registry validates backend, ONNX paths, pooling mode, dimensions, tokenizer settings, and license/source metadata. The selected active model is reflected in `/api/health`, `/api/embedding/models`, and admin diagnostics through `embedding_active_model_id`, `embedding_registry_size`, `embedding_registry_model_ids`, and `embedding_registry_warnings`.
+
+Runtime switching is explicit and marks the next index as a full re-embed. To switch and reindex immediately:
+
+```bash
+curl -X POST http://localhost:8081/api/embedding/switch \
+  -H 'Content-Type: application/json' \
+  -d '{"model_id":"local-semantic-v1","reindex":true,"force_reembed":true}'
+```
+
+`force_reembed` defaults to `true`. When `reindex` is false, call `/api/index` or `/api/ingest` afterwards to rebuild vectors for the selected model. The ONNX tokenizer path now uses a greedy WordPiece-style tokenizer for BERT-like vocabularies; other tokenizer JSON variants still fall back to the basic token lookup path.
 
 ## Vector Store
 
-Hybrid search uses a retrieval-time vector store in addition to Xapian text search. The current local backend is HNSW:
+Hybrid search uses a retrieval-time vector store in addition to Xapian text search. The default local backend is HNSW:
 
 ```yaml
 vector_store:
@@ -144,6 +168,38 @@ vector_store:
 When `index_path` is set, Qornix tries to load the local HNSW index before rebuilding it and saves the rebuilt index after successful indexing. The metadata sidecar validates backend, embedding model id, embedding dimension, vector count, and document/chunk snapshot hash before a saved index is reused.
 
 For generated `rag_app` or `--with-rag` projects, use app-relative paths such as `data/hnsw_index.bin`.
+
+Production-scale vector backends are selected through the same boundary:
+
+```yaml
+vector_store:
+  backend: qdrant
+  endpoint: "http://127.0.0.1:6333"
+  collection: qornix_rag_vectors
+  distance: Cosine
+  auto_load: false
+  auto_save: false
+```
+
+```yaml
+vector_store:
+  backend: pgvector
+  connection_string: "host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret"
+  table: qornix_rag_vectors
+  auto_load: false
+  auto_save: false
+```
+
+```yaml
+vector_store:
+  backend: faiss
+  index_path: "qornix_rag/data/faiss.index"
+  metadata_path: "qornix_rag/data/faiss.index.meta.json"
+  auto_load: true
+  auto_save: true
+```
+
+Qdrant requires CURL support at build time and a reachable Qdrant server. pgvector requires libpq support, PostgreSQL, and the `vector` extension in the target database. Faiss is optional; if Faiss headers/library are not available during CMake configuration, selecting `backend: faiss` reports a dependency-unavailable vector-store status instead of silently falling back.
 
 ## Retrieval Quality
 
@@ -251,6 +307,8 @@ rag:
     directory_path: "qornix_rag/knowledge_base"
     recursive: true
 ```
+
+SQLite QA pairs store `category`, `aliases`, string `metadata`, and optional `tags` metadata. QA list/export APIs can filter by `query`, `category`, and `tag`; Ask/Search include QA attribution metadata when available. Stored answers are returned both as Markdown text and as a small rendered `answer_html` field for UI display.
 
 Portable config rewrites these to:
 

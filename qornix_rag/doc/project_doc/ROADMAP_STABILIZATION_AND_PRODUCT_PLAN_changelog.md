@@ -1619,6 +1619,460 @@ cmake -S /tmp/qornix_csrf_with_rag_app -B /tmp/qornix_csrf_with_rag_app/build &&
 git diff --check
 ```
 
+## 2026-05-26 - Post-stabilization LLM response robustness baseline completed
+
+Goal:
+- close backlog item 11.2 with a shared JSON parser baseline;
+- stop hand-scanning provider JSON answer strings in `LLMClient`;
+- surface parser failures and truncation separately from provider availability.
+
+Implemented:
+- moved LLM answer parsing to `Boost.JSON`, matching the JSON library already used by `qornix_web`;
+- added `LLMGenerationResult`, `parse_response_result()`, and `ask_with_metadata()` while keeping the existing string-returning `parse_response()` and `ask()` compatibility APIs;
+- parsed Ollama chat `message.content`, Ollama generate `response`, OpenAI-compatible `choices[].message.content`, and streaming-style `choices[].delta.content`;
+- supported newline-delimited JSON and SSE-style `data:` payload lines for accidental/streaming provider responses;
+- added parser-specific status metadata: `parser_error`, `provider_error`, `truncated`, `finish_reason`, and `truncated` flag;
+- exposed `llm_truncated`, `llm_finish_reason`, and `llm_parser_error` through `/api/ask`;
+- updated the standalone/generated RAG UI status line to show truncation and parser diagnostics;
+- avoided treating arbitrary answer text containing the word `error` as a provider failure by parsing provider error payloads as JSON;
+- added LLM parser regression coverage for multiline code blocks, quoted includes, JSON snippets, markdown tables, escaped backslashes, SSE-style chunks, parser errors, and truncation metadata;
+- documented the new Ask response fields.
+
+Deferred:
+- replace remaining non-answer JSON helpers such as model-list extraction and token usage parsing with `Boost.JSON`;
+- add parser fixtures from real Ollama/OpenAI/vLLM/LM Studio responses;
+- route streaming SSE callback parsing through the same structured parser path end-to-end.
+
+Validation:
+```text
+cmake --build build --target test_llm_client test_rag_service qornix_rag qornix_web qornix_rag_route_extension -j2
+ctest --test-dir build -R 'test_(llm_client|rag_service|rag_quality_eval|embedding_config|sqlite_source)$' --output-on-failure
+git diff --check
+```
+
+## 2026-05-26 - Forward backlog priority policy clarified
+
+Reason:
+- `qornix_rag` is primarily a standalone reusable RAG library/core;
+- the standalone user application should remain a local single-user mode that may use `qornix_web` for HTTP/UI plumbing but should not be blocked by production web security;
+- full network-application security belongs to generated/host `qornix_web` applications, not to standalone RAG core.
+
+Updated priority order:
+- Priority 1: finish `qornix_rag` as a standalone reusable RAG library/core.
+- Priority 2: keep standalone user mode complete and ergonomic with local safety defaults, not production auth/RBAC.
+- Priority 3: support generated `rag_app` and `--with-rag` integration after core and standalone flows are solid.
+- Priority 4: implement CSRF/session rotation/audit/password recovery/cookie/TLS/reverse-proxy hardening as `qornix_web` / `qornix_auth` host-application capabilities.
+
+Recommended next execution order:
+- advanced ingestion adapters, starting with PDF;
+- parser-to-chunker metadata contracts and richer chunking;
+- RAG quality, citation post-processing, grounding checks, and expanded evals;
+- local embedding/model operations such as installer, tokenizer upgrades, and explicit reindex/re-embed switching;
+- QA/wiki quality improvements;
+- production vector backend adapters;
+- generated-app/web security hardening.
+
+## 2026-05-26 - Post-stabilization PDF ingestion baseline completed
+
+Goal:
+- start the advanced ingestion adapter priority with PDF support for standalone/library RAG;
+- keep the parser behind the existing `DocumentParser` registry;
+- avoid adding mandatory PDF library dependencies to the portable/standalone build.
+
+Implemented:
+- added `.pdf` detection as `application/pdf` with document type `pdf`;
+- added `PdfParser` as a first PDF text extraction adapter;
+- uses the optional `pdftotext` command through `fork`/`exec` without shell interpolation;
+- records a structured warning and skips the file when `pdftotext` is unavailable, extraction fails, or the PDF has no extractable text;
+- stores PDF metadata fields including `mime_type`, `ingestion_parser=pdf_pdftotext`, `source_extension=.pdf`, and `pdf_text_extractor=pdftotext`;
+- increased default standalone/generated indexing file-size limit to `4096 KB` so ordinary small PDFs are not skipped by the old source-code-sized limit;
+- added a generated valid PDF fixture to `test_ingestion_pipeline` and verified PDF text ingestion when `pdftotext` is installed;
+- updated README/config docs and roadmap backlog 11.6 to mark the PDF text baseline complete while keeping richer PDF page/metadata parsing deferred.
+
+Deferred:
+- page-aware PDF parsing and chunk metadata;
+- PDF document metadata/outlines/attachments;
+- DOCX, XLSX/CSV, PPTX, image, and OCR parser adapters;
+- dependency documentation for optional parser tools beyond the first `pdftotext` note.
+
+Validation:
+```text
+cmake --build build --target test_ingestion_pipeline test_rag_service qornix_rag -j2
+ctest --test-dir build -R 'test_(ingestion_pipeline|rag_service)$' --output-on-failure
+```
+
+## 2026-05-26 - Post-stabilization DOCX ingestion baseline completed
+
+Goal:
+- continue the advanced ingestion adapter priority with DOCX support for standalone/library RAG;
+- use a real ZIP library instead of shelling out to `unzip`;
+- keep DOCX support optional so standalone builds still work without the development package.
+
+Implemented:
+- added optional `libzip` detection to `qornix_rag_core` through CMake;
+- added `.docx` detection as `application/vnd.openxmlformats-officedocument.wordprocessingml.document` with document type `docx`;
+- added `DocxParser` as a first DOCX text extraction adapter;
+- reads `word/document.xml` from the DOCX archive through `libzip`;
+- extracts plain text from WordprocessingML paragraphs/runs and decodes basic XML entities;
+- records a structured warning and skips the file when `libzip` support is unavailable, the DOCX archive cannot be opened, `word/document.xml` is missing, or no text is extractable;
+- stores DOCX metadata fields including `mime_type`, `ingestion_parser=docx_libzip`, `source_extension=.docx`, and `docx_archive_backend=libzip`;
+- added `.docx` to reusable `FileSource` defaults;
+- extended ingestion tests with a generated DOCX fixture and full extraction assertions when `QORNIX_HAS_LIBZIP` is enabled;
+- updated README/config/API docs and roadmap backlog 11.6 to mark the DOCX text baseline complete while keeping richer DOCX structure/metadata parsing deferred.
+
+Deferred:
+- DOCX headings, tables, footnotes/endnotes, comments, styles, document properties, and structure metadata;
+- XLSX/CSV, PPTX, image, and OCR parser adapters;
+- parser-to-chunker metadata contracts for Office document structures.
+
+Validation:
+```text
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_TESTS=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
+cmake --build build --target test_ingestion_pipeline qornix_rag -j2
+ctest --test-dir build -R 'test_ingestion_pipeline$' --output-on-failure
+```
+
+## 2026-05-26 - Post-stabilization XLSX/CSV ingestion baseline completed
+
+Goal:
+- continue the advanced ingestion adapter priority with spreadsheet support for standalone/library RAG;
+- reuse dependency choices already present in related Qornix components;
+- avoid ad-hoc ZIP/XML parsing for XLSX.
+
+Implemented:
+- added built-in `.csv` detection as `text/csv` with document type `csv`;
+- added a `CsvParser` with delimiter detection, quoted-field handling, escaped quote handling, multiline field handling, and row/column metadata;
+- added optional `.xlsx` detection as `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` with document type `xlsx`;
+- added optional `pugixml` detection to `qornix_rag_core` and used it with the existing optional `libzip` Office document path;
+- added `XlsxParser` backed by `libzip + pugixml` for workbook relationships, shared strings, worksheet rows, sheet names, and row/cell metadata;
+- records structured warnings and skips XLSX files when `libzip + pugixml` support is unavailable or no extractable text is present;
+- stores spreadsheet metadata fields such as `csv_row_count`, `csv_column_count`, `csv_delimiter`, `xlsx_sheet_count`, `xlsx_row_count`, `xlsx_cell_count`, `xlsx_sheet_names`, and parser backend fields;
+- added `.csv` and `.xlsx` to reusable `FileSource` defaults;
+- extended ingestion tests with generated CSV and XLSX fixtures and extraction assertions when `QORNIX_HAS_XLSX` is enabled;
+- updated README/config/API docs and roadmap backlog 11.6 to mark the first XLSX/CSV text baseline complete while keeping richer spreadsheet structure/chunking deferred.
+
+Deferred:
+- XLSX formulas, merged cells, workbook properties, formatting signals, typed cell metadata, and multiple table-region detection;
+- table-aware spreadsheet chunking and citation metadata contracts;
+- PPTX, image, and OCR parser adapters.
+
+Validation:
+```text
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_TESTS=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
+cmake --build build --target test_ingestion_pipeline -j2
+ctest --test-dir build -R 'test_ingestion_pipeline$' --output-on-failure
+```
+
+## 2026-05-26 - Post-stabilization PPTX ingestion baseline completed
+
+Goal:
+- continue the advanced ingestion adapter priority with presentation support for standalone/library RAG;
+- reuse the same `libzip + pugixml` Open XML dependency path used for XLSX;
+- keep PPTX support optional and non-fatal when dependencies are unavailable.
+
+Implemented:
+- added `.pptx` detection as `application/vnd.openxmlformats-officedocument.presentationml.presentation` with document type `pptx`;
+- added `PptxParser` backed by `libzip + pugixml`;
+- reads `ppt/presentation.xml`, presentation relationships, and referenced slide XML files;
+- extracts plain text from DrawingML text runs on slides;
+- records structured warnings and skips PPTX files when `libzip + pugixml` support is unavailable, the presentation relationship graph is missing, or no text is extractable;
+- stores PPTX metadata fields including `mime_type`, `ingestion_parser=pptx_libzip_pugixml`, `source_extension=.pptx`, `pptx_archive_backend=libzip`, `pptx_xml_parser=pugixml`, `pptx_slide_count`, and `pptx_text_run_count`;
+- added `.pptx` to reusable `FileSource` defaults;
+- extended ingestion tests with a generated two-slide PPTX fixture and extraction assertions when `QORNIX_HAS_OPENXML` is enabled;
+- updated README/config/API docs and roadmap backlog 11.6 to mark the first PPTX text baseline complete while keeping richer presentation structure/metadata parsing deferred.
+
+Deferred:
+- slide titles, notes, comments, speaker metadata, alt text, media captions, layout metadata, and richer per-slide citations;
+- image ingestion with OCR;
+- parser-to-chunker metadata contracts for Office document structures.
+
+Validation:
+```text
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_TESTS=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
+cmake --build build --target test_ingestion_pipeline -j2
+ctest --test-dir build -R 'test_ingestion_pipeline$' --output-on-failure
+```
+
+## 2026-05-26 - Post-stabilization image OCR ingestion baseline completed
+
+Goal:
+- continue the advanced ingestion adapter priority with raster image OCR support for standalone/library RAG;
+- keep OCR optional and non-fatal when the local OCR tool is unavailable;
+- reuse the existing `DocumentParser` registry and structured ingestion issue behavior.
+
+Implemented:
+- added image extension detection for `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`, `.pbm`, `.pgm`, `.ppm`, and `.pnm` with document type `image`;
+- added `ImageOcrParser` backed by the optional `tesseract` command through `fork`/`exec` without shell interpolation;
+- records structured warnings and skips image files when `tesseract` is unavailable, OCR fails, or OCR produces no extractable text;
+- stores image OCR metadata fields including `mime_type`, `ingestion_parser=image_tesseract_ocr`, `source_extension`, `image_ocr_engine=tesseract`, and `image_ocr_language=default`;
+- added image extensions to reusable `FileSource` defaults;
+- extended ingestion tests with a generated PGM fixture, image type detection assertions, and optional OCR metadata assertions when OCR produces text;
+- updated README/config/API docs and roadmap backlog 11.6 to mark the first image OCR text baseline complete while keeping richer image metadata, OCR confidence, coordinates, language selection, and diagnostics deferred.
+
+Deferred:
+- image dimensions, EXIF metadata, OCR confidence, page/region coordinates, detected language, captions, and richer parser diagnostics;
+- parser-to-chunker metadata contracts for OCR regions and captions;
+- configurable OCR language/options.
+
+Validation:
+```text
+cmake --build build --target test_ingestion_pipeline -j2
+ctest --test-dir build -R 'test_ingestion_pipeline$' --output-on-failure
+```
+
+## 2026-05-26 - Post-stabilization parser-to-chunker metadata baseline completed
+
+Goal:
+- close the next core RAG item after image/OCR ingestion;
+- preserve parser structure through chunking so retrieval/citations can reason about pages, rows, OCR regions, and code symbols;
+- keep the baseline dependency-light and compatible with existing persisted chunk metadata.
+
+Implemented:
+- added stable parser-to-chunker structure hints including `structure_contract`, `pdf_page_count`, `table_*`, and `ocr_*`;
+- changed PDF extraction to preserve page breaks and page labels from `pdftotext`, then chunk PDFs with `chunk_strategy=pdf_page`;
+- added PDF chunk metadata: `chunk_page`, `chunk_page_start`, and `chunk_page_end`;
+- changed XLSX extraction to preserve sheet/row line boundaries and added spreadsheet structure metadata for CSV/XLSX;
+- added spreadsheet row chunking with `chunk_strategy=spreadsheet_table`, `chunk_sheet`, `chunk_row_start`, and `chunk_row_end`;
+- added image OCR region/caption propagation with `chunk_strategy=image_ocr_region`, `chunk_ocr_region`, and optional `chunk_ocr_caption`;
+- expanded code symbol detection across common declaration forms for C/C++, Python, JavaScript/TypeScript, Go, Rust, and Java/C-style functions/classes;
+- added `chunk_symbol_name` and `chunk_symbol_kind` alongside the existing `chunk_symbol` display text;
+- added tokenizer-limit-aware chunk budgets through `DocumentChunker::Config::tokenizer_max_tokens`, document metadata keys `tokenizer_max_tokens` / `embedding_token_limit`, and chunk metadata `chunk_token_budget`;
+- extended `test_document_chunker` for PDF pages, spreadsheet rows, OCR region/caption metadata, code symbol names/kinds, and tokenizer budget limits;
+- extended ingestion tests for PDF, spreadsheet, and OCR structure metadata.
+
+Deferred:
+- exact model-tokenizer tokenization beyond the current whitespace-token estimate and configured token budgets;
+- AST-grade language parsers beyond the expanded regex-based baseline;
+- PDF page boxes, outlines, coordinates, OCR confidence, spreadsheet merged-cell/formula metadata, and richer citation post-processing.
+
+Validation:
+```text
+cmake --build build --target test_document_chunker test_ingestion_pipeline -j2
+ctest --test-dir build -R 'test_(document_chunker|ingestion_pipeline)$' --output-on-failure
+```
+
+## 2026-05-26 - Post-stabilization RAG quality and grounding baseline completed
+
+Goal:
+- close the next core RAG quality item after parser-to-chunker metadata;
+- make generated-answer grounding more explicit than retrieval confidence alone;
+- define conversation-history rules before adding broader chat workflows;
+- expand the local evaluation dataset beyond the first retrieval/QA/refusal cases.
+
+Implemented:
+- added answer citation extraction from generated/fallback answers into `answer_citations`;
+- added `missing_citations` for answer citations that do not exist in retrieved context;
+- added `uncited_context_citations` for retrieved source ids not cited by the answer;
+- added `citations_post_processed` and source-id appending for generated answers that omit citations while using retrieved context;
+- refined post-answer `grounding_status` with `unsupported_citations` and `uncited` states while preserving existing `grounded`, `partial`, `weak`, and `no_context`;
+- added bounded conversation history support to `RagService::ask` and `/api/ask` through a `history` array;
+- conversation history accepts only recent `user`/`assistant` turns, drops system/tool content, sanitizes text, and is prompt-only continuity context rather than a citable source;
+- exposed `answer_citations`, `missing_citations`, `uncited_context_citations`, `citations_post_processed`, and `conversation_turns_used` through `/api/ask`;
+- expanded `retrieval_quality.json` with citation post-processing and conversation-history rules documents/cases;
+- extended `test_rag_service` and `test_rag_quality_eval` coverage for answer citations, missing citation checks, and conversation-history filtering.
+
+Deferred:
+- model-based claim verification against cited context beyond citation-id consistency checks;
+- answer completeness scoring;
+- generated-template and long-document evaluation fixtures;
+- user feedback capture and answer-quality analytics.
+
+Validation:
+```text
+cmake --build build --target test_rag_service test_rag_quality_eval qornix_rag -j2
+ctest --test-dir build -R 'test_(rag_service|rag_quality_eval)$' --output-on-failure
+```
+
+## 2026-05-26 - Post-stabilization embedding/model operations baseline completed
+
+Goal:
+- close the local embedding/model operations item after answer grounding;
+- provide a first-class install/download path that writes registry metadata;
+- support runtime model switching with explicit reindex/re-embed orchestration;
+- improve ONNX tokenization beyond exact whole-token lookup for BERT-like tokenizers.
+
+Implemented:
+- extended `download_onnx_model.sh` with `--model-id`, metadata, dimension, pooling, tokenizer, sequence-length, thread, and active-selection options;
+- changed the downloader config update to write an `embedding.registry` entry and set `active_model_id` by default;
+- copied the updated downloader behavior into generated RAG app templates;
+- added `RagEngine::switch_active_embedding_model()` and `force_reembed_on_next_index()` so model changes can invalidate unchanged-chunk embedding reuse explicitly;
+- added greedy WordPiece-style token splitting for ONNX tokenizers declared as `WordPiece` or `BertWordPiece`;
+- added `RagService::embeddingModels()` and `RagService::switchEmbeddingModel()`;
+- added `GET /api/embedding/models` and `POST /api/embedding/switch`;
+- protected `/api/embedding/switch` as a write/admin route;
+- extended embedding config/service tests for registry switching and forced full re-embedding.
+
+Deferred:
+- automatic model registry discovery from a models directory;
+- deeper model/tokenizer compatibility validation after download;
+- broader Hugging Face tokenizer JSON variants beyond the current greedy WordPiece path;
+- persistent embedding cache storage beyond the existing model-id/content-hash namespace;
+- ONNX Runtime integration tests with a real small model fixture.
+
+Validation:
+```text
+cmake --build build --target qornix_rag test_embedding_config test_rag_service test_rag_api -j2
+ctest --test-dir build -R 'test_(embedding_config|rag_service|rag_api)$' --output-on-failure
+```
+
+## 2026-05-26 - Post-stabilization generated-app hardening baseline completed
+
+Status: `done`
+
+Goal:
+- close the generated-app hardening item owned by `qornix_web` / `qornix_auth`;
+- keep standalone RAG local-first while improving generated networked app defaults;
+- add testable auth/account/container/deploy primitives without pretending to provide full production operations.
+
+Implemented:
+- added session invalidation by user and login-time session rotation;
+- added session invalidation after password changes, password resets, and admin user updates;
+- added bounded auth audit events for login/logout/register/access denial/session denial/invite/password-reset/session invalidation flows;
+- added manual invite-token and password-reset-token helpers in `AuthManager`;
+- added `/auth/invites`, `/auth/invites/accept`, `/auth/password-reset/request`, `/auth/password-reset/confirm`, and `/auth/audit` routes;
+- added configurable generated-app cookie policy for `secure_cookies`, `cookie_same_site`, and `cookie_path`;
+- wired generated `app` and `rag_app` templates to protect invite and audit admin routes with `auth:admin`;
+- added generated deploy smoke scripts;
+- hardened generated runtime containers with non-root execution, healthchecks, and RAG Compose read-only/no-new-privileges/cap-drop settings;
+- documented manual-token delivery, stricter cookie settings, TLS/reverse-proxy shape, container hardening, and smoke checks.
+
+Deferred:
+- durable audit-event storage/export;
+- SMTP/notification-provider delivery for invites and password resets;
+- cookie domain/max-age policy controls;
+- Caddy/Traefik examples and complete Docker Compose flow automation;
+- structured tracing, backup/restore commands, alert examples, SBOM/scanning, and secret-mounting guidance.
+
+Validation:
+```text
+cmake --build build --target auth_manager_test auth_routes_test auth_middleware_policy_test qornix_web -j2
+ctest --test-dir build -R 'auth_(manager|routes|middleware_policy)_test' --output-on-failure
+./create_new_project.sh /tmp/qornix_hardening_rag_app --template rag_app
+cmake -S /tmp/qornix_hardening_rag_app -B /tmp/qornix_hardening_rag_app/build
+cmake --build /tmp/qornix_hardening_rag_app/build -j2
+./create_new_project.sh /tmp/qornix_hardening_with_rag --with-rag
+cmake -S /tmp/qornix_hardening_with_rag -B /tmp/qornix_hardening_with_rag/build
+cmake --build /tmp/qornix_hardening_with_rag/build -j2
+```
+
+## 2026-05-26 - Post-stabilization production vector backend adapter baseline completed
+
+Status: `done`
+
+Goal:
+- close the next production vector backend adapter item;
+- keep local HNSW as the default while exposing Faiss, Qdrant, and pgvector through the existing `VectorStore` boundary;
+- make optional dependency behavior explicit instead of silently falling back.
+
+Implemented:
+- extended `VectorStore` with backend options, `lastError()`, and a `createVectorStore()` factory;
+- added optional `FaissVectorStore` with save/load label sidecar support when Faiss is available at build time;
+- added `QdrantVectorStore` backed by CURL JSON collection creation, point upsert, and search requests;
+- added `PgVectorStore` backed by libpq and PostgreSQL `vector` extension table creation, inserts, and nearest-neighbor search;
+- added `vector_store.endpoint`, `api_key`, `collection`, `connection_string`, `table`, `distance`, and `recreate` config parsing;
+- added optional CMake detection for Faiss and libpq while preserving the existing required local HNSW path;
+- updated standalone/generated config examples and vector-store docs;
+- added backend factory and config parsing regression coverage.
+
+Deferred:
+- live service integration tests for Qdrant and PostgreSQL+pgvector containers;
+- Faiss CI coverage in a build image with Faiss installed;
+- migration tooling from local HNSW/Faiss vectors into Qdrant or pgvector;
+- large-corpus paginated upsert/delete synchronization and richer backend health diagnostics.
+
+Validation:
+```text
+cmake --build build --target test_vector_store test_embedding_config -j2
+ctest --test-dir build -R 'test_(vector_store|embedding_config)$' --output-on-failure
+```
+
+## 2026-05-26 - Post-stabilization QA/wiki quality baseline completed
+
+Goal:
+- close the next local QA/wiki quality item after embedding/model operations;
+- make QA entries better structured for filtering, export, and attribution;
+- improve QA result scoring without replacing the existing SQLite-backed workflow.
+
+Implemented:
+- added `tags` to `QASource::QAPair` and propagated tags through documents, service DTOs, Search results, Ask context, and API JSON;
+- replaced placeholder `QASource::loadFromJson()` / `toJson()` with Boost.JSON import/export for `pairs`, aliases, tags, and string metadata;
+- parsed SQLite QA aliases and metadata JSON back into `QAPair` objects;
+- added tag filtering to SQLite-backed QA list queries and service list queries;
+- added `RagService::listQaTags()`, `GET /api/qa/tags`, `POST /api/qa/import`, and `GET/POST /api/qa/export`;
+- added conservative server-side Markdown rendering metadata as `answer_html`;
+- added richer QA scoring that boosts exact question/answer/alias matches and keeps QA attribution fields in Search/Ask responses;
+- preserved existing semantic duplicate detection endpoints while adding tags/import/export coverage around the QA data model.
+
+Deferred:
+- add/edit UI duplicate warnings before save;
+- production-grade Markdown sanitizer and richer Markdown extensions;
+- optional FTS/ORM-backed QA search and larger-scale tag autocomplete;
+- full provenance/version history beyond string metadata fields.
+
+Validation:
+```text
+cmake --build build --target qornix_rag test_sqlite_source test_rag_service test_data_sources test_deduplication -j2
+ctest --test-dir build -R 'test_(sqlite_source|rag_service|data_sources|deduplication)$' --output-on-failure
+```
+
+## 2026-05-26 - Roadmap open-work refresh
+
+Purpose:
+- make the roadmap reflect that Post-stabilization 25-28 completed the embedding/model operations, QA/wiki quality, production vector adapter, and generated-app hardening baselines;
+- keep baseline-complete items from looking like active pending work;
+- add an explicit current backlog with concrete tasks that remain after the completed baselines.
+
+Updated:
+- added `0.1 Current explicit open work` to the roadmap;
+- kept `Next - Generated app RAG UI polish` as the next pending item;
+- made the remaining work explicit for generated app UI polish, vector backend hardening, advanced ingestion metadata, code/chunking depth, embedding/model registry hardening, RAG quality, QA/wiki quality, operations/security depth, and LLM/provider diagnostics;
+- refreshed the deferred follow-up wording so it refers to the completed Post-stabilization 25-28 baselines.
+
+No code changes were made.
+
+## 2026-05-26 - Post-stabilization generated-app RAG UI polish completed
+
+Status: `done`
+
+Goal:
+- close `0.1 Current explicit open work` item 1;
+- make generated `rag_app` and `--with-rag` RAG views expose the capabilities added by the recent auth, QA, embedding/model, ingestion, and grounding baselines;
+- keep the standalone RAG UI copy synchronized with the generated app template.
+
+Implemented:
+- added generated UI controls for QA tags, tag filtering, JSON import/export, and duplicate checks;
+- added embedding model registry display and runtime model switching with explicit `force_reembed` and optional immediate reindex controls;
+- expanded Ask/Search source attribution with tags, chunk/language metadata, answer citation counts, missing citation counts, grounding status, and confidence;
+- added ingestion job progress bars to the Admin output;
+- added auth session status to the page-level status toolbar;
+- added generated app route policies for `/api/rag/embedding/models`, `/api/rag/embedding/switch`, `/api/rag/qa/tags`, `/api/rag/qa/import`, `/api/rag/qa/export`, and `/api/rag/ingest/jobs`;
+- kept `qornix_rag/templates/rag_interface.html` and `templates/rag_app/templates/rag_interface.html` byte-identical after the UI update.
+
+Deferred:
+- deeper visual redesign beyond the existing single-file generated UI;
+- inline duplicate warnings before save, which remain tracked under QA/wiki deeper quality;
+- live browser-driven authenticated smoke tests for the generated UI.
+
+Validation:
+```text
+cmp -s qornix_rag/templates/rag_interface.html templates/rag_app/templates/rag_interface.html
+node --check <extracted script from templates/rag_app/templates/rag_interface.html>
+cmake --build build --target qornix_web qornix_rag -j2
+./create_new_project.sh /tmp/qornix_ui_polish_rag_app --template rag_app
+cmake -S /tmp/qornix_ui_polish_rag_app -B /tmp/qornix_ui_polish_rag_app/build
+cmake --build /tmp/qornix_ui_polish_rag_app/build -j2
+./create_new_project.sh /tmp/qornix_ui_polish_with_rag --with-rag
+cmake -S /tmp/qornix_ui_polish_with_rag -B /tmp/qornix_ui_polish_with_rag/build
+cmake --build /tmp/qornix_ui_polish_with_rag/build -j2
+authenticated generated rag_app smoke:
+  unauthenticated /api/rag/health -> 401
+  /auth/login -> csrf token returned
+  authenticated /api/rag/health -> 200
+  authenticated /api/rag/embedding/models -> success
+  authenticated+admin-token /api/rag/qa/add -> success
+  authenticated+admin-token /api/rag/admin/diagnostics -> 200
+```
+
 ## Current milestone state
 
 - Milestone 0: `done`
@@ -1656,20 +2110,31 @@ git diff --check
 - Post-stabilization 14 - QA server-side pagination/filtering/suggestions baseline: `done`
 - Post-stabilization 15 - embedding model registry and ONNX config diagnostics baseline: `done`
 - Post-stabilization 16 - generated-app CSRF protection baseline: `done`
-- Next - select the next backlog item before implementation: `pending`
+- Post-stabilization 17 - LLM response robustness and Boost.JSON parser baseline: `done`
+- Post-stabilization 18 - PDF text ingestion adapter baseline: `done`
+- Post-stabilization 19 - DOCX text ingestion adapter baseline: `done`
+- Post-stabilization 20 - XLSX/CSV spreadsheet text ingestion adapter baseline: `done`
+- Post-stabilization 21 - PPTX presentation text ingestion adapter baseline: `done`
+- Post-stabilization 22 - image OCR ingestion adapter baseline: `done`
+- Post-stabilization 23 - parser-to-chunker metadata and richer chunking baseline: `done`
+- Post-stabilization 24 - RAG quality and grounding baseline: `done`
+- Post-stabilization 25 - embedding/model operations for local use: `done`
+- Post-stabilization 26 - QA/wiki knowledge quality baseline: `done`
+- Post-stabilization 27 - production vector backend adapter baseline: `done`
+- Post-stabilization 28 - generated-app hardening baseline: `done`
+- Post-stabilization 29 - generated-app RAG UI polish: `done`
+- Next - Vector backend production hardening: `pending`
 
 ## Deferred / known follow-ups
 
-These items are intentionally not closed by A2/A3/A4, the E1 persistence baseline, the Post-stabilization 13 auth/RBAC baseline, the Post-stabilization 14 QA scale baseline, the Post-stabilization 15 embedding registry baseline, or the Post-stabilization 16 CSRF baseline:
+These items are intentionally not closed by the completed stabilization baselines through Post-stabilization 28. Post-stabilization 25-28 completed the first embedding/model operations, QA/wiki quality, production vector backend adapter, and generated-app hardening baselines; the items below are deeper follow-ups beyond those baselines:
 
-- replaceable vector backend adapters beyond local HNSW;
-- optional Faiss backend adapter;
-- optional Qdrant backend adapter;
-- optional pgvector backend adapter;
-- deeper vector backend selection docs and tests beyond the local HNSW baseline;
-- arbitrary document ingestion beyond current text/Markdown/QA flows;
-- PDF/DOCX/XLSX/images/OCR support;
-- production security hardening beyond the generated-app CSRF baseline, such as audit events, session rotation, password reset, invite flows, MFA, and stricter cookie policy;
+- live vector backend integration tests for Qdrant/PostgreSQL+pgvector and Faiss CI coverage;
+- vector backend migration tooling and large-corpus synchronization beyond the first adapter baseline;
+- arbitrary document ingestion beyond current text/Markdown/code/HTML/PDF-text/DOCX-text/CSV/XLSX-text/PPTX-text/image-OCR/QA flows;
+- richer image/OCR metadata plus richer PDF/DOCX/XLSX/CSV/PPTX structure and metadata parsing;
+- production security hardening beyond the generated-app hardening baseline, such as durable audit storage, delivered account recovery, MFA, tracing, alerting, and secret-management docs;
 - retrieval relevance and query normalization;
-- QA tags, ORM-backed list abstractions, optional FTS, and richer autocomplete beyond the first server-side QA list baseline;
-- model selection UI, runtime embedding model switching, model installer/download flow, tokenizer upgrades, and additional LLM diagnostics polish.
+- ORM-backed QA list abstractions, optional FTS, richer autocomplete, and deeper QA provenance/versioning;
+- model selection UI, automatic model discovery, deeper tokenizer compatibility validation, and additional LLM diagnostics polish;
+- remaining LLM parser follow-ups such as model-list/token-usage parsing through `Boost.JSON`, real-provider response fixtures, and unified structured parsing for streaming callbacks.

@@ -35,7 +35,7 @@ The standalone UI has four main areas:
 
 - `Ask`: asks the configured LLM using retrieved local context.
 - `Search`: searches indexed project files and QA entries.
-- `QA`: add, list, edit, delete, filter, and page local QA/wiki entries.
+- `QA`: add, list, edit, delete, import/export, tag, filter, and page local QA/wiki entries.
 - `Sources / Health`: inspect index status, LLM status, sources, and diagnostics.
 
 If the LLM provider or model is unavailable, Ask falls back gracefully and the UI shows diagnostics, including the configured model and available provider models when the provider reports them.
@@ -93,7 +93,7 @@ Recommended one-command setup:
 ./qornix_rag/download_onnx_model.sh
 ```
 
-The script downloads a default BERT-style ONNX text embedding model from Hugging Face, saves it under `qornix_rag/models/`, and switches `qornix_rag/config.yaml` to `embedding.backend: onnx`.
+The script downloads a default BERT-style ONNX text embedding model from Hugging Face, saves it under `qornix_rag/models/`, writes an `embedding.registry` entry, and makes it active. Runtime model operations are exposed through `GET /api/embedding/models` and `POST /api/embedding/switch`; switching can reindex immediately with `{"model_id":"...","reindex":true,"force_reembed":true}`.
 
 Manual setup is also possible. See [Embedding models guide](models/README.md) for model sources, compatibility limits, and advanced options.
 
@@ -183,8 +183,12 @@ cmake --build build --target qornix_rag_route_extension
 
 These are intentionally deferred beyond the standalone stabilization stage:
 
-- arbitrary binary document ingestion;
-- PDF, DOCX, XLSX, PPTX, image, and OCR ingestion;
+- arbitrary binary document ingestion beyond the explicitly supported parser adapters;
+- richer image/OCR metadata beyond the first `tesseract` text baseline;
+- richer PPTX structure/metadata extraction beyond the first presentation text baseline;
+- richer XLSX/CSV table structure and chunk metadata beyond the first spreadsheet text baseline;
+- richer DOCX structure/metadata extraction beyond the first `libzip` text baseline;
+- page-aware PDF chunking and PDF metadata extraction beyond the first `pdftotext` text baseline;
 - production vector store;
 - multi-user workspaces;
 - authentication/RBAC for standalone mode;

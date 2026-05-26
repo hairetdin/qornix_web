@@ -100,6 +100,9 @@ macro(add_rag_test test_name source_file)
         ${QORNIX_WEB_CORE_LIB}
         ${QORNIX_RAG_CORE_LINK_TARGET}
     )
+    if(TARGET Boost::json)
+        target_link_libraries(${test_name} PRIVATE Boost::json)
+    endif()
 
     if(CURL_FOUND)
         target_link_libraries(${test_name} PRIVATE ${CURL_LIBRARIES})

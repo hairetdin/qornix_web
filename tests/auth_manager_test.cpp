@@ -47,8 +47,9 @@ int main() {
     auto secondLogin = auth.authenticate("admin", "correct-horse-password");
     assert(secondLogin.status == qornix_auth::AuthStatus::SUCCESS);
     assert(secondLogin.sessionId != login.sessionId);
+    assert(!auth.authenticateSession(login.sessionId).has_value());
 
-    auto context = auth.authenticateSession(login.sessionId);
+    auto context = auth.authenticateSession(secondLogin.sessionId);
     assert(context.has_value());
     assert(context->authenticated);
     assert(context->hasRole("admin"));
@@ -61,7 +62,7 @@ int main() {
     sessionUser->permissions = {"rag:read"};
     assert(auth.store()->updateUser(*sessionUser));
 
-    auto refreshedContext = auth.authenticateSession(login.sessionId);
+    auto refreshedContext = auth.authenticateSession(secondLogin.sessionId);
     assert(refreshedContext.has_value());
     assert(!refreshedContext->hasRole("admin"));
     assert(!refreshedContext->hasPermission("rag:admin"));
@@ -69,7 +70,7 @@ int main() {
 
     sessionUser->isActive = false;
     assert(auth.store()->updateUser(*sessionUser));
-    auto disabledContext = auth.authenticateSession(login.sessionId);
+    auto disabledContext = auth.authenticateSession(secondLogin.sessionId);
     assert(!disabledContext.has_value());
 
     sessionUser->isActive = true;
@@ -87,6 +88,25 @@ int main() {
     assert(oldPasswordLogin.status == qornix_auth::AuthStatus::INVALID_CREDENTIALS);
     auto newPasswordLogin = auth.authenticate("admin", "new-correct-horse-password");
     assert(newPasswordLogin.status == qornix_auth::AuthStatus::SUCCESS);
+
+    const std::string invite = auth.createInviteToken(
+        "invited",
+        "invited@example.com",
+        {"user"},
+        {"rag:read"});
+    assert(invite.rfind("invite_", 0) == 0);
+    auto accepted = auth.acceptInviteToken(invite, "invited-strong-password");
+    assert(accepted.status == qornix_auth::AuthStatus::SUCCESS);
+    assert(auth.acceptInviteToken(invite, "another-strong-password").status != qornix_auth::AuthStatus::SUCCESS);
+
+    const std::string reset = auth.createPasswordResetToken("invited");
+    assert(reset.rfind("reset_", 0) == 0);
+    assert(auth.resetPasswordWithToken(reset, "invited-new-strong-password"));
+    assert(!auth.resetPasswordWithToken(reset, "invited-newer-strong-password"));
+    assert(auth.authenticate("invited", "invited-new-strong-password").status == qornix_auth::AuthStatus::SUCCESS);
+
+    auto auditEvents = auth.auditEvents();
+    assert(!auditEvents.empty());
 
     qornix_auth::AuthConfig bothConfig = config;
     bothConfig.mode = qornix_auth::AuthMode::BOTH;

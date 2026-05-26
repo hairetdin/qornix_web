@@ -12,6 +12,14 @@
     {
       "path": "knowledge_base/qa_workflow.md",
       "content": "# QA workflow\nQA wiki pairs are local knowledge entries. They should appear in Ask context with Q citations when the question matches the stored pair."
+    },
+    {
+      "path": "doc/citations.md",
+      "content": "# Citations\nGenerated answers should use bracketed source ids from retrieved context. Citation post-processing reports answer citations, missing citations, and context citations that were not cited."
+    },
+    {
+      "path": "doc/conversation_rules.md",
+      "content": "# Conversation history\nConversation history may resolve follow-up wording, but it is not a factual source. Answers must cite retrieved sources rather than previous chat turns."
     }
   ],
   "qa_pairs": [
@@ -46,6 +54,24 @@
       "top_k": 3,
       "expected_source_type": "qa",
       "expected_citation_prefix": "Q"
+    },
+    {
+      "id": "citation_post_processing_context",
+      "type": "ask",
+      "question": "What citation ids should generated answers use?",
+      "top_k": 3,
+      "expected_context_source": "doc/citations.md",
+      "expected_citation_prefix": "S",
+      "expected_grounding_status": "grounded"
+    },
+    {
+      "id": "conversation_history_rules",
+      "type": "ask",
+      "question": "Can conversation history be used as a factual source?",
+      "top_k": 3,
+      "expected_context_source": "doc/conversation_rules.md",
+      "expected_citation_prefix": "S",
+      "expected_grounding_status": "grounded"
     },
     {
       "id": "unknown_topic_refusal",

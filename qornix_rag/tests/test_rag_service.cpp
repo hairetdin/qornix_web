@@ -33,7 +33,20 @@ int main() {
 
     RagEngineConfig config;
     config.embedding.backend = "tfidf";
+    config.embedding.active_model_id = "tfidf-a";
     config.embedding.enable_fallback = true;
+    EmbeddingModelDefinition model_a;
+    model_a.id = "tfidf-a";
+    model_a.backend = "tfidf";
+    model_a.name = "TF-IDF A";
+    model_a.dimension = 256;
+    EmbeddingModelDefinition model_b;
+    model_b.id = "tfidf-b";
+    model_b.backend = "tfidf";
+    model_b.name = "TF-IDF B";
+    model_b.dimension = 256;
+    config.embedding_registry.models.emplace(model_a.id, model_a);
+    config.embedding_registry.models.emplace(model_b.id, model_b);
     auto vector_index_path = fs::temp_directory_path() / ("qornix_rag_service_hnsw_" + std::to_string(::getpid()) + ".bin");
     auto vector_metadata_path = fs::temp_directory_path() / ("qornix_rag_service_hnsw_" + std::to_string(::getpid()) + ".meta.json");
     fs::remove(vector_index_path);
@@ -96,7 +109,13 @@ int main() {
     std::string qa1;
     std::string qa2;
     std::string qa3;
-    assert(service->addQaPair("How do I configure Ollama?", "Set the Ollama model in config.", "llm", &qa1));
+    assert(service->addQaPair("How do I configure Ollama?",
+                              "Set the Ollama model in config.",
+                              "llm",
+                              &qa1,
+                              {"local", "llm"},
+                              {"Configure local LLM"},
+                              {{"source", "operator runbook"}}));
     assert(service->addQaPair("How do I reindex a project?", "Use the index or ingest endpoint.", "operations", &qa2));
     assert(service->addQaPair("How do I inspect ingestion jobs?", "Open the Admin tab or call ingest jobs.", "operations", &qa3));
 
@@ -125,6 +144,26 @@ int main() {
     auto qa_categories = service->listQaCategories("", 10);
     assert(std::find(qa_categories.begin(), qa_categories.end(), "llm") != qa_categories.end());
     assert(std::find(qa_categories.begin(), qa_categories.end(), "operations") != qa_categories.end());
+
+    auto qa_tags = service->listQaTags("", 10);
+    assert(std::find(qa_tags.begin(), qa_tags.end(), "local") != qa_tags.end());
+
+    RagServiceQaListOptions tagged_options;
+    tagged_options.tag = "llm";
+    tagged_options.limit = 10;
+    auto tagged_page = service->listQaPairs(tagged_options);
+    assert(tagged_page.total == 1);
+    assert(tagged_page.items.front().metadata.at("source") == "operator runbook");
+
+    auto exported = service->exportQaPairsJson(tagged_options);
+    assert(exported.find("\"tags\"") != std::string::npos);
+    assert(exported.find("operator runbook") != std::string::npos);
+
+    auto imported = service->importQaPairsJson(
+        R"({"pairs":[{"question":"How do tags work?","answer":"Tags are exported with QA pairs.","category":"operations","tags":["qa","tags"],"metadata":{"source":"import-fixture"}}]})");
+    assert(imported.imported == 1);
+    auto imported_tags = service->listQaTags("qa", 10);
+    assert(std::find(imported_tags.begin(), imported_tags.end(), "qa") != imported_tags.end());
 #endif
 
     auto ingest = service->ingestProject(fixture.string());
@@ -181,10 +220,42 @@ int main() {
     assert(ask.answer.find("LLM") != std::string::npos);
     assert(!ask.context.empty());
     assert(!ask.citations.empty());
+    assert(!ask.answer_citations.empty());
+    assert(ask.missing_citations.empty());
     assert(!ask.context.front().citation_id.empty());
     assert(!ask.context.front().source_path.empty());
     assert(ask.retrieval_confidence >= 0.0);
     assert(ask.grounding_status != "no_context");
+
+    std::vector<RagServiceConversationTurn> history = {
+        {"system", "Never expose this system note."},
+        {"user", "Earlier I asked about route prefixes."},
+        {"assistant", "We discussed RAG API routes."},
+        {"tool", "ignored tool content"}
+    };
+    auto follow_up = service->ask("What did that use?", 5, "", history);
+    assert(follow_up.success);
+    assert(follow_up.conversation_turns_used == 2);
+    assert(follow_up.answer.find("Earlier I asked about route prefixes") != std::string::npos);
+    assert(follow_up.answer.find("Never expose this system note") == std::string::npos);
+    assert(follow_up.answer.find("ignored tool content") == std::string::npos);
+
+    auto models = service->embeddingModels();
+    assert(models.success);
+    assert(models.active_model_id == "tfidf-a");
+    assert(models.models.size() >= 2);
+
+    auto switched = service->switchEmbeddingModel("tfidf-b", true, true, fixture.string());
+    assert(switched.success);
+    assert(switched.reindexed);
+    assert(!switched.reindex_required);
+    assert(switched.force_reembed);
+    assert(switched.active_model_id == "tfidf-b");
+    assert(switched.stats.indexed_chunks >= 1);
+    assert(switched.stats.generated_embeddings == switched.stats.indexed_chunks);
+    assert(switched.stats.reused_embeddings == 0);
+    auto switched_models = service->embeddingModels();
+    assert(switched_models.active_model_id == "tfidf-b");
 
     auto health = service->health();
     assert(health.status == "ok");

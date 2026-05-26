@@ -9,6 +9,40 @@
 #include <set>
 #include <boost/json.hpp>
 
+namespace {
+
+std::vector<std::string> jsonStringArray(const std::string& json) {
+    std::vector<std::string> values;
+    if (json.empty()) {
+        return values;
+    }
+    try {
+        auto parsed = boost::json::parse(json);
+        if (!parsed.is_array()) {
+            return values;
+        }
+        for (const auto& value : parsed.as_array()) {
+            if (value.is_string()) {
+                values.emplace_back(value.as_string().c_str());
+            }
+        }
+    } catch (...) {
+    }
+    return values;
+}
+
+std::string stringArrayJson(const std::vector<std::string>& values) {
+    boost::json::array array;
+    for (const auto& value : values) {
+        if (!value.empty()) {
+            array.emplace_back(value);
+        }
+    }
+    return boost::json::serialize(array);
+}
+
+} // namespace
+
 // Simple join implementation (replacement for boost::algorithm::join)
 template<typename T>
 std::string join_strings(const std::vector<T>& items, const std::string& delimiter) {
@@ -387,7 +421,8 @@ bool SQLiteSource::addQAPair(const std::string& id, const std::string& question,
 
 bool SQLiteSource::updateQAPair(const std::string& id, const std::string& answer,
                                  const std::string& category, const std::string& aliases,
-                                 const std::string& question) {
+                                 const std::string& question,
+                                 const std::string& metadata) {
     std::lock_guard<std::mutex> lock(mutex_);
 
 #if !QORNIX_HAS_SQLITE
@@ -443,6 +478,10 @@ bool SQLiteSource::updateQAPair(const std::string& id, const std::string& answer
     if (!aliases.empty()) {
         set_clauses.push_back("aliases = ?");
         bind_values.push_back(aliases);
+    }
+    if (!metadata.empty()) {
+        set_clauses.push_back("metadata = ?");
+        bind_values.push_back(metadata);
     }
 
     if (!question.empty() || !answer.empty()) {
@@ -682,7 +721,10 @@ SQLiteSource::QAListResult SQLiteSource::listQAPairs(const QAListOptions& option
             sql += " AND category = ?";
         }
         if (!opts.query.empty()) {
-            sql += " AND (id LIKE ? OR question LIKE ? OR answer LIKE ? OR category LIKE ?)";
+            sql += " AND (id LIKE ? OR question LIKE ? OR answer LIKE ? OR category LIKE ? OR metadata LIKE ?)";
+        }
+        if (!opts.tag.empty()) {
+            sql += " AND metadata LIKE ?";
         }
     };
 
@@ -702,9 +744,13 @@ SQLiteSource::QAListResult SQLiteSource::listQAPairs(const QAListOptions& option
     }
     const std::string like_query = "%" + options.query + "%";
     if (!options.query.empty()) {
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             sqlite3_bind_text(count_stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
         }
+    }
+    const std::string like_tag = "%" + options.tag + "%";
+    if (!options.tag.empty()) {
+        sqlite3_bind_text(count_stmt, bind_index++, like_tag.c_str(), -1, SQLITE_TRANSIENT);
     }
 
     if (sqlite3_step(count_stmt) == SQLITE_ROW) {
@@ -729,9 +775,12 @@ SQLiteSource::QAListResult SQLiteSource::listQAPairs(const QAListOptions& option
         sqlite3_bind_text(stmt, bind_index++, options.category.c_str(), -1, SQLITE_TRANSIENT);
     }
     if (!options.query.empty()) {
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
         }
+    }
+    if (!options.tag.empty()) {
+        sqlite3_bind_text(stmt, bind_index++, like_tag.c_str(), -1, SQLITE_TRANSIENT);
     }
     sqlite3_bind_int64(stmt, bind_index++, static_cast<sqlite3_int64>(result.limit));
     sqlite3_bind_int64(stmt, bind_index++, static_cast<sqlite3_int64>(result.offset));
@@ -1556,21 +1605,33 @@ QASource::QAPair SQLiteSource::rowToQAPair(sqlite3_stmt* stmt) const {
     pair.answer = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
     pair.category = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
 
-    // Parse aliases JSON array
     const char* aliases_json = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
     if (aliases_json) {
-        // Simple JSON array parsing (extract strings between quotes)
-        std::string aliases_str(aliases_json);
-        // TODO: Use proper JSON parser when available
-        // For now, store as empty vector
-        pair.aliases = {};
+        pair.aliases = jsonStringArray(aliases_json);
     }
 
-    // Parse metadata JSON
     const char* metadata_json = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
     if (metadata_json) {
-        std::string metadata_str(metadata_json);
-        // TODO: Use proper JSON parser when available
+        pair.metadata = metadataFromJson(metadata_json);
+        auto tags_it = pair.metadata.find("tags");
+        if (tags_it != pair.metadata.end()) {
+            pair.tags = jsonStringArray(tags_it->second);
+            if (pair.tags.empty() && !tags_it->second.empty()) {
+                std::stringstream ss(tags_it->second);
+                std::string tag;
+                while (std::getline(ss, tag, ',')) {
+                    tag.erase(tag.begin(), std::find_if(tag.begin(), tag.end(), [](unsigned char c) {
+                        return !std::isspace(c);
+                    }));
+                    tag.erase(std::find_if(tag.rbegin(), tag.rend(), [](unsigned char c) {
+                        return !std::isspace(c);
+                    }).base(), tag.end());
+                    if (!tag.empty()) {
+                        pair.tags.push_back(tag);
+                    }
+                }
+            }
+        }
     }
 
     return pair;
@@ -1591,6 +1652,15 @@ Document SQLiteSource::qaPairToDocument(const QASource::QAPair& pair) const {
     // Store metadata
     doc.metadata["qa_id"] = pair.id;
     doc.metadata["category"] = pair.category;
+    if (!pair.aliases.empty()) {
+        doc.metadata["aliases"] = stringArrayJson(pair.aliases);
+    }
+    if (!pair.tags.empty()) {
+        doc.metadata["tags"] = stringArrayJson(pair.tags);
+    }
+    for (const auto& [key, value] : pair.metadata) {
+        doc.metadata[key] = value;
+    }
 
     return doc;
 }

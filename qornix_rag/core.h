@@ -145,9 +145,16 @@ inline void apply_embedding_model_definition(EmbeddingConfig& config,
 }
 
 struct VectorStoreConfig {
-    std::string backend = "local_hnsw"; // local_hnsw
+    std::string backend = "local_hnsw"; // local_hnsw, faiss, qdrant, pgvector
     std::string index_path;
     std::string metadata_path;
+    std::string endpoint;
+    std::string api_key;
+    std::string collection = "qornix_rag_vectors";
+    std::string connection_string;
+    std::string table = "qornix_rag_vectors";
+    std::string distance = "Cosine";
+    bool recreate = false;
     bool auto_load = true;
     bool auto_save = false;
 };
@@ -157,7 +164,7 @@ struct RagEngineConfig {
     EmbeddingConfig embedding;
     EmbeddingModelRegistry embedding_registry;
     VectorStoreConfig vector_store;
-    size_t max_file_size_kb = 512;
+    size_t max_file_size_kb = 4096;
 };
 
 struct Document {
@@ -475,7 +482,7 @@ private:
     EmbeddingConfig embedding_config_;
     EmbeddingModelRegistry embedding_registry_;
     VectorStoreConfig vector_store_config_;
-    size_t max_file_size_bytes_ = 512 * 1024;
+    size_t max_file_size_bytes_ = 4096 * 1024;
     bool is_hybrid_indexed_ = false;
     mutable std::mutex mutex_;
     bool is_indexed_ = false;
@@ -485,6 +492,7 @@ private:
     size_t last_reused_embeddings_ = 0;
     size_t last_generated_embeddings_ = 0;
     size_t last_stale_embeddings_ = 0;
+    bool force_reembed_next_index_ = false;
     qornix::rag::IngestionJobResult last_ingestion_result_;
 
     // ============================================
@@ -753,6 +761,25 @@ public:
         initialize_embedding_backend();
     }
 
+    bool switch_active_embedding_model(const std::string& model_id, bool force_reembed = true) {
+        auto it = embedding_registry_.models.find(model_id);
+        if (it == embedding_registry_.models.end()) {
+            return false;
+        }
+        embedding_config_.active_model_id = model_id;
+        apply_embedding_model_definition(embedding_config_, it->second);
+        initialize_embedding_backend();
+        if (force_reembed) {
+            force_reembed_next_index_ = true;
+        }
+        last_vector_store_status_ = "embedding model switched; reindex required";
+        return true;
+    }
+
+    void force_reembed_on_next_index() {
+        force_reembed_next_index_ = true;
+    }
+
     const EmbeddingModelRegistry& get_embedding_model_registry() const {
         return embedding_registry_;
     }
@@ -787,7 +814,10 @@ public:
     }
 
     std::string get_vector_store_backend() const {
-        return vector_store_ ? vector_store_->backendName() : "none";
+        if (vector_store_) {
+            return vector_store_->backendName();
+        }
+        return search_config_.use_hybrid ? vector_store_config_.backend : "none";
     }
 
     std::string get_vector_store_status() const {
@@ -871,8 +901,11 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         auto index_start = std::chrono::steady_clock::now();
         indexed_project_root_ = project_root;
-        auto reusable_embeddings = collect_reusable_embeddings();
+        auto reusable_embeddings = force_reembed_next_index_
+            ? std::unordered_map<std::string, std::vector<float>>{}
+            : collect_reusable_embeddings();
         reset_incremental_stats(reusable_embeddings.size());
+        force_reembed_next_index_ = false;
 
         documents_.clear();
         path_to_index_.clear();
@@ -973,11 +1006,20 @@ public:
 
 private:
     std::unique_ptr<VectorStore> create_vector_store() const {
-        if (search_config_.use_hybrid &&
-            (vector_store_config_.backend == "local_hnsw" || vector_store_config_.backend == "hnsw")) {
-            return std::make_unique<LocalHnswVectorStore>();
+        if (!search_config_.use_hybrid) {
+            return nullptr;
         }
-        return nullptr;
+        VectorStoreOptions options;
+        options.backend = vector_store_config_.backend;
+        options.index_path = vector_store_config_.index_path;
+        options.endpoint = vector_store_config_.endpoint;
+        options.api_key = vector_store_config_.api_key;
+        options.collection = vector_store_config_.collection;
+        options.connection_string = vector_store_config_.connection_string;
+        options.table = vector_store_config_.table;
+        options.distance = vector_store_config_.distance;
+        options.recreate = vector_store_config_.recreate;
+        return createVectorStore(options);
     }
 
     std::vector<VectorRecord> collect_vector_records() const {
@@ -1498,6 +1540,41 @@ private:
         return tokens;
     }
 
+    std::vector<std::string> wordpiece_tokens_for(const std::string& token) const {
+        if (token.empty()) {
+            return {};
+        }
+        if (tokenizer_vocab_.find(token) != tokenizer_vocab_.end()) {
+            return {token};
+        }
+
+        std::vector<std::string> pieces;
+        size_t start = 0;
+        while (start < token.size()) {
+            size_t end = token.size();
+            std::string best;
+            size_t best_end = start;
+            while (end > start) {
+                std::string candidate = token.substr(start, end - start);
+                if (start > 0) {
+                    candidate = "##" + candidate;
+                }
+                if (tokenizer_vocab_.find(candidate) != tokenizer_vocab_.end()) {
+                    best = candidate;
+                    best_end = end;
+                    break;
+                }
+                --end;
+            }
+            if (best.empty()) {
+                return {token};
+            }
+            pieces.push_back(best);
+            start = best_end;
+        }
+        return pieces;
+    }
+
     std::pair<std::vector<int64_t>, std::vector<int64_t>> encode_for_onnx(const std::string &text) const {
         std::vector<int64_t> input_ids;
         std::vector<int64_t> attention_mask;
@@ -1507,13 +1584,21 @@ private:
         input_ids.push_back(cls_token_id_);
         attention_mask.push_back(1);
 
+        const bool use_wordpiece = embedding_config_.tokenizer_type == "WordPiece" ||
+                                   embedding_config_.tokenizer_type == "BertWordPiece";
         for (const auto &token: basic_tokenize_for_onnx(text)) {
+            const auto pieces = use_wordpiece ? wordpiece_tokens_for(token) : std::vector<std::string>{token};
+            for (const auto& piece : pieces) {
+                if (input_ids.size() + 1 >= embedding_config_.max_seq_len) {
+                    break;
+                }
+                auto it = tokenizer_vocab_.find(piece);
+                input_ids.push_back(it != tokenizer_vocab_.end() ? it->second : unk_token_id_);
+                attention_mask.push_back(1);
+            }
             if (input_ids.size() + 1 >= embedding_config_.max_seq_len) {
                 break;
             }
-            auto it = tokenizer_vocab_.find(token);
-            input_ids.push_back(it != tokenizer_vocab_.end() ? it->second : unk_token_id_);
-            attention_mask.push_back(1);
         }
 
         if (input_ids.size() < embedding_config_.max_seq_len) {
@@ -1800,6 +1885,12 @@ public:
                             last_vector_store_status_ = "built; save failed: " + vector_store_config_.index_path;
                         }
                     }
+                } else if (store) {
+                    last_vector_store_status_ = store->lastError().empty()
+                        ? "build failed"
+                        : "build failed: " + store->lastError();
+                } else {
+                    last_vector_store_status_ = "backend unavailable: " + vector_store_config_.backend;
                 }
             }
 
@@ -2236,8 +2327,11 @@ public:
     void indexSources() {
         std::lock_guard<std::mutex> lock(mutex_);
         auto index_start = std::chrono::steady_clock::now();
-        auto reusable_embeddings = collect_reusable_embeddings();
+        auto reusable_embeddings = force_reembed_next_index_
+            ? std::unordered_map<std::string, std::vector<float>>{}
+            : collect_reusable_embeddings();
         reset_incremental_stats(reusable_embeddings.size());
+        force_reembed_next_index_ = false;
 
         documents_.clear();
         path_to_index_.clear();

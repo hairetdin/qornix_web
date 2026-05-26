@@ -36,6 +36,7 @@ int main() {
     assert(plain_chunks.front().metadata["chunk_strategy"] == "plain_text_token");
     assert(plain_chunks.front().metadata["chunk_index"] == "0");
     assert(plain_chunks.front().relative_path == "plain.txt#chunk-0");
+    assert(plain_chunks.front().metadata["chunk_token_budget"] == "20");
 
     Document markdown;
     markdown.path = "/tmp/guide.md";
@@ -78,6 +79,75 @@ int main() {
         }
     }
     assert(saw_symbol);
+    bool saw_symbol_name = false;
+    for (const auto& chunk : code_chunks) {
+        if (chunk.metadata.find("chunk_symbol_name") != chunk.metadata.end() &&
+            chunk.metadata.at("chunk_symbol_name") == "Worker") {
+            saw_symbol_name = true;
+            assert(chunk.metadata.at("chunk_symbol_kind") == "class");
+        }
+    }
+    assert(saw_symbol_name);
+
+    Document pdf;
+    pdf.path = "/tmp/manual.pdf";
+    pdf.relative_path = "manual.pdf";
+    pdf.type = "pdf";
+    pdf.language = "PDF";
+    pdf.metadata["mime_type"] = "application/pdf";
+    pdf.metadata["pdf_page_count"] = "2";
+    pdf.content = "Page 1:\n" + repeated_words("alpha", 10) + "\f\nPage 2:\n" + repeated_words("beta", 10);
+
+    auto pdf_chunks = chunker.chunkDocument(pdf);
+    assert(pdf_chunks.size() >= 2);
+    bool saw_page_1 = false;
+    bool saw_page_2 = false;
+    for (const auto& chunk : pdf_chunks) {
+        assert(chunk.metadata.at("chunk_strategy") == "pdf_page");
+        if (chunk.metadata.at("chunk_page") == "1") {
+            saw_page_1 = true;
+        }
+        if (chunk.metadata.at("chunk_page") == "2") {
+            saw_page_2 = true;
+        }
+    }
+    assert(saw_page_1);
+    assert(saw_page_2);
+
+    Document table;
+    table.path = "/tmp/table.csv";
+    table.relative_path = "table.csv";
+    table.type = "csv";
+    table.language = "CSV";
+    table.content = "CSV table: table.csv\nColumns: 2\nRow 1: name | value\nRow 2: alpha | 10\nRow 3: beta | 20\n";
+
+    auto table_chunks = chunker.chunkDocument(table);
+    assert(table_chunks.size() == 3);
+    assert(table_chunks.front().metadata.at("chunk_strategy") == "spreadsheet_table");
+    assert(table_chunks.front().metadata.at("chunk_sheet") == "CSV");
+    assert(table_chunks.front().metadata.at("chunk_row_start") == "1");
+
+    Document ocr;
+    ocr.path = "/tmp/sign.pgm";
+    ocr.relative_path = "sign.pgm";
+    ocr.type = "image";
+    ocr.language = "Image";
+    ocr.metadata["ingestion_parser"] = "image_tesseract_ocr";
+    ocr.metadata["ocr_region_0"] = "full_image";
+    ocr.metadata["ocr_caption"] = "Scanned label";
+    ocr.content = repeated_words("ocr", 12);
+
+    auto ocr_chunks = chunker.chunkDocument(ocr);
+    assert(!ocr_chunks.empty());
+    assert(ocr_chunks.front().metadata.at("chunk_strategy") == "image_ocr_region");
+    assert(ocr_chunks.front().metadata.at("chunk_ocr_region") == "full_image");
+    assert(ocr_chunks.front().metadata.at("chunk_ocr_caption") == "Scanned label");
+
+    Document tokenizer_limited = plain;
+    tokenizer_limited.metadata["tokenizer_max_tokens"] = "8";
+    auto limited_chunks = chunker.chunkDocument(tokenizer_limited);
+    assert(limited_chunks.size() > plain_chunks.size());
+    assert(limited_chunks.front().metadata.at("chunk_token_budget") == "8");
 
     std::cout << "DocumentChunker tests passed\n";
     return 0;
