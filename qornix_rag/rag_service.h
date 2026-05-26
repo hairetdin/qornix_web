@@ -45,6 +45,8 @@ struct RagServiceSearchItem {
     std::string source_type = "project";
     std::string category;
     std::string pair_id;
+    std::vector<std::string> tags;
+    std::string attribution;
 };
 
 struct RagServiceSearchResponse {
@@ -67,6 +69,13 @@ struct RagServiceAskContextItem {
     std::string source_type = "project";
     std::string category;
     std::string pair_id;
+    std::vector<std::string> tags;
+    std::string attribution;
+};
+
+struct RagServiceConversationTurn {
+    std::string role;
+    std::string content;
 };
 
 struct RagServiceAskResponse {
@@ -79,9 +88,17 @@ struct RagServiceAskResponse {
     std::vector<RagServiceAskContextItem> context;
     std::vector<std::string> sources;
     std::vector<std::string> citations;
+    std::vector<std::string> answer_citations;
+    std::vector<std::string> missing_citations;
+    std::vector<std::string> uncited_context_citations;
+    bool citations_post_processed = false;
     double retrieval_confidence = 0.0;
     std::string grounding_status = "no_context";
+    size_t conversation_turns_used = 0;
     std::string llm_status = "not_configured";
+    std::string llm_parser_error;
+    std::string llm_finish_reason;
+    bool llm_truncated = false;
     long long response_time_ms = 0;
 };
 
@@ -118,6 +135,7 @@ struct RagServiceIngestResponse {
 struct RagServiceQaListOptions {
     std::string query;
     std::string category;
+    std::string tag;
     std::string source_id;
     size_t limit = 25;
     size_t offset = 0;
@@ -137,6 +155,15 @@ struct RagServiceQaSuggestion {
     std::string id;
     std::string question;
     std::string category;
+};
+
+struct RagServiceQaImportResponse {
+    bool success = false;
+    size_t imported = 0;
+    size_t duplicates = 0;
+    size_t errors = 0;
+    std::vector<std::string> imported_ids;
+    std::vector<std::string> error_messages;
 };
 
 struct RagServiceHealth {
@@ -167,6 +194,43 @@ struct RagServiceHealth {
     int llm_response_time_ms = -1;
 };
 
+struct RagServiceEmbeddingModelItem {
+    std::string id;
+    std::string backend;
+    std::string name;
+    std::string version;
+    std::string model_path;
+    std::string tokenizer_path;
+    std::string tokenizer_type;
+    std::string pooling;
+    size_t dimension = 0;
+    size_t max_seq_len = 0;
+    bool active = false;
+    bool ready = false;
+    std::string status;
+};
+
+struct RagServiceEmbeddingModelsResponse {
+    bool success = true;
+    std::string active_model_id;
+    std::string effective_model_id;
+    std::string backend;
+    std::vector<RagServiceEmbeddingModelItem> models;
+    std::vector<std::string> warnings;
+};
+
+struct RagServiceEmbeddingSwitchResponse {
+    bool success = false;
+    std::string message;
+    std::string previous_model_id;
+    std::string active_model_id;
+    std::string effective_model_id;
+    bool reindex_required = true;
+    bool reindexed = false;
+    bool force_reembed = false;
+    ProjectStats stats;
+};
+
 class RagService {
 public:
     RagService(std::shared_ptr<RagEngine> engine,
@@ -188,8 +252,17 @@ public:
                                  const std::string& source_id = "");
     RagServiceSearchResponse search(const std::string& query, size_t top_k = 10);
     RagServiceAskResponse ask(const std::string& question, size_t top_k = 5, const std::string& client_ip = "");
+    RagServiceAskResponse ask(const std::string& question,
+                              size_t top_k,
+                              const std::string& client_ip,
+                              const std::vector<RagServiceConversationTurn>& history);
     RagServiceHealth health() const;
     std::vector<RagServiceSourceInfo> sources() const;
+    RagServiceEmbeddingModelsResponse embeddingModels() const;
+    RagServiceEmbeddingSwitchResponse switchEmbeddingModel(const std::string& model_id,
+                                                           bool reindex = false,
+                                                           bool force_reembed = true,
+                                                           const std::optional<std::string>& project_path = std::nullopt);
 
     std::vector<qornix::rag::QASource::QAPair> listQaPairs(size_t page = 1,
                                                            size_t per_page = 20,
@@ -201,15 +274,27 @@ public:
     std::vector<std::string> listQaCategories(const std::string& query = "",
                                               size_t limit = 50,
                                               const std::string& source_id = "") const;
+    std::vector<std::string> listQaTags(const std::string& query = "",
+                                        size_t limit = 50,
+                                        const std::string& source_id = "") const;
     bool addQaPair(const std::string& question,
                    const std::string& answer,
                    const std::string& category = "general",
-                   std::string* pair_id = nullptr);
+                   std::string* pair_id = nullptr,
+                   const std::vector<std::string>& tags = {},
+                   const std::vector<std::string>& aliases = {},
+                   const std::map<std::string, std::string>& metadata = {});
     bool updateQaPair(const std::string& pair_id,
                       const std::string& question,
                       const std::string& answer,
-                      const std::string& category);
+                      const std::string& category,
+                      const std::vector<std::string>& tags = {},
+                      const std::vector<std::string>& aliases = {},
+                      const std::map<std::string, std::string>& metadata = {});
     bool deleteQaPair(const std::string& pair_id);
+    std::string exportQaPairsJson(const RagServiceQaListOptions& options = {}) const;
+    RagServiceQaImportResponse importQaPairsJson(const std::string& json,
+                                                 const std::string& default_category = "general");
 
 private:
     std::shared_ptr<RagEngine> rag_engine_;

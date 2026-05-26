@@ -47,6 +47,37 @@ int main() {
     assert(loaded_hits.front().label == 20);
 
     fs::remove(path);
+
+    VectorStoreOptions faiss_options;
+    faiss_options.backend = "faiss";
+    auto faiss = createVectorStore(faiss_options);
+    assert(faiss);
+    assert(faiss->backendName() == "faiss");
+
+    VectorStoreOptions qdrant_options;
+    qdrant_options.backend = "qdrant";
+    qdrant_options.endpoint = "http://127.0.0.1:6333";
+    qdrant_options.collection = "qornix_test_vectors";
+    auto qdrant = createVectorStore(qdrant_options);
+    assert(qdrant);
+    assert(qdrant->backendName() == "qdrant");
+    assert(!qdrant->load("", 0));
+    assert(!qdrant->lastError().empty());
+
+    VectorStoreOptions pg_options;
+    pg_options.backend = "pgvector";
+    pg_options.connection_string = "postgresql://127.0.0.1/qornix";
+    pg_options.table = "qornix_test_vectors";
+    auto pg = createVectorStore(pg_options);
+    assert(pg);
+    assert(pg->backendName() == "pgvector");
+    assert(!pg->load("", 0));
+    assert(!pg->lastError().empty());
+
+    VectorStoreOptions unknown_options;
+    unknown_options.backend = "unknown";
+    assert(!createVectorStore(unknown_options));
+
     std::cout << "Vector store tests passed\n";
     return 0;
 }

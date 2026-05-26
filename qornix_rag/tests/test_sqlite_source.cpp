@@ -332,7 +332,12 @@ TEST(sqlite_source_server_side_qa_list_and_suggest) {
     source->initialize();
 
     source->addQAPair("qa_001", "How to configure Ollama?", "Set llm.provider to ollama.", "llm");
-    source->addQAPair("qa_002", "How to rebuild the vector index?", "Run ingestion or indexing again.", "operations");
+    source->addQAPair("qa_002",
+                      "How to rebuild the vector index?",
+                      "Run ingestion or indexing again.",
+                      "operations",
+                      "[\"reindex\"]",
+                      "{\"tags\":\"[\\\"vectors\\\",\\\"ops\\\"]\",\"source\":\"runbook\"}");
     source->addQAPair("qa_003", "How to change the RAG port?", "Pass --port to the launcher.", "operations");
     source->addQAPair("qa_004", "Where are QA pairs stored?", "SQLite stores QA pairs locally.", "storage");
 
@@ -352,6 +357,17 @@ TEST(sqlite_source_server_side_qa_list_and_suggest) {
     ASSERT_EQ(2, page2.total, "Filtered total stable on page 2");
     ASSERT_EQ(1, page2.items.size(), "Second page has one row");
     ASSERT_TRUE(page2.items[0].id != page1.items[0].id, "Second page returns a different row");
+
+    SQLiteSource::QAListOptions tag_options;
+    tag_options.tag = "vectors";
+    tag_options.limit = 10;
+    auto tag_page = source->listQAPairs(tag_options);
+    ASSERT_EQ(1, tag_page.total, "Tag filter finds vector QA row");
+    ASSERT_EQ(1, tag_page.items.size(), "Tag page returns vector QA row");
+    ASSERT_STR_EQ("qa_002", tag_page.items[0].id, "Tag filter id matches");
+    ASSERT_EQ(2, tag_page.items[0].tags.size(), "Tags parsed from metadata");
+    ASSERT_EQ(1, tag_page.items[0].aliases.size(), "Aliases parsed from JSON");
+    ASSERT_STR_EQ("runbook", tag_page.items[0].metadata["source"], "Metadata parsed from JSON");
 
     auto suggestions = source->suggestQAPairs("vector", 5);
     ASSERT_EQ(1, suggestions.size(), "Suggestion finds vector question");

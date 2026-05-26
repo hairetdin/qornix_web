@@ -335,6 +335,24 @@ TEST(qa_source_to_document) {
     ASSERT_TRUE(docs[0].content.find("RAG is Retrieval-Augmented Generation.") != std::string::npos, "Document contains answer");
 }
 
+TEST(qa_source_json_import_export) {
+    QASource::Config config;
+    config.name = "Test QA KB";
+    auto source = std::make_shared<QASource>(config);
+
+    const std::string input = R"({"pairs":[{"id":"qa_001","question":"How to tag QA?","answer":"Use tags.","category":"docs","aliases":["tag question"],"tags":["qa","docs"],"metadata":{"source":"unit"}}]})";
+    ASSERT_TRUE(source->loadFromJson(input), "QA JSON import succeeds");
+    auto found = source->findQAPair("How to tag QA?");
+    ASSERT_TRUE(found.has_value(), "Imported QA pair found");
+    ASSERT_EQ(2, static_cast<int>(found->tags.size()), "Imported tags parsed");
+    ASSERT_EQ(1, static_cast<int>(found->aliases.size()), "Imported aliases parsed");
+    ASSERT_EQ("unit", found->metadata["source"], "Imported metadata parsed");
+
+    auto exported = source->toJson();
+    ASSERT_TRUE(exported.find("\"tags\"") != std::string::npos, "Export contains tags field");
+    ASSERT_TRUE(exported.find("tag question") != std::string::npos, "Export contains aliases");
+}
+
 // ============================================
 // DataSource Type Tests
 // ============================================
@@ -455,6 +473,7 @@ int main() {
     RUN_TEST(qa_source_get_all_pairs);
     RUN_TEST(qa_source_update_pair);
     RUN_TEST(qa_source_to_document);
+    RUN_TEST(qa_source_json_import_export);
 
     // DataSource type tests
     RUN_TEST(data_source_type_to_string);

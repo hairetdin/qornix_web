@@ -15,6 +15,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -27,6 +29,8 @@ private:
     std::shared_ptr<qornix_auth::AuthManager> authManager_;
     bool registrationEnabled_{false};
     bool secureCookies_{false};
+    std::string sameSite_{"Lax"};
+    std::string cookiePath_{"/"};
 
     static std::string stringField(const boost::json::object& object, const char* key) {
         auto it = object.find(key);
@@ -87,6 +91,19 @@ private:
         user["roles"] = toJsonArray(result.roles);
         user["permissions"] = toJsonArray(result.permissions);
         return user;
+    }
+
+    static boost::json::object auditObject(const qornix_auth::AuthAuditEvent& event) {
+        boost::json::object out;
+        out["type"] = event.type;
+        out["user_id"] = event.userId;
+        out["username"] = event.username;
+        out["outcome"] = event.outcome;
+        out["detail"] = event.detail;
+        out["at_ms"] = static_cast<std::int64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                event.at.time_since_epoch()).count());
+        return out;
     }
 
     static boost::json::object userObject(const qornix_auth::User& user) {
@@ -169,6 +186,17 @@ private:
         return sessionId.empty() ? "" : authManager_->csrfTokenForSession(sessionId);
     }
 
+    std::string sessionCookie(const std::string& sessionId, bool clear = false) const {
+        std::string cookie = "session_id=" + sessionId + "; HttpOnly; SameSite=" + sameSite_ + "; Path=" + cookiePath_;
+        if (secureCookies_) {
+            cookie += "; Secure";
+        }
+        if (clear) {
+            cookie += "; Max-Age=0";
+        }
+        return cookie;
+    }
+
     void writeAuthSuccess(Response& res, const qornix_auth::AuthResult& result) const {
         boost::json::object body;
         body["success"] = true;
@@ -182,11 +210,7 @@ private:
 
         res = make_json_response(http::status::ok, res.version(), boost::json::serialize(body));
         if (!result.sessionId.empty()) {
-            std::string cookie = "session_id=" + result.sessionId + "; HttpOnly; SameSite=Lax; Path=/";
-            if (secureCookies_) {
-                cookie += "; Secure";
-            }
-            res.set(http::field::set_cookie, cookie);
+            res.set(http::field::set_cookie, sessionCookie(result.sessionId));
         }
     }
 
@@ -353,6 +377,7 @@ private:
             buildErrorResponse(res, http::status::bad_request, "User update failed");
             return;
         }
+        authManager_->invalidateSessionsForUser(user->id);
 
         boost::json::object body;
         body["success"] = true;
@@ -400,7 +425,128 @@ private:
         boost::json::object body;
         body["success"] = true;
         res = make_json_response(http::status::ok, res.version(), boost::json::serialize(body));
-        res.set(http::field::set_cookie, "session_id=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+        res.set(http::field::set_cookie, sessionCookie("", true));
+    }
+
+    void handleAdminCreateInvite(const Request& req, Response& res) {
+        boost::json::value parsed;
+        try {
+            parsed = boost::json::parse(req.body());
+        } catch (const std::exception&) {
+            buildErrorResponse(res, http::status::bad_request, "Invalid JSON body");
+            return;
+        }
+        if (!parsed.is_object()) {
+            buildErrorResponse(res, http::status::bad_request, "JSON object body required");
+            return;
+        }
+        const auto& object = parsed.as_object();
+        const std::string username = stringField(object, "username");
+        if (username.empty()) {
+            buildErrorResponse(res, http::status::bad_request, "username is required");
+            return;
+        }
+        std::chrono::minutes ttl(1440);
+        auto ttlIt = object.find("ttl_minutes");
+        if (ttlIt != object.end() && ttlIt->value().is_int64()) {
+            ttl = std::chrono::minutes(std::max<std::int64_t>(1, ttlIt->value().as_int64()));
+        }
+        const std::string token = authManager_->createInviteToken(
+            username,
+            stringField(object, "email"),
+            stringArrayField(object, "roles"),
+            stringArrayField(object, "permissions"),
+            ttl);
+        boost::json::object body;
+        body["success"] = true;
+        body["invite_token"] = token;
+        body["delivery"] = "manual";
+        res = make_json_response(http::status::created, res.version(), boost::json::serialize(body));
+    }
+
+    void handleAcceptInvite(const Request& req, Response& res) {
+        boost::json::value parsed;
+        try {
+            parsed = boost::json::parse(req.body());
+        } catch (const std::exception&) {
+            buildErrorResponse(res, http::status::bad_request, "Invalid JSON body");
+            return;
+        }
+        if (!parsed.is_object()) {
+            buildErrorResponse(res, http::status::bad_request, "JSON object body required");
+            return;
+        }
+        const auto& object = parsed.as_object();
+        auto result = authManager_->acceptInviteToken(
+            stringField(object, "token"),
+            stringField(object, "password"),
+            stringField(object, "username"),
+            stringField(object, "email"));
+        if (result.status != qornix_auth::AuthStatus::SUCCESS) {
+            buildErrorResponse(res, http::status::bad_request, result.message);
+            return;
+        }
+        boost::json::object body;
+        body["success"] = true;
+        body["user"] = userObject(result);
+        res = make_json_response(http::status::created, res.version(), boost::json::serialize(body));
+    }
+
+    void handlePasswordResetRequest(const Request& req, Response& res) {
+        boost::json::value parsed;
+        try {
+            parsed = boost::json::parse(req.body());
+        } catch (const std::exception&) {
+            buildErrorResponse(res, http::status::bad_request, "Invalid JSON body");
+            return;
+        }
+        if (!parsed.is_object()) {
+            buildErrorResponse(res, http::status::bad_request, "JSON object body required");
+            return;
+        }
+        const auto& object = parsed.as_object();
+        const std::string token = authManager_->createPasswordResetToken(stringField(object, "username"));
+        boost::json::object body;
+        body["success"] = true;
+        body["delivery"] = "manual";
+        if (!token.empty()) {
+            body["reset_token"] = token;
+        }
+        res = make_json_response(http::status::ok, res.version(), boost::json::serialize(body));
+    }
+
+    void handlePasswordResetConfirm(const Request& req, Response& res) {
+        boost::json::value parsed;
+        try {
+            parsed = boost::json::parse(req.body());
+        } catch (const std::exception&) {
+            buildErrorResponse(res, http::status::bad_request, "Invalid JSON body");
+            return;
+        }
+        if (!parsed.is_object()) {
+            buildErrorResponse(res, http::status::bad_request, "JSON object body required");
+            return;
+        }
+        const auto& object = parsed.as_object();
+        if (!authManager_->resetPasswordWithToken(stringField(object, "token"), stringField(object, "password"))) {
+            buildErrorResponse(res, http::status::bad_request, "Invalid token or password");
+            return;
+        }
+        boost::json::object body;
+        body["success"] = true;
+        res = make_json_response(http::status::ok, res.version(), boost::json::serialize(body));
+    }
+
+    void handleAdminAuditEvents(const Request& req, Response& res) {
+        boost::json::array events;
+        for (const auto& event : authManager_->auditEvents()) {
+            events.emplace_back(auditObject(event));
+        }
+        boost::json::object body;
+        body["success"] = true;
+        body["events"] = events;
+        body["count"] = static_cast<int>(events.size());
+        res = make_json_response(http::status::ok, req.version(), boost::json::serialize(body));
     }
 
 protected:
@@ -411,6 +557,10 @@ protected:
         }
         if (url.path() == "/auth/users") {
             handleAdminListUsers(req, res);
+            return;
+        }
+        if (url.path() == "/auth/audit") {
+            handleAdminAuditEvents(req, res);
             return;
         }
         buildErrorResponse(res, http::status::not_found, "Auth route not found");
@@ -427,6 +577,22 @@ protected:
         }
         if (url.path() == "/auth/register") {
             handleRegister(req, res);
+            return;
+        }
+        if (url.path() == "/auth/invites") {
+            handleAdminCreateInvite(req, res);
+            return;
+        }
+        if (url.path() == "/auth/invites/accept") {
+            handleAcceptInvite(req, res);
+            return;
+        }
+        if (url.path() == "/auth/password-reset/request") {
+            handlePasswordResetRequest(req, res);
+            return;
+        }
+        if (url.path() == "/auth/password-reset/confirm") {
+            handlePasswordResetConfirm(req, res);
             return;
         }
         if (url.path() == "/auth/users") {
@@ -451,28 +617,51 @@ protected:
 public:
     explicit AuthApiHandler(std::shared_ptr<qornix_auth::AuthManager> authManager,
                             bool registrationEnabled = false,
-                            bool secureCookies = false)
+                            bool secureCookies = false,
+                            std::string sameSite = "Lax",
+                            std::string cookiePath = "/")
         : authManager_(std::move(authManager)),
           registrationEnabled_(registrationEnabled),
-          secureCookies_(secureCookies) {}
+          secureCookies_(secureCookies),
+          sameSite_(std::move(sameSite)),
+          cookiePath_(std::move(cookiePath)) {}
 };
 
 inline std::shared_ptr<AuthApiHandler> makeAuthApiHandler(
     std::shared_ptr<qornix_auth::AuthManager> authManager,
     bool registrationEnabled = false,
-    bool secureCookies = false) {
-    return std::make_shared<AuthApiHandler>(std::move(authManager), registrationEnabled, secureCookies);
+    bool secureCookies = false,
+    std::string sameSite = "Lax",
+    std::string cookiePath = "/") {
+    return std::make_shared<AuthApiHandler>(
+        std::move(authManager),
+        registrationEnabled,
+        secureCookies,
+        std::move(sameSite),
+        std::move(cookiePath));
 }
 
 inline void setupAuthRoutes(HttpServer& server,
                             std::shared_ptr<qornix_auth::AuthManager> authManager,
                             bool registrationEnabled = false,
-                            bool secureCookies = false) {
-    auto handler = makeAuthApiHandler(std::move(authManager), registrationEnabled, secureCookies);
+                            bool secureCookies = false,
+                            std::string sameSite = "Lax",
+                            std::string cookiePath = "/") {
+    auto handler = makeAuthApiHandler(
+        std::move(authManager),
+        registrationEnabled,
+        secureCookies,
+        std::move(sameSite),
+        std::move(cookiePath));
     server.add_route("/auth/login", handler);
     server.add_route("/auth/logout", handler);
     server.add_route("/auth/me", handler);
     server.add_route("/auth/register", handler);
     server.add_route("/auth/users", handler);
     server.add_route("/auth/users/{id}", handler);
+    server.add_route("/auth/invites", handler);
+    server.add_route("/auth/invites/accept", handler);
+    server.add_route("/auth/password-reset/request", handler);
+    server.add_route("/auth/password-reset/confirm", handler);
+    server.add_route("/auth/audit", handler);
 }

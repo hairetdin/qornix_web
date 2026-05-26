@@ -50,6 +50,14 @@ struct LLMTokenStats {
     float estimated_cost_usd = 0.0f;
 };
 
+struct LLMGenerationResult {
+    std::string answer;
+    std::string status = "ok";
+    std::string parser_error;
+    std::string finish_reason;
+    bool truncated = false;
+};
+
 struct LLMConfig {
     bool enabled = false;
     std::string api_url = "http://localhost:11434";
@@ -147,10 +155,13 @@ public:
 
     // Response parsing
     std::string parse_response(const std::string& json_response) const;
+    LLMGenerationResult parse_response_result(const std::string& json_response) const;
 
     // Main ask method
     std::string ask(const std::string& question,
                    const std::string& context = "") const;
+    LLMGenerationResult ask_with_metadata(const std::string& question,
+                                          const std::string& context = "") const;
 
     // Health check
     bool is_available() const;
@@ -199,6 +210,9 @@ public:
     std::string ask(const std::string& question,
                    const std::string& context = "",
                    const std::string& client_ip = "") const;
+    LLMGenerationResult ask_with_metadata(const std::string& question,
+                                          const std::string& context,
+                                          const std::string& client_ip) const;
 
 private:
     // Phase 3: Cache and rate limiter

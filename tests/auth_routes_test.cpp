@@ -48,7 +48,7 @@ int main() {
     config.minPasswordLength = 12;
     auto manager = std::make_shared<qornix_auth::AuthManager>(config);
 
-    auto handler = makeAuthApiHandler(manager, true);
+    auto handler = makeAuthApiHandler(manager, true, true, "Strict", "/");
 
     auto registerRes = call(*handler,
                             http::verb::post,
@@ -73,6 +73,8 @@ int main() {
     const std::string cookie(login[http::field::set_cookie]);
     assert(cookie.find("session_id=sess_") != std::string::npos);
     assert(cookie.find("HttpOnly") != std::string::npos);
+    assert(cookie.find("SameSite=Strict") != std::string::npos);
+    assert(cookie.find("Secure") != std::string::npos);
 
     auto me = call(*handler, http::verb::get, "/auth/me", {}, cookie);
     assert(me.result() == http::status::ok);
@@ -96,6 +98,40 @@ int main() {
     auto adminUser = manager->authenticate("admin", "correct-horse-password");
     assert(adminUser.status == qornix_auth::AuthStatus::SUCCESS);
     const std::string adminCookie = "session_id=" + adminUser.sessionId;
+
+    auto invite = call(*handler,
+                       http::verb::post,
+                       "/auth/invites",
+                       R"({"username":"invited","email":"invited@example.com","roles":["user"],"permissions":["rag:read"],"ttl_minutes":60})",
+                       adminCookie);
+    assert(invite.result() == http::status::created);
+    const std::string inviteToken = jsonStringField(invite.body(), "invite_token");
+    assert(inviteToken.rfind("invite_", 0) == 0);
+
+    auto acceptInvite = call(*handler,
+                             http::verb::post,
+                             "/auth/invites/accept",
+                             "{\"token\":\"" + inviteToken + "\",\"password\":\"correct-invited-password\"}");
+    assert(acceptInvite.result() == http::status::created);
+    assert(manager->getUserByUsername("invited") != nullptr);
+
+    auto resetRequest = call(*handler,
+                             http::verb::post,
+                             "/auth/password-reset/request",
+                             R"({"username":"invited"})");
+    assert(resetRequest.result() == http::status::ok);
+    const std::string resetToken = jsonStringField(resetRequest.body(), "reset_token");
+    assert(resetToken.rfind("reset_", 0) == 0);
+    auto resetConfirm = call(*handler,
+                             http::verb::post,
+                             "/auth/password-reset/confirm",
+                             "{\"token\":\"" + resetToken + "\",\"password\":\"correct-invited-new-password\"}");
+    assert(resetConfirm.result() == http::status::ok);
+    assert(manager->authenticate("invited", "correct-invited-new-password").status == qornix_auth::AuthStatus::SUCCESS);
+
+    auto audit = call(*handler, http::verb::get, "/auth/audit", {}, adminCookie);
+    assert(audit.result() == http::status::ok);
+    assert(audit.body().find("\"type\":\"login\"") != std::string::npos);
 
     auto createUser = call(*handler,
                            http::verb::post,

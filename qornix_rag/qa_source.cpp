@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <numeric>
 #include <sstream>
+#include <boost/json.hpp>
 
 namespace qornix {
 namespace rag {
@@ -121,6 +122,14 @@ Document QASource::qaPairToDocument(const QAPair& pair) const {
             }
         );
     }
+    if (!pair.tags.empty()) {
+        doc.metadata["tags"] = std::accumulate(
+            pair.tags.begin(), pair.tags.end(), std::string(""),
+            [](const std::string& a, const std::string& b) {
+                return a.empty() ? b : a + ", " + b;
+            }
+        );
+    }
 
     for (const auto& [key, value] : pair.metadata) {
         doc.metadata[key] = value;
@@ -162,7 +171,7 @@ void QASource::addDocument(const Document& doc) {
     size_t answer_pos = doc.content.find("\n\nОтвет: ");
 
     if (question_pos != std::string::npos && answer_pos != std::string::npos) {
-        std::string question = doc.content.substr(question_pos + 4, answer_pos - question_pos - 4);
+        std::string question = doc.content.substr(question_pos + 8, answer_pos - question_pos - 8);
         std::string answer = doc.content.substr(answer_pos + 6);
 
         // Check if this QA pair already exists
@@ -193,21 +202,94 @@ size_t QASource::count() const {
 }
 
 bool QASource::loadFromJson(const std::string& json_str) {
-    // Simple JSON parsing for QA pairs
-    // In production, use nlohmann/json or similar
     std::lock_guard<std::mutex> lock(mutex_);
+    try {
+        auto parsed = boost::json::parse(json_str);
+        const boost::json::array* array = nullptr;
+        if (parsed.is_array()) {
+            array = &parsed.as_array();
+        } else if (parsed.is_object() && parsed.as_object().contains("pairs") && parsed.as_object().at("pairs").is_array()) {
+            array = &parsed.as_object().at("pairs").as_array();
+        }
+        if (!array) {
+            return false;
+        }
 
-    // Placeholder for JSON parsing implementation
-    // This would parse a JSON array of QA pair objects
-    std::cout << "QASource: loadFromJson called (placeholder implementation)" << std::endl;
-    return true;
+        for (const auto& value : *array) {
+            if (!value.is_object()) {
+                continue;
+            }
+            const auto& object = value.as_object();
+            if (!object.contains("id") || !object.contains("question") || !object.contains("answer")) {
+                continue;
+            }
+
+            QAPair pair;
+            pair.id = object.at("id").as_string().c_str();
+            pair.question = object.at("question").as_string().c_str();
+            pair.answer = object.at("answer").as_string().c_str();
+            if (object.contains("category") && object.at("category").is_string()) {
+                pair.category = object.at("category").as_string().c_str();
+            }
+            auto loadStrings = [](const boost::json::object& obj, const char* key) {
+                std::vector<std::string> values;
+                if (!obj.contains(key) || !obj.at(key).is_array()) {
+                    return values;
+                }
+                for (const auto& item : obj.at(key).as_array()) {
+                    if (item.is_string()) {
+                        values.emplace_back(item.as_string().c_str());
+                    }
+                }
+                return values;
+            };
+            pair.aliases = loadStrings(object, "aliases");
+            pair.tags = loadStrings(object, "tags");
+            if (object.contains("metadata") && object.at("metadata").is_object()) {
+                for (const auto& entry : object.at("metadata").as_object()) {
+                    if (entry.value().is_string()) {
+                        pair.metadata[std::string(entry.key())] = entry.value().as_string().c_str();
+                    }
+                }
+            }
+            qa_pairs_[pair.id] = std::move(pair);
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 std::string QASource::toJson() const {
-    // Placeholder for JSON serialization implementation
-    // This would serialize all QA pairs to a JSON array
-    std::cout << "QASource: toJson called (placeholder implementation)" << std::endl;
-    return "[]";
+    std::lock_guard<std::mutex> lock(mutex_);
+    boost::json::array array;
+    for (const auto& [id, pair] : qa_pairs_) {
+        boost::json::object object;
+        object["id"] = pair.id;
+        object["question"] = pair.question;
+        object["answer"] = pair.answer;
+        object["category"] = pair.category.empty() ? "general" : pair.category;
+        boost::json::array aliases;
+        for (const auto& alias : pair.aliases) {
+            aliases.emplace_back(alias);
+        }
+        object["aliases"] = aliases;
+        boost::json::array tags;
+        for (const auto& tag : pair.tags) {
+            tags.emplace_back(tag);
+        }
+        object["tags"] = tags;
+        boost::json::object metadata;
+        for (const auto& [key, value] : pair.metadata) {
+            metadata[key] = value;
+        }
+        object["metadata"] = metadata;
+        array.emplace_back(std::move(object));
+    }
+    boost::json::object root;
+    root["pairs"] = array;
+    root["count"] = static_cast<std::int64_t>(array.size());
+    return boost::json::serialize(root);
 }
 
 } // namespace rag

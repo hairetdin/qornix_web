@@ -17,9 +17,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <openssl/rand.h>
+#include <optional>
 #include <sstream>
 #include <iomanip>
 #include <string>
@@ -47,6 +49,31 @@ struct AuthConfig {
     std::vector<std::string> defaultPermissions{};
 };
 
+struct AuthAuditEvent {
+    std::chrono::system_clock::time_point at = std::chrono::system_clock::now();
+    std::string type;
+    std::string userId;
+    std::string username;
+    std::string outcome;
+    std::string detail;
+};
+
+struct AuthOneTimeToken {
+    std::string token;
+    std::string type;
+    std::string userId;
+    std::string username;
+    std::string email;
+    std::vector<std::string> roles;
+    std::vector<std::string> permissions;
+    std::chrono::system_clock::time_point expiresAt;
+    bool used = false;
+
+    bool isExpired() const {
+        return std::chrono::system_clock::now() > expiresAt;
+    }
+};
+
 class AuthManager : public AuthInterface {
 private:
     std::shared_ptr<AuthStore> store_;
@@ -54,6 +81,10 @@ private:
     std::unique_ptr<SessionManager> sessionManager_;
     std::unique_ptr<JwtManager> jwtManager_;
     AuthConfig config_;
+    mutable std::mutex auditMutex_;
+    std::vector<AuthAuditEvent> auditEvents_;
+    mutable std::mutex tokenMutex_;
+    std::map<std::string, AuthOneTimeToken> oneTimeTokens_;
 
     mutable std::mutex lookupCacheMutex_;
     mutable std::optional<User> lookupCache_;
@@ -74,6 +105,34 @@ private:
             return "usr_fallback_" + std::to_string(++fallbackCounter);
         }
         return "usr_" + bytesToHex(random, sizeof(random));
+    }
+
+    static std::string generateSecureToken(const std::string& prefix) {
+        unsigned char random[32];
+        if (RAND_bytes(random, sizeof(random)) != 1) {
+            static std::atomic<int> fallbackCounter{0};
+            return prefix + "fallback_" + std::to_string(++fallbackCounter);
+        }
+        return prefix + bytesToHex(random, sizeof(random));
+    }
+
+    void audit(std::string type,
+               std::string userId,
+               std::string username,
+               std::string outcome,
+               std::string detail = "") {
+        std::lock_guard lock(auditMutex_);
+        auditEvents_.push_back(AuthAuditEvent{
+            std::chrono::system_clock::now(),
+            std::move(type),
+            std::move(userId),
+            std::move(username),
+            std::move(outcome),
+            std::move(detail)
+        });
+        if (auditEvents_.size() > 1000) {
+            auditEvents_.erase(auditEvents_.begin(), auditEvents_.begin() + static_cast<std::ptrdiff_t>(auditEvents_.size() - 1000));
+        }
     }
 
     bool validatePassword(const std::string& password) const {
@@ -141,10 +200,12 @@ public:
         }
 
         if (store_->findUserByUsername(username).has_value()) {
+            audit("register", "", username, "failure", "duplicate");
             return AuthResult::failure(AuthStatus::USER_ALREADY_EXISTS, "User already exists");
         }
 
         if (!validatePassword(password)) {
+            audit("register", "", username, "failure", "weak_password");
             return AuthResult::failure(AuthStatus::ERROR, "Password does not meet requirements");
         }
 
@@ -159,8 +220,10 @@ public:
         user.permissions = std::move(permissions);
 
         if (!store_->createUser(user)) {
+            audit("register", userId, username, "failure", "store_create_failed");
             return AuthResult::failure(AuthStatus::USER_ALREADY_EXISTS, "User already exists");
         }
+        audit("register", userId, username, "success");
 
         AuthResult result = AuthResult::success(userId);
         result.username = user.username;
@@ -176,26 +239,35 @@ public:
             if (config_.enableUserEnumerationProtection) {
                 (void)hasher_->hash(password, "dummy-salt");
             }
+            audit("login", "", username, "failure", "not_found");
             return AuthResult::failure(AuthStatus::USER_NOT_FOUND, "Invalid credentials");
         }
 
         if (!user->isActive) {
+            audit("login", user->id, user->username, "failure", "inactive");
             return AuthResult::failure(AuthStatus::INVALID_CREDENTIALS, "Invalid credentials");
         }
 
         if (!hasher_->verify(password, user->password, user->salt)) {
+            audit("login", user->id, user->username, "failure", "invalid_password");
             return AuthResult::failure(AuthStatus::INVALID_CREDENTIALS, "Invalid credentials");
         }
 
         user->lastLoginAt = std::chrono::system_clock::now();
         store_->updateUser(*user);
 
-        return buildSuccessResult(*user);
+        auto result = buildSuccessResult(*user);
+        if (!result.sessionId.empty()) {
+            sessionManager_->invalidateSessionsForUser(user->id, result.sessionId);
+        }
+        audit("login", user->id, user->username, "success");
+        return result;
     }
 
     AuthResult logout(const std::string& sessionIdOrUserId) override {
         sessionManager_->invalidateSession(sessionIdOrUserId);
         sessionManager_->cleanupExpiredSessions();
+        audit("logout", sessionIdOrUserId, "", "success");
         return AuthResult::success("");
     }
 
@@ -225,6 +297,7 @@ public:
         auto user = activeUserById(session->userId);
         if (!user.has_value()) {
             sessionManager_->invalidateSession(sessionId);
+            audit("session_denied", session->userId, session->username, "failure", "inactive_or_missing_user");
             return std::nullopt;
         }
 
@@ -324,7 +397,126 @@ public:
 
         user->salt = hasher_->generateSalt();
         user->password = hasher_->hash(newPassword, user->salt);
-        return store_->updateUser(*user);
+        const bool updated = store_->updateUser(*user);
+        if (updated) {
+            sessionManager_->invalidateSessionsForUser(userId);
+            audit("password_change", userId, user->username, "success");
+        }
+        return updated;
+    }
+
+    size_t invalidateSessionsForUser(const std::string& userId,
+                                     const std::string& exceptSessionId = "") {
+        const auto removed = sessionManager_->invalidateSessionsForUser(userId, exceptSessionId);
+        if (removed > 0) {
+            audit("session_invalidate_user", userId, "", "success", std::to_string(removed));
+        }
+        return removed;
+    }
+
+    void recordAuditEvent(const std::string& type,
+                          const std::string& userId,
+                          const std::string& username,
+                          const std::string& outcome,
+                          const std::string& detail = "") {
+        audit(type, userId, username, outcome, detail);
+    }
+
+    std::string createInviteToken(const std::string& username,
+                                  const std::string& email,
+                                  std::vector<std::string> roles,
+                                  std::vector<std::string> permissions,
+                                  std::chrono::minutes ttl = std::chrono::minutes(1440)) {
+        AuthOneTimeToken record;
+        record.token = generateSecureToken("invite_");
+        record.type = "invite";
+        record.username = username;
+        record.email = email;
+        record.roles = std::move(roles);
+        record.permissions = std::move(permissions);
+        record.expiresAt = std::chrono::system_clock::now() + ttl;
+        std::lock_guard lock(tokenMutex_);
+        oneTimeTokens_[record.token] = record;
+        audit("invite_create", "", username, "success");
+        return record.token;
+    }
+
+    AuthResult acceptInviteToken(const std::string& token,
+                                 const std::string& password,
+                                 const std::string& usernameOverride = "",
+                                 const std::string& emailOverride = "") {
+        AuthOneTimeToken record;
+        {
+            std::lock_guard lock(tokenMutex_);
+            auto it = oneTimeTokens_.find(token);
+            if (it == oneTimeTokens_.end() || it->second.type != "invite" || it->second.used || it->second.isExpired()) {
+                audit("invite_accept", "", "", "failure", "invalid_or_expired");
+                return AuthResult::failure(AuthStatus::INVALID_CREDENTIALS, "Invalid or expired invite token");
+            }
+            it->second.used = true;
+            record = it->second;
+        }
+
+        auto result = registerUser(
+            usernameOverride.empty() ? record.username : usernameOverride,
+            password,
+            emailOverride.empty() ? record.email : emailOverride,
+            record.roles,
+            record.permissions);
+        audit("invite_accept", result.userId, result.username, result.status == AuthStatus::SUCCESS ? "success" : "failure");
+        return result;
+    }
+
+    std::string createPasswordResetToken(const std::string& username,
+                                         std::chrono::minutes ttl = std::chrono::minutes(60)) {
+        auto user = store_->findUserByUsername(username);
+        if (!user.has_value() || !user->isActive) {
+            audit("password_reset_create", "", username, "failure", "missing_or_inactive");
+            return "";
+        }
+        AuthOneTimeToken record;
+        record.token = generateSecureToken("reset_");
+        record.type = "password_reset";
+        record.userId = user->id;
+        record.username = user->username;
+        record.email = user->email;
+        record.expiresAt = std::chrono::system_clock::now() + ttl;
+        std::lock_guard lock(tokenMutex_);
+        oneTimeTokens_[record.token] = record;
+        audit("password_reset_create", user->id, user->username, "success");
+        return record.token;
+    }
+
+    bool resetPasswordWithToken(const std::string& token, const std::string& newPassword) {
+        AuthOneTimeToken record;
+        {
+            std::lock_guard lock(tokenMutex_);
+            auto it = oneTimeTokens_.find(token);
+            if (it == oneTimeTokens_.end() || it->second.type != "password_reset" || it->second.used || it->second.isExpired()) {
+                audit("password_reset_confirm", "", "", "failure", "invalid_or_expired");
+                return false;
+            }
+            it->second.used = true;
+            record = it->second;
+        }
+        auto user = store_->findUserById(record.userId);
+        if (!user.has_value() || !validatePassword(newPassword)) {
+            audit("password_reset_confirm", record.userId, record.username, "failure", "invalid_user_or_password");
+            return false;
+        }
+        user->salt = hasher_->generateSalt();
+        user->password = hasher_->hash(newPassword, user->salt);
+        const bool updated = store_->updateUser(*user);
+        if (updated) {
+            sessionManager_->invalidateSessionsForUser(user->id);
+            audit("password_reset_confirm", user->id, user->username, "success");
+        }
+        return updated;
+    }
+
+    std::vector<AuthAuditEvent> auditEvents() const {
+        std::lock_guard lock(auditMutex_);
+        return auditEvents_;
     }
 
     void setConfig(const AuthConfig& config) {

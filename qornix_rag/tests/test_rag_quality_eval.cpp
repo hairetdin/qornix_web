@@ -115,6 +115,8 @@ void assert_ask_case(RagService& service, const boost::json::object& test_case) 
     assert(response.context.front().source_path == expected_source);
     assert(response.context.front().citation_id.rfind(citation_prefix, 0) == 0);
     assert(response.grounding_status == expected_grounding);
+    assert(!response.answer_citations.empty());
+    assert(response.missing_citations.empty());
     assert(response.llm_status == "unavailable");
     assert(contains_text(response.answer, "LLM"));
 }
@@ -130,6 +132,8 @@ void assert_qa_case(RagService& service, const boost::json::object& test_case) {
     assert(response.context.front().source_type == expected_source_type);
     assert(response.context.front().citation_id.rfind(citation_prefix, 0) == 0);
     assert(!response.context.front().pair_id.empty());
+    assert(!response.answer_citations.empty());
+    assert(response.missing_citations.empty());
     assert(response.grounding_status == "grounded");
 }
 
@@ -142,6 +146,7 @@ void assert_refusal_case(RagService& service, const boost::json::object& test_ca
     assert(response.success);
     assert(response.context.empty());
     assert(response.citations.empty());
+    assert(response.answer_citations.empty());
     assert(response.grounding_status == expected_grounding);
     assert(response.llm_status == expected_llm_status);
     assert(contains_text(response.answer, "LLM"));

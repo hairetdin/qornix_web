@@ -43,15 +43,17 @@ public:
         std::string answer;                  // Answer text
         std::string category = "general";    // Optional category/tag
         std::vector<std::string> aliases;    // Alternative ways to ask
+        std::vector<std::string> tags;       // Additional tags for filtering/attribution
         std::map<std::string, std::string> metadata; // Extra metadata (author, date, version, etc.)
 
         QAPair() = default;
         QAPair(std::string id_, std::string question_, std::string answer_,
                std::string category_ = "general",
-               std::vector<std::string> aliases_ = {})
+               std::vector<std::string> aliases_ = {},
+               std::vector<std::string> tags_ = {})
             : id(std::move(id_)), question(std::move(question_)),
               answer(std::move(answer_)), category(std::move(category_)),
-              aliases(std::move(aliases_)) {}
+              aliases(std::move(aliases_)), tags(std::move(tags_)) {}
     };
 
     struct Config {

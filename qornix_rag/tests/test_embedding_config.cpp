@@ -29,6 +29,13 @@ int main() {
         flat["vector_store.backend"] = "local_hnsw";
         flat["vector_store.index_path"] = "data/test_hnsw.bin";
         flat["vector_store.metadata_path"] = "data/test_hnsw.meta.json";
+        flat["vector_store.endpoint"] = "http://127.0.0.1:6333";
+        flat["vector_store.api_key"] = "test-key";
+        flat["vector_store.collection"] = "test_collection";
+        flat["vector_store.connection_string"] = "postgresql://localhost/test";
+        flat["vector_store.table"] = "test_vectors";
+        flat["vector_store.distance"] = "Cosine";
+        flat["vector_store.recreate"] = "true";
         flat["vector_store.auto_load"] = "true";
         flat["vector_store.auto_save"] = "true";
         flat["search.use_query_expansion"] = "true";
@@ -58,6 +65,13 @@ int main() {
         assert(config.engine.vector_store.backend == "local_hnsw");
         assert(config.engine.vector_store.index_path == "data/test_hnsw.bin");
         assert(config.engine.vector_store.metadata_path == "data/test_hnsw.meta.json");
+        assert(config.engine.vector_store.endpoint == "http://127.0.0.1:6333");
+        assert(config.engine.vector_store.api_key == "test-key");
+        assert(config.engine.vector_store.collection == "test_collection");
+        assert(config.engine.vector_store.connection_string == "postgresql://localhost/test");
+        assert(config.engine.vector_store.table == "test_vectors");
+        assert(config.engine.vector_store.distance == "Cosine");
+        assert(config.engine.vector_store.recreate);
         assert(config.engine.vector_store.auto_load);
         assert(config.engine.vector_store.auto_save);
         assert(config.engine.search.use_query_expansion);
@@ -168,6 +182,32 @@ int main() {
         assert(info.registry_model_ids.size() == 1);
         assert(info.registry_model_ids.front() == "tfidf-local");
         assert(info.name == "Local TF-IDF registry");
+    }
+
+    {
+        RagEngineConfig config;
+        config.embedding.active_model_id = "tfidf-a";
+        EmbeddingModelDefinition model_a;
+        model_a.id = "tfidf-a";
+        model_a.backend = "tfidf";
+        model_a.name = "Local TF-IDF A";
+        model_a.dimension = 256;
+        EmbeddingModelDefinition model_b;
+        model_b.id = "tfidf-b";
+        model_b.backend = "tfidf";
+        model_b.name = "Local TF-IDF B";
+        model_b.dimension = 256;
+        config.embedding_registry.models.emplace(model_a.id, model_a);
+        config.embedding_registry.models.emplace(model_b.id, model_b);
+
+        RagEngine engine(config);
+        assert(engine.get_embedding_model_info().active_model_id == "tfidf-a");
+        assert(engine.switch_active_embedding_model("tfidf-b"));
+        auto info = engine.get_embedding_model_info();
+        assert(info.backend == "tfidf");
+        assert(info.active_model_id == "tfidf-b");
+        assert(info.name == "Local TF-IDF B");
+        assert(!engine.switch_active_embedding_model("missing-model"));
     }
 
     std::cout << "Embedding config tests passed\n";

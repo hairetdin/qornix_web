@@ -114,6 +114,66 @@ auth:
 
 The login and current-user endpoints return `csrf_token`; the bundled Admin UI sends it as `X-CSRF-Token` for `POST`, `PUT`, `PATCH`, and `DELETE` requests. Bearer/JWT requests are not blocked by this browser-session CSRF check.
 
+Generated apps also expose first-baseline account hardening endpoints:
+
+```http
+POST /auth/invites
+POST /auth/invites/accept
+POST /auth/password-reset/request
+POST /auth/password-reset/confirm
+GET  /auth/audit
+```
+
+Invite and password-reset delivery is manual in this baseline: the API returns
+the one-time token to an admin/operator instead of sending email. Integrate an
+SMTP or notification provider before enabling self-service recovery for public
+users. Password reset and privilege-sensitive user updates invalidate active
+sessions for the affected user.
+
+For production behind HTTPS, prefer:
+
+```yaml
+auth:
+  secure_cookies: true
+  cookie_same_site: Strict
+```
+
+Keep `SameSite=Lax` only when cross-site login redirects require it.
+
+## TLS And Reverse Proxy
+
+Terminate TLS in a reverse proxy such as Nginx, Caddy, Traefik, or your platform
+load balancer. Forward only the generated app port from an internal network and
+set:
+
+```yaml
+server:
+  address: 0.0.0.0
+auth:
+  enabled: true
+  secure_cookies: true
+```
+
+Minimal Nginx shape:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name rag.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/rag.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/rag.example.com/privkey.pem;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+    location / {
+        proxy_pass http://127.0.0.1:8008;
+    }
+}
+```
+
 ## Logging
 
 Generated apps use the host application's logging config:
@@ -144,6 +204,16 @@ Before starting a generated app with Compose, create local runtime folders:
 ```bash
 mkdir -p data knowledge_base logs
 docker compose up --build
+```
+
+The runtime image runs as a non-root user and the Compose template drops Linux
+capabilities, enables `no-new-privileges`, mounts writable runtime directories
+explicitly, and keeps the container filesystem read-only outside those mounts.
+
+Run the generated smoke check after deploy:
+
+```bash
+./deploy_smoke.sh http://127.0.0.1:8008
 ```
 
 ## Backup And Restore

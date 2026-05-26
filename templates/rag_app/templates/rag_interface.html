@@ -165,6 +165,7 @@
         .qa-question-cell { font-weight: 750; color: var(--ink); min-width: 220px; }
         .qa-answer-cell { color: #334155; min-width: 260px; line-height: 1.45; }
         .qa-category-cell { white-space: nowrap; }
+        .tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
         .qa-actions-cell { white-space: nowrap; min-width: 150px; }
         .qa-actions-cell .btn { padding: 7px 9px; border-radius: 9px; font-size: 12px; margin-right: 6px; margin-bottom: 6px; }
         .qa-pagination {
@@ -251,6 +252,13 @@
         .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin-top: 12px; }
         .stat { background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
         .stat strong { display: block; font-size: 24px; color: var(--accent); margin-bottom: 4px; }
+        .model-grid { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 10px; align-items: end; margin-top: 10px; }
+        .check-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--muted); font-size: 14px; }
+        .check-row input { width: auto; }
+        .progress-track { height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+        .progress-fill { height: 100%; background: var(--accent); width: 0%; }
+        .file-row { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 10px; align-items: end; margin-top: 10px; }
+        .file-row input[type="file"] { padding: 10px; }
         .admin-grid { grid-template-columns: minmax(360px, .9fr) minmax(560px, 1.2fr); }
         .admin-pre { max-height: 460px; overflow: auto; white-space: pre-wrap; }
         .notice { border-radius: 14px; padding: 12px; background: #f8fafc; border: 1px solid var(--line); color: var(--muted); line-height: 1.5; }
@@ -303,6 +311,7 @@
         @media (max-width: 900px) {
             .grid, .qa-grid { grid-template-columns: 1fr; }
             .qa-list-tools { grid-template-columns: 1fr; }
+            .model-grid, .file-row { grid-template-columns: 1fr; }
             .shell { padding: 14px; }
             .hero { border-radius: 18px; }
             .stats-grid { grid-template-columns: 1fr; }
@@ -318,6 +327,7 @@
                 <span class="pill" id="hero-llm">LLM: checking...</span>
                 <span class="pill" id="hero-index">Index: checking...</span>
                 <span class="pill" id="hero-project">Project: -</span>
+                <span class="pill" id="hero-auth">Auth: checking...</span>
             </div>
         </section>
 
@@ -392,10 +402,25 @@
                     <textarea id="qa-answer" placeholder="Например: По умолчанию 8081, но можно передать --port 8082."></textarea>
                     <label for="qa-category">Category</label>
                     <input id="qa-category" value="general">
+                    <label for="qa-tags">Tags</label>
+                    <input id="qa-tags" list="qa-tag-suggestions" placeholder="docs, operations, local">
+                    <datalist id="qa-tag-suggestions"></datalist>
                     <div style="margin-top: 12px;">
                         <button class="btn" id="qa-add-btn" onclick="addQAPair()">Добавить QA</button>
                         <button class="btn secondary hidden" id="qa-cancel-btn" onclick="cancelQAEdit()">Отменить правку</button>
                         <button class="btn secondary" onclick="loadQAPairs()">Обновить список</button>
+                    </div>
+                    <h3>Import / export</h3>
+                    <div class="file-row">
+                        <div>
+                            <label for="qa-import-file">QA JSON</label>
+                            <input id="qa-import-file" type="file" accept="application/json,.json">
+                        </div>
+                        <button class="btn secondary" onclick="importQAPairs()">Import</button>
+                    </div>
+                    <div class="item-actions">
+                        <button class="btn secondary" onclick="exportQAPairs()">Export current filter</button>
+                        <button class="btn secondary" onclick="checkQADuplicates()">Check duplicates</button>
                     </div>
                     <div id="qa-message" style="margin-top: 12px;"></div>
                 </div>
@@ -412,6 +437,12 @@
                             <label for="qa-category-filter">Category</label>
                             <select id="qa-category-filter">
                                 <option value="">All categories</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="qa-tag-filter">Tag</label>
+                            <select id="qa-tag-filter">
+                                <option value="">All tags</option>
                             </select>
                         </div>
                         <div>
@@ -449,6 +480,17 @@
                     <div style="margin-top: 14px;">
                         <button class="btn" id="reindex-btn" onclick="reindexProject()">Переиндексировать проект</button>
                     </div>
+                    <h3>Embedding models</h3>
+                    <div id="embedding-model-box" class="notice">Loading model registry...</div>
+                    <div class="model-grid">
+                        <div>
+                            <label for="embedding-model-select">Active model</label>
+                            <select id="embedding-model-select"></select>
+                        </div>
+                        <button class="btn secondary" id="embedding-switch-btn" onclick="switchEmbeddingModel()">Switch</button>
+                    </div>
+                    <label class="check-row"><input id="embedding-force-reembed" type="checkbox" checked> Force re-embed unchanged chunks</label>
+                    <label class="check-row"><input id="embedding-reindex" type="checkbox"> Reindex immediately after switch</label>
                 </div>
                 <aside class="card">
                     <h2>Data sources</h2>
@@ -516,6 +558,8 @@
         let editingQaPairId = null;
         let selectedQaPairId = null;
         let lastQAPairs = [];
+        let lastQATags = [];
+        let lastEmbeddingModels = [];
         let qaCurrentPage = 1;
         let qaPageSize = 25;
         let qaTotal = 0;
@@ -565,6 +609,10 @@
                 }, 250);
             });
             document.getElementById('qa-category-filter').addEventListener('change', () => {
+                qaCurrentPage = 1;
+                loadQAPairs();
+            });
+            document.getElementById('qa-tag-filter').addEventListener('change', () => {
                 qaCurrentPage = 1;
                 loadQAPairs();
             });
@@ -618,7 +666,7 @@
         }
 
         async function refreshDashboard() {
-            await Promise.allSettled([loadStats(), loadHealth(), loadSources()]);
+            await Promise.allSettled([loadStats(), loadHealth(), loadSources(), loadEmbeddingModels(), loadQATags()]);
         }
 
         async function loadStats() {
@@ -924,6 +972,80 @@ Available models: ${escapeHtml(modelsText)}</div>
             }
         }
 
+        async function loadEmbeddingModels() {
+            const box = document.getElementById('embedding-model-box');
+            const select = document.getElementById('embedding-model-select');
+            if (!box || !select) return;
+            try {
+                const data = await api('/api/embedding/models');
+                lastEmbeddingModels = Array.isArray(data.models) ? data.models : [];
+                select.innerHTML = lastEmbeddingModels.map((model) =>
+                    `<option value="${escapeAttr(model.id || '')}" ${model.active ? 'selected' : ''}>${escapeHtml(model.id || model.name || 'model')}</option>`
+                ).join('');
+                if (!lastEmbeddingModels.length) {
+                    box.className = 'notice warn';
+                    box.textContent = 'No embedding models are registered.';
+                    return;
+                }
+                const active = lastEmbeddingModels.find((model) => model.active) || lastEmbeddingModels[0];
+                const warnings = Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
+                box.className = `notice ${warnings.length ? 'warn' : 'ok'}`;
+                box.innerHTML = `
+                    <strong>${escapeHtml(data.active_model_id || active.id || 'active model')}</strong><br>
+                    backend: ${escapeHtml(data.backend || active.backend || '-')} |
+                    dimension: ${active.dimension ?? '-'} |
+                    tokenizer: ${escapeHtml(active.tokenizer_type || '-')} |
+                    max seq: ${active.max_seq_len ?? '-'}
+                    ${warnings.length ? `<div class="tag-list">${warnings.map((warning) => `<span class="badge warn">${escapeHtml(warning)}</span>`).join('')}</div>` : ''}`;
+            } catch (error) {
+                lastEmbeddingModels = [];
+                select.innerHTML = '';
+                box.className = 'notice error';
+                box.textContent = error.message;
+            }
+        }
+
+        async function switchEmbeddingModel() {
+            const select = document.getElementById('embedding-model-select');
+            const btn = document.getElementById('embedding-switch-btn');
+            const box = document.getElementById('embedding-model-box');
+            const modelId = select ? select.value : '';
+            if (!modelId) {
+                if (box) {
+                    box.className = 'notice warn';
+                    box.textContent = 'Select an embedding model first.';
+                }
+                return;
+            }
+            btn.disabled = true;
+            btn.textContent = 'Switching...';
+            try {
+                const data = await api('/api/embedding/switch', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        model_id: modelId,
+                        force_reembed: Boolean(document.getElementById('embedding-force-reembed').checked),
+                        reindex: Boolean(document.getElementById('embedding-reindex').checked),
+                        project_path: currentProjectRoot || '.'
+                    })
+                });
+                box.className = `notice ${data.success ? 'ok' : 'warn'}`;
+                box.innerHTML = `
+                    <strong>${escapeHtml(data.active_model_id || modelId)}</strong><br>
+                    ${escapeHtml(data.message || 'Embedding model switched.')}
+                    ${data.reindexed ? `<div class="tag-list"><span class="badge ok">reindexed</span><span class="badge">generated: ${data.stats?.generated_embeddings ?? 0}</span><span class="badge">reused: ${data.stats?.reused_embeddings ?? 0}</span></div>` : ''}`;
+                await Promise.allSettled([loadEmbeddingModels(), loadStats()]);
+            } catch (error) {
+                if (box) {
+                    box.className = 'notice error';
+                    box.textContent = error.message;
+                }
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Switch';
+            }
+        }
+
         async function askQuestion() {
             const question = document.getElementById('ask-input').value.trim();
             const topK = Number(document.getElementById('ask-top-k').value || 5);
@@ -945,7 +1067,11 @@ Available models: ${escapeHtml(modelsText)}</div>
                 renderAnswer(data.answer || 'Пустой ответ.');
                 const statusType = data.llm_status === 'ok' ? 'ok' : 'warn';
                 const confidence = formatScore(data.retrieval_confidence ?? 0);
-                showAskStatus(`LLM: ${data.llm_status || 'unknown'} | ${data.response_time_ms ?? 0} ms | sources: ${(data.context || []).length} | grounding: ${data.grounding_status || 'unknown'} | confidence: ${confidence}`, statusType);
+                const truncation = data.llm_truncated ? ` | finish: ${data.llm_finish_reason || 'truncated'}` : '';
+                const parser = data.llm_parser_error ? ` | parser: ${data.llm_parser_error}` : '';
+                const cited = Array.isArray(data.answer_citations) ? data.answer_citations.length : 0;
+                const missing = Array.isArray(data.missing_citations) ? data.missing_citations.length : 0;
+                showAskStatus(`LLM: ${data.llm_status || 'unknown'}${truncation}${parser} | ${data.response_time_ms ?? 0} ms | sources: ${(data.context || []).length} | citations: ${cited}${missing ? `, missing: ${missing}` : ''} | grounding: ${data.grounding_status || 'unknown'} | confidence: ${confidence}`, statusType);
                 renderAskSources(data.context || [], data.sources || []);
             } catch (error) {
                 renderAnswer(error.message);
@@ -1069,9 +1195,18 @@ Available models: ${escapeHtml(modelsText)}</div>
                         <span class="badge">confidence: ${formatScore(item.confidence)}</span>
                         <span>source: ${escapeHtml(item.source_type || 'project')}</span>
                         ${item.category ? `<span>category: ${escapeHtml(item.category)}</span>` : ''}
+                        ${item.chunk_index != null ? `<span>chunk: ${escapeHtml(item.chunk_index)}</span>` : ''}
+                        ${item.language ? `<span>language: ${escapeHtml(item.language)}</span>` : ''}
                     </div>
+                    ${renderTags(item.tags)}
                     <div class="snippet">${escapeHtml(item.snippet || '')}</div>
                 </div>`).join('');
+        }
+
+        function renderTags(tags) {
+            const values = Array.isArray(tags) ? tags.filter(Boolean) : [];
+            if (!values.length) return '';
+            return `<div class="tag-list">${values.map((tag) => `<span class="badge">${escapeHtml(tag)}</span>`).join('')}</div>`;
         }
 
         function showAskStatus(message, type) {
@@ -1118,6 +1253,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                             <span>language: ${escapeHtml(result.language || '-')}</span>
                             <span>lines: ${result.lines ?? '-'}</span>
                         </div>
+                        ${renderTags(result.tags)}
                         <div class="snippet">${escapeHtml(result.snippet || '')}</div>
                     </div>`).join('');
             } catch (error) {
@@ -1132,6 +1268,7 @@ Available models: ${escapeHtml(modelsText)}</div>
             const question = document.getElementById('qa-question').value.trim();
             const answer = document.getElementById('qa-answer').value.trim();
             const category = document.getElementById('qa-category').value.trim() || 'general';
+            const tags = parseCommaList(document.getElementById('qa-tags').value);
             if (!question || !answer) {
                 document.getElementById('qa-message').innerHTML = renderNotice('Question и Answer обязательны.', 'error');
                 return;
@@ -1142,14 +1279,15 @@ Available models: ${escapeHtml(modelsText)}</div>
             try {
                 const endpoint = editingQaPairId ? '/api/qa/update' : '/api/qa/add';
                 const payload = editingQaPairId
-                    ? { pair_id: editingQaPairId, question, answer, category }
-                    : { question, answer, category };
+                    ? { pair_id: editingQaPairId, question, answer, category, tags }
+                    : { question, answer, category, tags };
                 await api(endpoint, {
                     method: 'POST',
                     body: JSON.stringify(payload)
                 });
                 document.getElementById('qa-question').value = '';
                 document.getElementById('qa-answer').value = '';
+                document.getElementById('qa-tags').value = '';
                 document.getElementById('qa-message').innerHTML = renderNotice(
                     editingQaPairId
                         ? 'QA-пара обновлена. Она сразу будет учитываться в Ask и Search.'
@@ -1175,6 +1313,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 qaPageSize = Number(document.getElementById('qa-page-size').value || qaPageSize || 25);
                 const query = document.getElementById('qa-filter').value.trim();
                 const category = document.getElementById('qa-category-filter').value;
+                const tag = document.getElementById('qa-tag-filter').value;
                 const offset = Math.max(0, (qaCurrentPage - 1) * qaPageSize);
                 const params = new URLSearchParams({
                     limit: String(qaPageSize),
@@ -1182,6 +1321,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 });
                 if (query) params.set('query', query);
                 if (category) params.set('category', category);
+                if (tag) params.set('tag', tag);
                 const data = await api(`/api/qa/list?${params.toString()}`);
                 lastQAPairs = data.items || data.pairs || [];
                 qaTotal = Number(data.total || 0);
@@ -1190,6 +1330,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                     return loadQAPairs();
                 }
                 await populateQACategoryFilter();
+                await populateQATagFilter();
                 renderQATable();
             } catch (error) {
                 summary.textContent = 'Ошибка загрузки QA.';
@@ -1217,6 +1358,35 @@ Available models: ${escapeHtml(modelsText)}</div>
                 if (categories.includes(current)) {
                     select.value = current;
                 }
+            }
+        }
+
+        async function loadQATags() {
+            try {
+                const data = await api('/api/qa/tags?limit=200');
+                lastQATags = Array.isArray(data.tags) ? data.tags : [];
+                await populateQATagFilter();
+                const datalist = document.getElementById('qa-tag-suggestions');
+                if (datalist) {
+                    datalist.innerHTML = lastQATags.map((tag) => `<option value="${escapeAttr(tag)}"></option>`).join('');
+                }
+            } catch (error) {
+                lastQATags = [];
+            }
+        }
+
+        async function populateQATagFilter() {
+            const select = document.getElementById('qa-tag-filter');
+            if (!select) return;
+            const current = select.value;
+            const tags = lastQATags.length
+                ? lastQATags
+                : Array.from(new Set(lastQAPairs.flatMap((pair) => Array.isArray(pair.tags) ? pair.tags : []))).sort((a, b) => a.localeCompare(b));
+            select.innerHTML = '<option value="">All tags</option>' + tags.map((tag) =>
+                `<option value="${escapeAttr(tag)}">${escapeHtml(tag)}</option>`
+            ).join('');
+            if (tags.includes(current)) {
+                select.value = current;
             }
         }
 
@@ -1280,7 +1450,10 @@ Available models: ${escapeHtml(modelsText)}</div>
                                 <td>${startIndex + index + 1}</td>
                                 <td class="qa-question-cell">${escapeHtml(truncateText(pair.question || '', 160))}</td>
                                 <td class="qa-answer-cell">${escapeHtml(truncateText(pair.answer || '', 220))}</td>
-                                <td class="qa-category-cell"><span class="badge">${escapeHtml(pair.category || 'general')}</span></td>
+                                <td class="qa-category-cell">
+                                    <span class="badge">${escapeHtml(pair.category || 'general')}</span>
+                                    ${renderTags(pair.tags)}
+                                </td>
                                 <td class="qa-actions-cell">
                                     <button class="btn secondary" onclick="startQAEdit('${escapeJs(pair.id || '')}')">Править</button>
                                     <button class="btn danger" onclick="deleteQAPair('${escapeJs(pair.id || '')}')">Удалить</button>
@@ -1337,6 +1510,7 @@ Available models: ${escapeHtml(modelsText)}</div>
         function resetQAFilter() {
             document.getElementById('qa-filter').value = '';
             document.getElementById('qa-category-filter').value = '';
+            document.getElementById('qa-tag-filter').value = '';
             qaCurrentPage = 1;
             loadQAPairs();
         }
@@ -1352,6 +1526,7 @@ Available models: ${escapeHtml(modelsText)}</div>
             document.getElementById('qa-question').value = pair.question || '';
             document.getElementById('qa-answer').value = pair.answer || '';
             document.getElementById('qa-category').value = pair.category || 'general';
+            document.getElementById('qa-tags').value = Array.isArray(pair.tags) ? pair.tags.join(', ') : '';
             document.getElementById('qa-message').innerHTML = renderNotice(`Режим правки QA: ${pair.id}`, 'warn');
             updateQAFormMode();
             renderQATable();
@@ -1401,6 +1576,75 @@ ${label}`)) {
                 }
                 document.getElementById('qa-message').innerHTML = renderNotice('QA-пара удалена.', 'ok');
                 await loadQAPairs();
+            } catch (error) {
+                document.getElementById('qa-message').innerHTML = renderNotice(error.message, 'error');
+            }
+        }
+
+        async function importQAPairs() {
+            const file = document.getElementById('qa-import-file').files?.[0];
+            if (!file) {
+                document.getElementById('qa-message').innerHTML = renderNotice('Choose a QA JSON file first.', 'warn');
+                return;
+            }
+            try {
+                const json = await file.text();
+                const data = await api('/api/qa/import', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        json,
+                        default_category: document.getElementById('qa-category').value.trim() || 'general'
+                    })
+                });
+                document.getElementById('qa-message').innerHTML = renderNotice(
+                    `Imported: ${data.imported ?? 0}, duplicates: ${data.duplicates ?? 0}, errors: ${data.errors ?? 0}.`,
+                    data.errors ? 'warn' : 'ok'
+                );
+                await Promise.allSettled([loadQATags(), loadQAPairs()]);
+            } catch (error) {
+                document.getElementById('qa-message').innerHTML = renderNotice(error.message, 'error');
+            }
+        }
+
+        async function exportQAPairs() {
+            try {
+                const payload = {
+                    query: document.getElementById('qa-filter').value.trim(),
+                    category: document.getElementById('qa-category-filter').value,
+                    tag: document.getElementById('qa-tag-filter').value,
+                    limit: 500
+                };
+                const data = await api('/api/qa/export', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'qornix-qa-export.json';
+                link.click();
+                URL.revokeObjectURL(link.href);
+                document.getElementById('qa-message').innerHTML = renderNotice('QA export prepared.', 'ok');
+            } catch (error) {
+                document.getElementById('qa-message').innerHTML = renderNotice(error.message, 'error');
+            }
+        }
+
+        async function checkQADuplicates() {
+            try {
+                const data = await api('/api/qa/dedup', {
+                    method: 'POST',
+                    body: JSON.stringify({ threshold: 0.9 })
+                });
+                const duplicates = Array.isArray(data.duplicates) ? data.duplicates : [];
+                document.getElementById('qa-message').innerHTML = duplicates.length
+                    ? renderNotice(`Potential duplicates found: ${duplicates.length}. Open Admin output for details.`, 'warn')
+                    : renderNotice('No duplicate QA pairs found.', 'ok');
+                document.getElementById('admin-output').innerHTML = `
+                    <div class="item">
+                        <div class="item-title">QA duplicate check</div>
+                        <div class="snippet admin-pre">${escapeHtml(JSON.stringify(data, null, 2))}</div>
+                    </div>`;
             } catch (error) {
                 document.getElementById('qa-message').innerHTML = renderNotice(error.message, 'error');
             }
@@ -1473,6 +1717,12 @@ ${label}`)) {
 
         function renderAuthUserBox() {
             const box = document.getElementById('auth-user-box');
+            const hero = document.getElementById('hero-auth');
+            if (hero) {
+                hero.textContent = currentAuthUser
+                    ? `Auth: ${currentAuthUser.username || currentAuthUser.id || 'signed in'}`
+                    : 'Auth: no session';
+            }
             if (!box) return;
             if (!currentAuthUser) {
                 box.className = 'notice warn';
@@ -1542,6 +1792,10 @@ ${label}`)) {
         }
 
         function commaList(value) {
+            return parseCommaList(value);
+        }
+
+        function parseCommaList(value) {
             return String(value || '')
                 .split(',')
                 .map((item) => item.trim())
@@ -1661,6 +1915,7 @@ ${label}`)) {
                                 <span>documents: ${job.documents_imported ?? 0}</span>
                                 <span>errors: ${job.errors ?? 0}</span>
                             </div>
+                            <div class="progress-track"><div class="progress-fill" style="width: ${Math.max(0, Math.min(100, Number(job.progress_percent || 0)))}%;"></div></div>
                             <div class="snippet">${escapeHtml(job.root_path || '')}</div>
                         </div>`).join('')
                     : renderNotice('No ingestion jobs found.');

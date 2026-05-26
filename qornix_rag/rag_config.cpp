@@ -289,6 +289,13 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.engine.vector_store.backend = getString(values, {"vector_store.backend", "rag.vector_store.backend"}, config.engine.vector_store.backend);
     config.engine.vector_store.index_path = getString(values, {"vector_store.index_path", "rag.vector_store.index_path"}, config.engine.vector_store.index_path);
     config.engine.vector_store.metadata_path = getString(values, {"vector_store.metadata_path", "rag.vector_store.metadata_path"}, config.engine.vector_store.metadata_path);
+    config.engine.vector_store.endpoint = getString(values, {"vector_store.endpoint", "rag.vector_store.endpoint"}, config.engine.vector_store.endpoint);
+    config.engine.vector_store.api_key = getString(values, {"vector_store.api_key", "rag.vector_store.api_key"}, config.engine.vector_store.api_key);
+    config.engine.vector_store.collection = getString(values, {"vector_store.collection", "rag.vector_store.collection"}, config.engine.vector_store.collection);
+    config.engine.vector_store.connection_string = getString(values, {"vector_store.connection_string", "rag.vector_store.connection_string"}, config.engine.vector_store.connection_string);
+    config.engine.vector_store.table = getString(values, {"vector_store.table", "rag.vector_store.table"}, config.engine.vector_store.table);
+    config.engine.vector_store.distance = getString(values, {"vector_store.distance", "rag.vector_store.distance"}, config.engine.vector_store.distance);
+    config.engine.vector_store.recreate = getBool(values, {"vector_store.recreate", "rag.vector_store.recreate"}, config.engine.vector_store.recreate);
     config.engine.vector_store.auto_load = getBool(values, {"vector_store.auto_load", "rag.vector_store.auto_load"}, config.engine.vector_store.auto_load);
     config.engine.vector_store.auto_save = getBool(values, {"vector_store.auto_save", "rag.vector_store.auto_save"}, config.engine.vector_store.auto_save);
 

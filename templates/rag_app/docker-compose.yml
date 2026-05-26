@@ -5,6 +5,13 @@ services:
       dockerfile: runtime-Dockerfile
     ports:
       - "8008:8008"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
     volumes:
       - ./knowledge_base:/app/knowledge_base
       - ./data:/app/data

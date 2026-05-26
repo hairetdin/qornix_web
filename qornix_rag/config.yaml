@@ -25,9 +25,18 @@ search:
   rerank_exact_content_boost: 0.05
 
 vector_store:
+  # Backends: local_hnsw (default), faiss, qdrant, pgvector.
+  # Faiss is enabled only when Faiss headers/library are available at build time.
+  # Qdrant requires endpoint + collection; pgvector requires connection_string + table.
   backend: local_hnsw
   index_path: "qornix_rag/data/hnsw_index.bin"
   metadata_path: "qornix_rag/data/hnsw_index.meta.json"
+  collection: qornix_rag_vectors
+  # endpoint: "http://127.0.0.1:6333"
+  # api_key: ""
+  # connection_string: "host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret"
+  # table: qornix_rag_vectors
+  # distance: Cosine
   auto_load: true
   auto_save: true
 
@@ -46,7 +55,7 @@ indexing:
   # web UI first and trigger indexing manually through the UI/API.
   auto_index_on_startup: true
   embedding_dim: 256
-  max_file_size_kb: 512
+  max_file_size_kb: 4096
   skip_directories:
     - cmake-build
     - .git
@@ -125,8 +134,9 @@ llm:
 
     Правила:
     - Используй только информацию из контекста
-    - Если информации недостаточно, скажи "Недостаточно информации"
+    - Если информации недостаточно, скажи "Недостаточно информации в локальной базе, но я нашел дополнительную информацию." и добавь информацию 
     - Приводи примеры кода если это уместно
+    - Приводи другие примеры по контексту из любого источника, если информации слишком мало
     - Отвечай на русском языке
     - Цитируй файлы из которых взята информация
 

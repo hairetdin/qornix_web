@@ -46,8 +46,77 @@ Post-stabilization 13: done
 Post-stabilization 14: done
 Post-stabilization 15: done
 Post-stabilization 16: done
-Next: select the next backlog item before implementation
+Post-stabilization 17: done
+Post-stabilization 18: done
+Post-stabilization 19: done
+Post-stabilization 20: done
+Post-stabilization 21: done
+Post-stabilization 22: done
+Post-stabilization 23: done
+Post-stabilization 24: done
+Post-stabilization 25: done
+Post-stabilization 26: done
+Post-stabilization 27: done
+Post-stabilization 28: done
+Post-stabilization 29: done
+Next: Vector backend production hardening
 ```
+
+### 0.1 Current explicit open work
+
+The baseline stabilization scope is complete through Post-stabilization 29. The following items are the current explicit backlog. Each item should be completed as a separate post-stabilization entry and marked done in this document and the changelog when implemented.
+
+1. Done baseline: Generated app RAG UI polish:
+   - make generated `rag_app` and `--with-rag` RAG views easier to use after auth/RBAC hardening;
+   - expose existing diagnostics, source attribution, ingestion progress, QA tags, import/export, and model-switching affordances coherently in the generated app UI;
+   - verify the generated app UI with authenticated read/write/admin flows.
+2. Pending: Vector backend production hardening:
+   - add live integration tests for Qdrant and PostgreSQL+pgvector;
+   - add Faiss CI coverage where Faiss is available;
+   - add migration tooling from local HNSW/Faiss persisted vectors to Qdrant or pgvector;
+   - add large-corpus batch/upsert pagination, delete synchronization, and backend-specific health diagnostics.
+3. Pending: Advanced ingestion metadata:
+   - add richer PDF metadata, outlines, attachments, page boxes, and diagnostics;
+   - add richer DOCX headings, tables, footnotes/endnotes, comments, styles, and document properties;
+   - add richer XLSX/CSV formulas, merged cells, workbook/table metadata, formatting signals, and typed cells;
+   - add richer PPTX notes, comments, alt text, media captions, speaker metadata, and slide layout metadata;
+   - add richer image/OCR EXIF, dimensions, confidence, coordinates, detected language, captions, and diagnostics.
+4. Pending: Code and chunking depth:
+   - add source-repository structure-aware chunking;
+   - add AST-grade language parsers for symbols/classes/methods/functions/namespaces;
+   - preserve richer parser metadata through chunking, persistence, retrieval, and citation rendering;
+   - expand chunk quality tests for boundaries, metadata preservation, duplicates, tiny/large sections, and mixed Markdown/code.
+5. Pending: Embedding/model registry hardening:
+   - add automatic model discovery from the local models directory;
+   - add deeper model/tokenizer compatibility validation after download;
+   - support common Hugging Face tokenizer JSON variants beyond the first greedy WordPiece path;
+   - integrate exact active-tokenizer sizing into chunking;
+   - add persistent embedding cache storage and migration/rebuild flows for model, tokenizer, dimension, pooling, and normalization changes;
+   - add ONNX Runtime integration tests with a small real model fixture and clearer shape/pooling/tokenizer diagnostics.
+6. Pending: RAG quality beyond deterministic baseline:
+   - add learned or model-based reranking;
+   - add query rewriting and multi-query retrieval with visible diagnostics;
+   - add model-based claim grounding against cited context;
+   - add user feedback capture for helpfulness, missing context, bad citations, and wrong answers;
+   - expand analytics and evaluation datasets for long documents and generated template apps.
+7. Pending: QA/wiki deeper quality:
+   - wire duplicate warnings into the add/edit UI before save;
+   - add production-grade Markdown sanitization when richer rendering is enabled;
+   - add optional FTS/ORM-backed QA search and larger-scale tag autocomplete;
+   - add provenance/version history beyond string metadata.
+8. Pending: Operations, deployment, and security depth:
+   - add durable audit-event persistence and export;
+   - add provider-backed invite/password-reset delivery;
+   - add cookie domain/max-age controls;
+   - add Caddy/Traefik deployment examples;
+   - add structured tracing/request ids across host routing, RAG, LLM calls, persistence, and ingestion;
+   - add first-class backup/restore commands;
+   - add upload endpoints with allowlists, MIME checks, and size enforcement;
+   - add SBOM/vulnerability scanning guidance, secret mounting examples, alert examples, and full Docker Compose deploy smoke automation.
+9. Pending: Remaining LLM/provider diagnostics:
+   - move model-list extraction and token-usage parsing to the structured `Boost.JSON` parser path;
+   - add real-provider fixtures for Ollama, OpenAI-compatible APIs, vLLM, and LM Studio;
+   - unify streaming SSE parsing with the structured parser path.
 
 ## 1. Product split
 
@@ -131,7 +200,7 @@ The following items are intentionally deferred until after the local standalone 
 
 - authentication and authorization in standalone mode;
 - arbitrary document ingestion for all file types;
-- PDF, DOCX, XLSX, PPTX, image, and OCR support;
+- rich PDF/DOCX/XLSX/CSV/PPTX metadata/structure parsing, image, and OCR support;
 - persistent production vector store;
 - multi-model embedding registry;
 - automatic embedding model download;
@@ -771,13 +840,9 @@ Needed:
 - duplicate detection;
 - content hashing.
 
-Document types still to add after the text/Markdown/code/HTML baseline:
+Document/source families still needing richer ingestion after the first text and document parser baselines:
 
-- PDF;
-- DOCX;
-- XLSX/CSV;
-- PPTX;
-- images with OCR;
+- richer image/OCR metadata beyond the first plain OCR text baseline;
 - source code repositories with structure-aware chunking.
 
 Completed baseline:
@@ -796,6 +861,12 @@ Completed baseline:
 - added parser registry in `IngestionPipeline`;
 - added plain-text parser for supported text-like files;
 - added HTML parser with tag/script/style stripping, title extraction, entity decoding, and metadata capture;
+- added a first PDF text parser baseline using the optional `pdftotext` command when available;
+- added a first DOCX text parser baseline using optional `libzip` support when available;
+- added a first CSV parser baseline with delimiter detection, quoted-field handling, multiline field handling, and table metadata;
+- added a first XLSX parser baseline using optional `libzip` + `pugixml` support when available;
+- added a first PPTX parser baseline using optional `libzip` + `pugixml` support when available;
+- added a first image OCR parser baseline using optional `tesseract` when available;
 - moved `RagEngine::index_project()` onto the ingestion pipeline so `/api/rag/index` uses the E2 path;
 - moved `FileSource` onto the ingestion pipeline so standalone source indexing and reusable source indexing share the same detection/parser behavior;
 - added durable SQLite ingestion job records in `rag_ingestion_jobs`;
@@ -813,11 +884,15 @@ Remaining E2 follow-ups:
 
 - live progress streaming instead of polling-only background ingestion;
 - full incremental runtime indexing by modified time and content hash instead of rebuilding the in-memory index;
-- parser plugins for PDF, DOCX, XLSX/CSV, PPTX, and images/OCR; see backlog 11.6.
+- richer image/OCR parser metadata beyond the first text baseline; see backlog 11.6.
+- richer PPTX structure, notes, speaker comments, media captions, and slide metadata beyond the first presentation text baseline; see backlog 11.6.
+- richer XLSX/CSV structure, formulas, merged cells, and table-aware chunk metadata beyond the first spreadsheet text baseline; see backlog 11.6.
+- richer DOCX structure/metadata parsing beyond the first text extraction baseline; see backlog 11.6.
+- page-aware PDF parsing/chunk metadata beyond the first text extraction baseline; see backlog 11.6.
 
 ### E3. Chunking strategies
 
-Status: `done` for the first text/Markdown/code chunking baseline.
+Status: `done` for the first text/Markdown/code/PDF/spreadsheet/OCR chunking baseline.
 
 Needed strategies:
 
@@ -837,16 +912,21 @@ Completed baseline:
 - added code symbol/function-aware section chunking before token-window splitting;
 - indexed chunk-level documents in `RagEngine` so HNSW/Xapian retrieval targets chunks instead of whole files;
 - preserved source document metadata on chunks through `chunk_of`, `chunk_index`, `chunk_count`, `chunk_strategy`, character offsets, token count, heading, and symbol metadata;
+- added parser-to-chunker structure contracts through stable metadata fields such as `structure_contract`, `pdf_page_count`, `table_*`, and `ocr_*`;
+- added page-aware PDF chunking with `chunk_page`, `chunk_page_start`, and `chunk_page_end`;
+- added spreadsheet row-aware chunking with `chunk_sheet`, `chunk_row_start`, and `chunk_row_end`;
+- added image OCR region/caption chunk metadata with `chunk_ocr_region` and `chunk_ocr_caption`;
+- expanded code chunk metadata with `chunk_symbol_name` and `chunk_symbol_kind` for common C/C++, Python, JavaScript/TypeScript, Go, Rust, and Java/C-style declarations;
+- added tokenizer-limit-aware chunk budgets through `tokenizer_max_tokens` / `embedding_token_limit` metadata and `chunk_token_budget`;
 - updated context building so answers cite the source file and chunk index instead of only the synthetic chunk path;
 - updated SQLite persistence so one source document can own multiple persisted chunks and chunk embeddings;
 - added regression coverage for chunking strategies and chunked SQLite persistence.
 
 Remaining E3 follow-ups:
 
-- use tokenizer-specific token counts for ONNX models instead of whitespace-token estimates;
-- add richer language-specific code parsers for symbols/classes/functions beyond regex-based section detection;
-- add page-aware PDF chunking after PDF parsing exists;
-- add table-aware spreadsheet chunking after XLSX/CSV parser adapters exist.
+- use model-specific tokenizer implementations for exact ONNX token counts instead of whitespace-token estimates;
+- add AST-grade language-specific code parsers for symbols/classes/functions beyond regex-based detection;
+- add richer page/table/OCR coordinate metadata when parsers expose those fields.
 
 ### E4. ONNX embedding expansion
 
@@ -1002,6 +1082,38 @@ Recommended post-stabilization order:
 12. Done baseline: add generated-app login/logout UI plus `auth:admin` user-management API and Admin-tab controls.
 13. Done baseline: harden auth/RBAC checks so active sessions and bearer tokens re-check the current user record, permission changes take effect without re-login, disabled users lose access, and route/cookie matching avoids prefix-substring bypasses.
 
+### 9.1 Forward priority policy
+
+The next work must be prioritized by product ownership, not by whichever backlog item is easiest to implement.
+
+Priority 1: finish `qornix_rag` as a standalone reusable RAG library/core.
+
+This means planned RAG capabilities that belong to retrieval, ingestion, embeddings, chunking, citations, QA/wiki knowledge, local persistence, model handling, and evaluation come before web-application hardening. The reusable core should stay host-agnostic and callable without depending on generated `qornix_web` applications.
+
+Priority 2: keep the standalone user application complete and ergonomic.
+
+Standalone mode is a local single-user application. It may use `qornix_web` HTTP/routing infrastructure for the web UI, but it must remain usable without production auth/RBAC. Local safety still matters: local bind defaults, path allowlists/confirmation, upload/index size limits, safe exclusion defaults, no bundled secrets or user data, and clear diagnostics.
+
+Priority 3: support `qornix_rag` as a `qornix_web` extension after the core and standalone flows are solid.
+
+Generated `rag_app` and `--with-rag` applications should mount the RAG UI/API safely and expose RAG permissions/policies, but full network-application concerns are owned by the host `qornix_web` app.
+
+Priority 4: keep web-app security hardening in `qornix_web`/`qornix_auth`, not in the standalone RAG core.
+
+CSRF protection, session rotation, audit events, password reset/invite/account recovery, strict cookie policy, TLS, reverse-proxy examples, MFA, and similar networked-application concerns should be implemented as reusable `qornix_web` / `qornix_auth` capabilities and then consumed by generated RAG apps. They should not block standalone RAG library functionality unless a RAG API contract depends on them.
+
+Recommended next execution order:
+
+1. Done baseline: advanced ingestion adapters for standalone/library RAG: PDF, DOCX, CSV, XLSX, PPTX, and image OCR text baselines.
+2. Done baseline: parser-to-chunker metadata contracts and richer chunking with page-aware PDF chunks, row-aware spreadsheet chunks, image OCR region metadata, language-aware code symbol metadata, and tokenizer-limit-aware chunk budgets.
+3. Done baseline: RAG quality and grounding with citation post-processing, generated-answer grounding checks, conversation history rules, and expanded evaluation datasets.
+4. Done baseline: embedding/model operations for local use: model install/download command, tokenizer upgrades, runtime model switching with explicit reindex/re-embed orchestration.
+5. Done baseline: QA/wiki quality: duplicate detection, import/export, tags, markdown rendering, better QA scoring/source attribution.
+6. Done baseline: production vector backend adapters: Faiss, Qdrant, and pgvector behind the existing `VectorStore` boundary when the local RAG workflow needs deployment-scale retrieval.
+7. Done baseline: `qornix_web` generated-app hardening: session rotation, audit events, password recovery/invites, stricter cookie policy, TLS/reverse-proxy examples, container hardening, and deploy smoke tests.
+8. Done baseline: generated app RAG UI polish for authenticated read/write/admin flows, QA tags/import/export, embedding model switching, ingestion progress, diagnostics, and richer source attribution.
+9. Pending: vector backend production hardening with live service tests, Faiss CI coverage, migration tooling, large-corpus synchronization, and backend health diagnostics.
+
 ## 10. Definition of done for the current phase
 
 Status: `done` for the stabilization and E1-E6 baseline described in this roadmap.
@@ -1045,14 +1157,22 @@ Future direction:
 
 ### 11.2 LLM response robustness
 
-Status: partially improved during A2/A3, follow-up still needed.
+Status: `done` for the first Boost.JSON parser and response-metadata baseline.
 
-The Ollama parser should handle escaped quotes, multiline text, code snippets, and non-streaming JSON responses reliably. Remaining backlog:
+The LLM response parser now uses the same `Boost.JSON` parser used by `qornix_web` instead of hand-scanning JSON strings. Completed baseline:
 
-- Add regression tests for multiline code blocks, quoted includes, JSON snippets, markdown tables, and escaped backslashes.
-- Surface parser failures separately from provider availability.
-- Add an answer truncation indicator when a provider stops early or returns an incomplete response.
-- Keep provider-specific parsing isolated behind the LLM client/provider boundary.
+- added regression tests for multiline code blocks, quoted includes, JSON snippets, markdown tables, escaped backslashes, SSE-style `data:` JSON lines, parser failures, and truncation metadata;
+- parses Ollama chat, Ollama generate, OpenAI-compatible chat completions, and OpenAI-compatible streaming delta payloads through `Boost.JSON`;
+- surfaces parser failures separately from provider availability through `llm_status: parser_error` and `llm_parser_error`;
+- surfaces provider error payloads through `llm_status: provider_error`;
+- adds truncation metadata through `llm_status: truncated`, `llm_truncated`, and `llm_finish_reason`;
+- keeps the legacy `parse_response()` and `ask()` string APIs while adding structured `parse_response_result()` and `ask_with_metadata()` APIs for service/API callers.
+
+Remaining follow-ups:
+
+- Replace remaining non-answer JSON helpers such as model-list extraction and token usage parsing with `Boost.JSON`.
+- Add provider-specific parser fixtures for real Ollama/OpenAI/vLLM/LM Studio response samples.
+- Extend streaming SSE response handling to use the same structured parser path end-to-end instead of the current word-chunk callback fallback.
 
 ### 11.3 User-facing LLM diagnostics
 
@@ -1130,34 +1250,36 @@ Target dynamic API / ORM requirements:
 
 ### 11.5 Production vector backend adapters
 
-Status: partially implemented after the first two post-stabilization vector-store baselines.
+Status: completed baseline in Post-stabilization 27; deeper production hardening remains deferred.
 
-E1 established persistent document/chunk/embedding metadata and a `PersistentIndexStore` boundary. The first post-stabilization baselines added the retrieval-time `VectorStore` boundary, local HNSW save/load, vector index metadata sidecars, stale-index detection, and rebuild-on-stale behavior. The following vector backend capabilities are still not complete:
+E1 established persistent document/chunk/embedding metadata and a `PersistentIndexStore` boundary. The first post-stabilization baselines added the retrieval-time `VectorStore` boundary, local HNSW save/load, vector index metadata sidecars, stale-index detection, and rebuild-on-stale behavior. Post-stabilization 27 added optional Faiss, Qdrant, and pgvector adapters behind the same `VectorStore` factory plus config/docs/test coverage.
+
+The following vector backend capabilities are still not complete:
 
 - Keep SQLite-backed metadata as the local default, but avoid coupling retrieval to raw SQLite BLOB scans.
-- Add optional Faiss backend adapter after the local HNSW backend contract is stable.
-- Add optional Qdrant backend adapter for deployment scenarios that use an external vector database.
-- Add optional pgvector backend adapter for PostgreSQL-backed web applications.
-- Document backend selection, config keys, dependency requirements, migration behavior, and fallback behavior.
-- Add tests for backend selection, stale index detection, save/load roundtrip, and fallback to rebuild.
+- Add service-backed integration tests against live Qdrant and PostgreSQL+pgvector containers.
+- Add Faiss CI coverage in an environment with Faiss installed.
+- Add migration tooling for moving persisted local HNSW/Faiss vectors into Qdrant or pgvector.
+- Add batch/upsert pagination and delete synchronization for very large corpora.
+- Add backend-specific health diagnostics beyond dependency and connection errors.
 
 ### 11.6 Advanced ingestion adapters
 
-Status: deferred after E2 durable text/Markdown/code/HTML ingestion baseline.
+Status: partially complete after the first PDF, DOCX, CSV, XLSX, PPTX, and image OCR text extraction baselines.
 
-E2 established the ingestion pipeline, parser interface, parser registry, durable job records, job status APIs, and persisted document delete flow. The following ingestion capabilities are intentionally not implemented by the E2 baseline and must not be considered closed:
+E2 established the ingestion pipeline, parser interface, parser registry, durable job records, job status APIs, and persisted document delete flow. Post-stabilization 18 added a first PDF text extraction adapter backed by optional `pdftotext`. Post-stabilization 19 added a first DOCX text extraction adapter backed by optional `libzip`. Post-stabilization 20 added first CSV and XLSX spreadsheet text extraction adapters backed by built-in CSV parsing and optional `libzip` + `pugixml` for XLSX. Post-stabilization 21 added a first PPTX presentation text extraction adapter backed by optional `libzip` + `pugixml`. Post-stabilization 22 added a first image OCR text extraction adapter backed by optional `tesseract`. The following ingestion capabilities are intentionally not complete and must not be considered closed:
 
-- Add parser plugins for PDF documents.
-- Add parser plugins for DOCX documents.
-- Add parser plugins for XLSX and richer CSV ingestion.
-- Add parser plugins for PPTX documents.
-- Add image ingestion with OCR.
+- Add richer PDF parsing with page numbers, document metadata, outlines, attachments, and parser diagnostics beyond plain extracted text.
+- Add richer DOCX parsing with headings, tables, footnotes/endnotes, comments, styles, document properties, and structure metadata beyond plain extracted text.
+- Add richer XLSX/CSV ingestion with formulas, merged cells, workbook properties, multiple table regions, formatting signals, and typed cell metadata beyond plain row text.
+- Add richer PPTX ingestion with slide titles, notes, comments, alt text, media captions, speaker metadata, and slide layout metadata beyond plain slide text.
+- Add richer image OCR ingestion with image dimensions, EXIF metadata, OCR confidence, page/region coordinates, detected language, captions, and parser diagnostics beyond plain OCR text.
 - Add source-code repository structure-aware chunking beyond extension-based file parsing.
-- Add language-specific code chunkers/parsers for symbols, classes, methods, functions, and namespaces instead of relying only on regex-based section detection from the E3 baseline.
-- Add tokenizer-aware chunk sizing for configured embedding models, including ONNX tokenizer limits, instead of relying only on whitespace-token estimates.
-- Add page-aware PDF chunking after PDF parser plugins expose page numbers, page text, and page-level metadata.
-- Add table-aware spreadsheet chunking after XLSX/CSV parser plugins expose sheets, ranges, headers, and row/column metadata.
-- Add parser-to-chunker metadata contracts so headings, symbols, pages, tables, captions, and source offsets survive ingestion, retrieval, persistence, and citation rendering.
+- Add AST-grade language-specific code chunkers/parsers for symbols, classes, methods, functions, and namespaces beyond the regex-based language-aware baseline.
+- Add exact tokenizer implementations for configured embedding models, including ONNX tokenizer limits, instead of relying only on whitespace-token estimates with configured token budgets.
+- Add richer page-aware PDF chunking after the PDF parser exposes document metadata, outlines, page boxes, and page-level diagnostics.
+- Add richer table-aware spreadsheet chunking after XLSX/CSV parser plugins expose ranges, headers, merged cells, formulas, and typed row/column metadata.
+- Extend parser-to-chunker metadata contracts so coordinates, confidence, layout regions, captions, and source offsets survive ingestion, retrieval, persistence, and citation rendering.
 - Add chunk quality tests for overlap boundaries, metadata preservation, duplicate/near-duplicate chunks, very small sections, very large sections, and mixed Markdown/code documents.
 - Add live progress streaming for background ingestion jobs beyond the current polling baseline.
 - Add deeper source-level modified-time shortcuts beyond the current chunk-hash embedding reuse baseline.
@@ -1166,16 +1288,15 @@ E2 established the ingestion pipeline, parser interface, parser registry, durabl
 
 ### 11.7 Embedding model registry and ONNX runtime follow-ups
 
-Status: completed baseline in Post-stabilization 15; remaining runtime and installer work is deferred.
+Status: completed baseline in Post-stabilization 15 and expanded in Post-stabilization 25; remaining discovery/cache/test hardening is deferred.
 
-E4 added active-model metadata, stable effective model ids, embedding namespaces, dimension validation, pooling selection, and fallback-safe persistence. Post-stabilization 15 added a config-driven embedding model registry with multiple installed model definitions, active model selection, validation warnings, generated-app path resolution, health/admin diagnostics, docs, and regression coverage.
+E4 added active-model metadata, stable effective model ids, embedding namespaces, dimension validation, pooling selection, and fallback-safe persistence. Post-stabilization 15 added a config-driven embedding model registry with multiple installed model definitions, active model selection, validation warnings, generated-app path resolution, health/admin diagnostics, docs, and regression coverage. Post-stabilization 25 added a registry-writing install/download command, runtime embedding model listing/switching APIs, explicit reindex/re-embed orchestration, and a first greedy WordPiece tokenizer path for BERT-like ONNX vocabularies.
 
 The following embedding capabilities are intentionally not complete and must not be considered closed:
 
 - Add automatic model registry discovery from a models directory, beyond the current config-driven registry.
-- Add runtime model switching with explicit reindex/re-embed orchestration and stale index warnings.
-- Add a model install/download command that writes registry metadata and validates model/tokenizer compatibility after download.
-- Add tokenizer implementations beyond the current basic WordPiece-like path, including compatibility with common Hugging Face tokenizer JSON variants.
+- Add deeper model/tokenizer compatibility validation after download.
+- Add tokenizer implementations beyond the current greedy WordPiece-like path, including compatibility with common Hugging Face tokenizer JSON variants.
 - Add tokenizer-aware chunk sizing integration so E3 chunking can use the active embedding tokenizer and max sequence length.
 - Add persistent embedding cache storage keyed by model id/version/content hash, beyond the current model-id namespace boundary.
 - Add migration/rebuild flows when `model_id`, `model_version`, dimension, tokenizer, pooling mode, or normalization changes.
@@ -1184,53 +1305,51 @@ The following embedding capabilities are intentionally not complete and must not
 
 ### 11.8 RAG quality, citations, and evaluation follow-ups
 
-Status: deferred after E5 citation/confidence/grounding metadata baseline.
+Status: partially complete after the E5 citation/confidence/grounding metadata baseline and Post-stabilization 24 answer-grounding baseline.
 
-E5 added citation ids, source path preservation, normalized confidence fields, response-level retrieval confidence, grounding status, prompt citation hints, API metadata, UI rendering, and service-level regression coverage. Post-stabilization 5 added the first actual deterministic query expansion and reranking baseline. The following quality capabilities are intentionally not complete and must not be considered closed:
+E5 added citation ids, source path preservation, normalized confidence fields, response-level retrieval confidence, grounding status, prompt citation hints, API metadata, UI rendering, and service-level regression coverage. Post-stabilization 5 added the first actual deterministic query expansion and reranking baseline. Post-stabilization 24 added answer citation extraction, missing/uncited citation reporting, citation append post-processing for uncited generated answers, bounded conversation history rules, and expanded local eval cases. The following quality capabilities are intentionally not complete and must not be considered closed:
 
 - Add model-based or learned reranking beyond the current deterministic path/metadata/exact-phrase boost baseline.
 - Add query rewriting and multi-query retrieval beyond the current deterministic lexical query expansion baseline, while exposing rewritten/expanded queries in diagnostics.
-- Add conversation history with rules for when previous sources can or cannot ground a new answer.
-- Add generated-answer grounding checks that validate claims against cited context.
-- Add citation post-processing that verifies generated answers cite only known source ids such as `S1` or `Q1`.
+- Add model-based generated-answer grounding checks that validate claims against cited context beyond citation-id consistency and retrieval confidence.
 - Add user feedback capture for answer helpfulness, citation usefulness, missing context, and wrong answers.
 - Add retrieval and answer-quality analytics tied to feedback and query metadata.
-- Expand evaluation datasets beyond the first local docs/QA/refusal baseline to include chunked long documents and generated template apps.
-- Expand regression tests beyond the first retrieval/citation/no-context refusal baseline to cover answer completeness and generated-answer claim checking.
+- Expand evaluation datasets beyond the local docs/QA/refusal/citation/history baseline to include chunked long documents and generated template apps.
+- Expand regression tests beyond citation/history consistency to cover answer completeness and generated-answer claim checking.
 - Add UI affordances for reporting bad answers, missing sources, and irrelevant sources.
 
 ### 11.9 QA/wiki quality improvements
 
-Status: deferred after A4 baseline.
+Status: completed baseline in Post-stabilization 26; remaining UI/deeper retrieval work is deferred.
+
+Post-stabilization 26 added JSON import/export, tags, tag suggestions/filtering, markdown answer rendering metadata, richer QA scoring, aliases/metadata parsing, and QA source attribution in Search/Ask responses.
 
 Future QA improvements:
 
-- Duplicate detection in the add/edit flow.
-- Import/export for QA pairs.
-- Tags in addition to category.
-- Optional markdown rendering in stored answers.
-- Better QA search scoring and source attribution.
+- Wire duplicate warnings directly into the add/edit UI before save.
+- Add richer Markdown rendering with a production sanitizer when the UI needs more than the current conservative server-side rendering baseline.
+- Add optional FTS/ORM-backed QA search and larger-scale tag autocomplete.
+- Add provenance/version history fields beyond string metadata.
 
 ### 11.10 Operations, deployment, and security follow-ups
 
-Status: partially completed through Post-stabilization 16; remaining production hardening is deferred.
+Status: completed baseline in Post-stabilization 28; deeper production hardening remains deferred.
 
-E6 added diagnostics, metrics, generated operations docs, Docker Compose volume updates, and file-based backup/restore guidance. Post-stabilization 7-13 added generated-app auth/RBAC baselines: `qornix_auth`, durable `QornixOrmAuthStore`, generated app auth wiring, route-level RAG permissions, login/user-management UI, and current-user validation for sessions/JWTs. Post-stabilization 16 added CSRF protection for cookie-authenticated browser write/admin routes in generated apps.
+E6 added diagnostics, metrics, generated operations docs, Docker Compose volume updates, and file-based backup/restore guidance. Post-stabilization 7-13 added generated-app auth/RBAC baselines: `qornix_auth`, durable `QornixOrmAuthStore`, generated app auth wiring, route-level RAG permissions, login/user-management UI, and current-user validation for sessions/JWTs. Post-stabilization 16 added CSRF protection for cookie-authenticated browser write/admin routes in generated apps. Post-stabilization 28 added first-baseline session rotation, auth audit events, manual invite/password-reset token flows, stricter cookie config, TLS/reverse-proxy docs, container hardening, and generated deploy smoke scripts.
 
-The following operations and security capabilities are intentionally not complete and must not be considered closed:
+The following operations and security capabilities are intentionally not complete and must not be considered closed. They should be implemented as `qornix_web` / `qornix_auth` host-application capabilities, then consumed by generated RAG apps:
 
-- Add session rotation after login and privilege-sensitive user updates.
-- Add auth/security audit events for login, logout, failed login, user-management changes, permission changes, and denied access.
-- Add password reset, invite, and account recovery flows for generated networked applications.
-- Add optional stricter cookie settings such as configurable `SameSite`, `Secure`, domain, and session lifetime policy.
-- Add TLS and reverse-proxy examples for nginx, Caddy, or an equivalent edge proxy.
+- Add durable audit-event persistence and export beyond the current bounded in-memory audit log.
+- Add email/SMS/provider-backed delivery for invite and password reset tokens beyond the current manual-token baseline.
+- Add cookie domain and max-age controls beyond the current `Secure`, `SameSite`, and path settings.
+- Add Caddy/Traefik examples beyond the first Nginx TLS/reverse-proxy shape.
 - Add structured tracing with request ids across host app routing, RAG retrieval, LLM calls, SQLite persistence, and ingestion jobs.
 - Add first-class backup and restore commands instead of documentation-only file backup examples.
 - Add upload endpoints, upload allowlists, MIME checks, and upload-size enforcement beyond current indexing file-size limits.
 - Expand the first Admin tab beyond diagnostics, metrics, and ingestion job history into reindexing, delete flows, and backup/export.
-- Add production container hardening such as non-root runtime validation, healthcheck directives, read-only filesystem options, and secret mounting examples.
+- Add container vulnerability scanning/SBOM guidance and secret mounting examples beyond the first non-root/read-only/healthcheck baseline.
 - Add metrics alert examples for LLM failures, rate-limit rejections, stale indexes, failed ingestion jobs, and storage growth.
-- Add deploy smoke tests for generated `rag_app` and `--with-rag` Docker Compose flows.
+- Add full Docker Compose deploy smoke automation that starts containers and validates auth/RAG flows, beyond the generated `deploy_smoke.sh` HTTP checks.
 
 ### 11.11 Explicitly out of scope for standalone stabilization
 
@@ -1238,6 +1357,6 @@ The following remain out of scope for Milestone A unless the roadmap is explicit
 
 - Auth/RBAC for standalone local usage.
 - Multi-user permissions.
-- Production vector store.
-- Arbitrary document ingestion such as PDF/DOCX/XLSX/images.
+- Production vector store hardening beyond the first Faiss/Qdrant/pgvector adapter baseline.
+- Arbitrary document ingestion beyond the current text/Markdown/code/HTML/PDF-text/DOCX-text/CSV/XLSX-text/PPTX-text/image-OCR baseline.
 - Full `qornix_web` template integration.

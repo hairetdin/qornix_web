@@ -71,6 +71,31 @@ GET /api/stats
 
 Returns indexing statistics, embedding status, and indexed project root.
 
+## Embedding Models
+
+```http
+GET /api/embedding/models
+```
+
+Returns the configured embedding registry, active model id, effective runtime model id, backend, readiness/status fields, and registry warnings.
+
+```http
+POST /api/embedding/switch
+```
+
+Request:
+
+```json
+{
+  "model_id": "local-semantic-v1",
+  "reindex": true,
+  "force_reembed": true,
+  "project_path": "/path/to/project"
+}
+```
+
+`model_id` must exist in `embedding.registry`. `force_reembed` defaults to true and prevents unchanged chunks from reusing vectors generated under the previous model. If `reindex` is true, the service indexes immediately and returns normal indexing counters in `stats`; otherwise the response reports `reindex_required: true` and the next `/api/index` or `/api/ingest` performs the re-embed.
+
 ## Sources
 
 ```http
@@ -116,6 +141,18 @@ GET /api/ingest/jobs
 ```
 
 Job fields include `status`, `progress_percent`, `files_seen`, `documents_imported`, `skipped`, `errors`, and timestamps when persisted storage is enabled.
+
+Supported filesystem ingestion formats include source/config/text files, Markdown, HTML, CSV, PDF text extraction through optional `pdftotext`, image OCR through optional `tesseract`, DOCX text extraction through optional `libzip`, and XLSX/PPTX text extraction through optional `libzip` + `pugixml`. If an optional parser dependency is unavailable, matching files are skipped with a structured warning instead of failing the whole job.
+
+Chunk metadata preserves parser structure where available: PDF chunks include page fields, CSV/XLSX chunks include sheet/row fields, image OCR chunks include OCR region fields, and source-code chunks include symbol name/kind fields. `chunk_token_budget` records the effective token budget used by the chunker.
+
+Ask responses include citation post-processing and grounding metadata:
+
+- `answer_citations` - bracketed citation ids found in the generated answer.
+- `missing_citations` - answer citation ids that were not present in retrieved context.
+- `uncited_context_citations` - retrieved context ids not cited by the answer.
+- `citations_post_processed` - true when the service appended source ids to an uncited generated answer.
+- `conversation_turns_used` - sanitized recent `user`/`assistant` history turns included for follow-up wording only.
 
 Index and ingestion stats include incremental embedding counters:
 
@@ -185,6 +222,9 @@ Response:
   "context": [],
   "sources": [],
   "llm_status": "ok",
+  "llm_truncated": false,
+  "llm_finish_reason": "",
+  "llm_parser_error": "",
   "response_time_ms": 1234
 }
 ```
@@ -195,6 +235,13 @@ Response:
 - `fallback`
 - `unavailable`
 - `not_configured`
+- `parser_error`
+- `provider_error`
+- `truncated`
+- `rate_limited`
+- `cache_hit`
+
+`llm_parser_error` is populated when the provider returned a response that could not be parsed as supported JSON. `llm_truncated` and `llm_finish_reason` are populated when the provider reports an incomplete answer, such as OpenAI-compatible `finish_reason: "length"` or an incomplete Ollama stream/chunk.
 
 ## QA
 
@@ -208,7 +255,12 @@ POST /api/qa/add
 {
   "question": "How do I run standalone RAG?",
   "answer": "Use ./qornix_rag/run.sh",
-  "category": "setup"
+  "category": "setup",
+  "tags": ["local", "startup"],
+  "aliases": ["How do I start local RAG?"],
+  "metadata": {
+    "source": "operator runbook"
+  }
 }
 ```
 
@@ -216,7 +268,7 @@ List:
 
 ```http
 GET /api/qa/list?limit=25&offset=0
-GET /api/qa/list?query=rag&category=setup&limit=25&offset=0
+GET /api/qa/list?query=rag&category=setup&tag=local&limit=25&offset=0
 ```
 
 Response:
@@ -229,8 +281,13 @@ Response:
       "id": "sqlite_kb_qa_...",
       "question": "How do I run standalone RAG?",
       "answer": "Use ./qornix_rag/run.sh",
+      "answer_html": "<p>Use ./qornix_rag/run.sh</p>",
       "category": "setup",
-      "aliases": []
+      "aliases": [],
+      "tags": ["local", "startup"],
+      "metadata": {
+        "source": "operator runbook"
+      }
     }
   ],
   "pairs": [],
@@ -248,6 +305,7 @@ Suggestions:
 ```http
 GET /api/qa/suggest?q=rag&limit=10
 GET /api/qa/categories?q=set&limit=20
+GET /api/qa/tags?q=local&limit=20
 ```
 
 Update:
@@ -261,7 +319,12 @@ POST /api/qa/update
   "pair_id": "sqlite_kb_qa_...",
   "question": "Updated question",
   "answer": "Updated answer",
-  "category": "setup"
+  "category": "setup",
+  "tags": ["local"],
+  "aliases": ["Updated alias"],
+  "metadata": {
+    "source": "runbook"
+  }
 }
 ```
 
@@ -279,6 +342,16 @@ POST /api/qa/delete
 
 QA entries participate in Ask context and Search results.
 
+QA import/export:
+
+```http
+POST /api/qa/import
+GET /api/qa/export?category=setup&tag=local
+POST /api/qa/export
+```
+
+Import accepts either a JSON array or an object with `pairs`. Export returns `pairs` with `aliases`, `tags`, and string metadata. Search and Ask context for QA entries include `tags`, `attribution`, `category`, `pair_id`, confidence, and `Q*` citation ids.
+
 ## Optional Endpoints
 
 When the corresponding services are enabled:
@@ -291,5 +364,7 @@ When the corresponding services are enabled:
 - `POST /api/analytics/export`
 - `POST /api/qa/dedup`
 - `POST /api/qa/dedup/remove`
+- `POST /api/qa/import`
+- `GET/POST /api/qa/export`
 - `POST /api/import/markdown`
 - `GET /api/import/history`

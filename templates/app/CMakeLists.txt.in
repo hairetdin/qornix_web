@@ -66,6 +66,7 @@ add_custom_command(TARGET @PROJECT_NAME@ POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:@PROJECT_NAME@>" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/$<TARGET_FILE_NAME:@PROJECT_NAME@>"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/config.yaml" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/config.yaml"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/README.md" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/README.md"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/deploy_smoke.sh" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/deploy_smoke.sh"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/templates" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/templates"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/static" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/static"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/doc" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/doc"
@@ -81,7 +82,7 @@ add_custom_target(@PROJECT_NAME@_deploy
 )
 
 install(TARGETS @PROJECT_NAME@ RUNTIME DESTINATION .)
-install(FILES config.yaml README.md DESTINATION .)
+install(FILES config.yaml README.md deploy_smoke.sh DESTINATION .)
 install(DIRECTORY templates static doc route_extensions DESTINATION .)
 install(DIRECTORY DESTINATION logs)
 @WITH_RAG_INSTALL@

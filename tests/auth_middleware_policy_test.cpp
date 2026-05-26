@@ -133,6 +133,15 @@ int main() {
     auto excludedBoundary = call(*middleware, http::verb::post, "/auth/login-extra");
     assert(excludedBoundary.result() == http::status::unauthorized);
 
+    bool sawDeniedAudit = false;
+    for (const auto& event : manager->auditEvents()) {
+        if (event.type == "access_denied") {
+            sawDeniedAudit = true;
+            break;
+        }
+    }
+    assert(sawDeniedAudit);
+
     std::cout << "auth_middleware_policy_test passed\n";
     return 0;
 }

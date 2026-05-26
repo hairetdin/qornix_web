@@ -134,6 +134,23 @@ namespace qornix_auth {
             return false;
         }
 
+        size_t invalidateSessionsForUser(const std::string &userId,
+                                         const std::string &exceptSessionId = "") {
+            std::lock_guard<std::mutex> lock(mutex_);
+            size_t removed = 0;
+            for (auto it = sessions_.begin(); it != sessions_.end();) {
+                auto &session = it->second;
+                if (session->userId == userId && session->sessionId != exceptSessionId) {
+                    session->isValid = false;
+                    it = sessions_.erase(it);
+                    ++removed;
+                } else {
+                    ++it;
+                }
+            }
+            return removed;
+        }
+
         void cleanupExpiredSessions() {
             std::lock_guard<std::mutex> lock(mutex_);
 

@@ -277,6 +277,8 @@ auth:
   mode: session
   registration_enabled: false
   secure_cookies: false
+  cookie_same_site: Lax
+  cookie_path: /
   csrf:
     enabled: true
     header: X-CSRF-Token
@@ -294,7 +296,7 @@ auth:
   rag_read_permissions: rag:read
   rag_write_permissions: rag:write
   rag_admin_permissions: rag:admin
-  exclude_paths: /auth/login,/auth/register,/health,/static
+  exclude_paths: /auth/login,/auth/register,/auth/invites/accept,/auth/password-reset/request,/auth/password-reset/confirm,/health,/static
   database:
     driver: sqlite
     path: data/auth.db
@@ -335,9 +337,15 @@ rag:
     rerank_exact_content_boost: 0.05
 
   vector_store:
+    # Backends: local_hnsw, faiss, qdrant, pgvector.
     backend: local_hnsw
     index_path: data/hnsw_index.bin
     metadata_path: data/hnsw_index.meta.json
+    collection: qornix_rag_vectors
+    # endpoint: http://127.0.0.1:6333
+    # connection_string: host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret
+    # table: qornix_rag_vectors
+    # distance: Cosine
     auto_load: true
     auto_save: true
 
@@ -352,7 +360,7 @@ rag:
     protect_write_routes: true
 
   indexing:
-    max_file_size_kb: 1024
+    max_file_size_kb: 4096
 
   sqlite:
     enabled: true

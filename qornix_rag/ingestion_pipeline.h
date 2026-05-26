@@ -81,7 +81,7 @@ public:
         std::string root_path = ".";
         std::vector<std::string> include_extensions;
         std::vector<std::string> exclude_directories;
-        size_t max_file_size_kb = 512;
+        size_t max_file_size_kb = 4096;
         bool recursive = true;
     };
 
