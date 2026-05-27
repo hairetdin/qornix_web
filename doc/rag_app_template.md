@@ -27,6 +27,7 @@ cmake --build build
 Open:
 
 ```text
+http://127.0.0.1:8008/
 http://127.0.0.1:8008/rag
 http://127.0.0.1:8008/api/rag/health
 ```
@@ -34,7 +35,7 @@ http://127.0.0.1:8008/api/rag/health
 ## What Is Included
 
 - application entry point that registers `qornix_rag` as an integrated Qornix Web module;
-- RAG UI under `/rag`;
+- RAG UI under `/` and `/rag`;
 - RAG API under `/api/rag/*`;
 - project-local `config.yaml`;
 - SQLite QA storage at `data/rag_kb.db`;
@@ -49,6 +50,7 @@ The generated app links `qornix::web_core` and `qornix::rag_extension`. It does 
 ## Endpoints
 
 ```text
+GET  /
 GET  /rag
 GET  /api/rag/health
 POST /api/rag/ask

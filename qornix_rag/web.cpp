@@ -2291,6 +2291,11 @@ void RagApiHandler::handleGet(
             rag_obj["embedding_registry_warnings"] = std::move(registry_warnings);
             rag_obj["vector_store_backend"] = health.vector_store_backend;
             rag_obj["vector_store_status"] = health.vector_store_status;
+            rag_obj["vector_store_health_status"] = health.vector_store_health_status;
+            rag_obj["vector_store_health_detail"] = health.vector_store_health_detail;
+            rag_obj["vector_store_ready"] = health.vector_store_ready;
+            rag_obj["vector_store_size"] = static_cast<std::int64_t>(health.vector_store_size);
+            rag_obj["vector_store_dimension"] = static_cast<std::int64_t>(health.vector_store_dimension);
             rag_obj["query_expansion"] = health.query_expansion;
             rag_obj["reranking"] = health.reranking;
             rag_obj["grounding_api"] = true;
@@ -2606,6 +2611,12 @@ void RagApiHandler::handleGet(
             rag_obj["embedding_registry_warnings"] = std::move(registry_warnings);
             rag_obj["vector_store_backend"] = rag_engine_->get_vector_store_backend();
             rag_obj["vector_store_status"] = rag_engine_->get_vector_store_status();
+            const auto vector_diagnostics = rag_engine_->get_vector_store_diagnostics();
+            rag_obj["vector_store_health_status"] = vector_diagnostics.status;
+            rag_obj["vector_store_health_detail"] = vector_diagnostics.detail;
+            rag_obj["vector_store_ready"] = vector_diagnostics.ready;
+            rag_obj["vector_store_size"] = static_cast<std::int64_t>(vector_diagnostics.size);
+            rag_obj["vector_store_dimension"] = static_cast<std::int64_t>(vector_diagnostics.dimension);
             rag_obj["hybrid_search"] = true; // Default to true
             rag_obj["query_expansion"] = rag_engine_->is_query_expansion_enabled();
             rag_obj["reranking"] = rag_engine_->is_reranking_enabled();
@@ -2664,6 +2675,12 @@ void RagApiHandler::handleGet(
             response["embedding_dim"] = static_cast<std::int64_t>(rag_engine_->get_embedding_dim());
             response["vector_store_backend"] = rag_engine_->get_vector_store_backend();
             response["vector_store_status"] = rag_engine_->get_vector_store_status();
+            const auto vector_diagnostics = rag_engine_->get_vector_store_diagnostics();
+            response["vector_store_health_status"] = vector_diagnostics.status;
+            response["vector_store_health_detail"] = vector_diagnostics.detail;
+            response["vector_store_ready"] = vector_diagnostics.ready;
+            response["vector_store_size"] = static_cast<std::int64_t>(vector_diagnostics.size);
+            response["vector_store_dimension"] = static_cast<std::int64_t>(vector_diagnostics.dimension);
             response["query_expansion"] = rag_engine_->is_query_expansion_enabled();
             response["reranking"] = rag_engine_->is_reranking_enabled();
             response["onnx_ready"] = rag_engine_->is_onnx_ready();
@@ -2801,6 +2818,11 @@ void setupRagRoutes(HttpServer& server,
         server.add_route(options.ui_path, std::make_shared<RagWebHandler>(templates_dir, api_base));
         std::cout << "  \u2713 GET  " << options.ui_path << " - Web \u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441"
                   << " (templates: " << templates_dir << ")" << std::endl;
+        if (options.expose_root_ui && options.ui_path != "/") {
+            server.add_route("/", std::make_shared<RagWebHandler>(templates_dir, api_base));
+            std::cout << "  * GET  / - Web interface"
+                      << " (alias for " << options.ui_path << ")" << std::endl;
+        }
     }
 
     // API endpoints. Keep one full handler for routes that need optional

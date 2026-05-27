@@ -346,6 +346,7 @@ rag:
     # connection_string: host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret
     # table: qornix_rag_vectors
     # distance: Cosine
+    upsert_batch_size: 512
     auto_load: true
     auto_save: true
 
@@ -483,6 +484,7 @@ echo "  docker run --rm -p 8008:8008 $(basename "$project_name"):runtime"
 echo ""
 echo "Open in browser:"
 if [ "$template_name" = "rag_app" ]; then
+    echo "  http://127.0.0.1:8008/"
     echo "  http://127.0.0.1:8008/rag"
     echo "  http://127.0.0.1:8008/api/rag/health"
 elif [ "$with_rag" = "true" ]; then

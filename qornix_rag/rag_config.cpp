@@ -295,6 +295,7 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.engine.vector_store.connection_string = getString(values, {"vector_store.connection_string", "rag.vector_store.connection_string"}, config.engine.vector_store.connection_string);
     config.engine.vector_store.table = getString(values, {"vector_store.table", "rag.vector_store.table"}, config.engine.vector_store.table);
     config.engine.vector_store.distance = getString(values, {"vector_store.distance", "rag.vector_store.distance"}, config.engine.vector_store.distance);
+    config.engine.vector_store.upsert_batch_size = getSize(values, {"vector_store.upsert_batch_size", "rag.vector_store.upsert_batch_size"}, config.engine.vector_store.upsert_batch_size);
     config.engine.vector_store.recreate = getBool(values, {"vector_store.recreate", "rag.vector_store.recreate"}, config.engine.vector_store.recreate);
     config.engine.vector_store.auto_load = getBool(values, {"vector_store.auto_load", "rag.vector_store.auto_load"}, config.engine.vector_store.auto_load);
     config.engine.vector_store.auto_save = getBool(values, {"vector_store.auto_save", "rag.vector_store.auto_save"}, config.engine.vector_store.auto_save);
@@ -405,7 +406,7 @@ RagConfig makeRagConfigFromIntegratedFlatMap(
     RagConfig config;
     config.mode = RagRuntimeMode::Integrated;
     config.config_source = config_source.empty() ? "host application config" : config_source;
-    config.routes.expose_root_ui = false;
+    config.routes.expose_root_ui = getBool(flat, {"rag.route.expose_root_ui", "route.expose_root_ui"}, false);
     config.routes.ui_path = normalizePathPrefix(getString(flat, {"rag.route.ui_path", "route.ui_path"}, "/rag"), "/rag");
     config.routes.api_prefix = normalizePathPrefix(getString(flat, {"rag.route.api_prefix", "route.api_prefix"}, "/api/rag"), "/api/rag");
 

@@ -790,6 +790,12 @@ RagServiceHealth RagService::health() const {
     health.embedding_registry_warnings = embedding_info.registry_warnings;
     health.vector_store_backend = rag_engine_->get_vector_store_backend();
     health.vector_store_status = rag_engine_->get_vector_store_status();
+    const auto vector_diagnostics = rag_engine_->get_vector_store_diagnostics();
+    health.vector_store_health_status = vector_diagnostics.status;
+    health.vector_store_health_detail = vector_diagnostics.detail;
+    health.vector_store_ready = vector_diagnostics.ready;
+    health.vector_store_size = vector_diagnostics.size;
+    health.vector_store_dimension = vector_diagnostics.dimension;
     health.query_expansion = rag_engine_->is_query_expansion_enabled();
     health.reranking = rag_engine_->is_reranking_enabled();
 

@@ -134,6 +134,7 @@ endif()
 target_include_directories(qornix_rag_core PRIVATE ${HNSWLIB_INCLUDE_DIR})
 
 option(QORNIX_ENABLE_FAISS "Enable optional Faiss vector-store backend" ON)
+set(QORNIX_RAG_FAISS_AVAILABLE OFF)
 if(QORNIX_ENABLE_FAISS)
     find_path(FAISS_INCLUDE_DIR faiss/IndexFlat.h
         PATHS /usr/local/include /usr/include
@@ -148,6 +149,7 @@ if(QORNIX_ENABLE_FAISS)
         target_compile_definitions(qornix_rag_core PUBLIC QORNIX_HAS_FAISS=1)
         target_include_directories(qornix_rag_core PRIVATE ${FAISS_INCLUDE_DIR})
         target_link_libraries(qornix_rag_core PRIVATE ${FAISS_LIBRARY})
+        set(QORNIX_RAG_FAISS_AVAILABLE ON)
         if(OpenMP_CXX_FOUND)
             target_link_libraries(qornix_rag_core PUBLIC OpenMP::OpenMP_CXX)
         else()
@@ -344,6 +346,11 @@ if(QORNIX_BUILD_RAG_STANDALONE)
         main.cpp
     )
     target_link_libraries(qornix_rag PRIVATE qornix_rag_http)
+
+    add_executable(qornix_rag_vector_migrate
+        vector_migrate_main.cpp
+    )
+    target_link_libraries(qornix_rag_vector_migrate PRIVATE qornix_rag_core)
     message(STATUS "Standalone qornix_rag executable enabled")
 endif()
 

@@ -84,6 +84,19 @@ bool isSafeSqlIdentifier(const std::string& value) {
     return true;
 }
 
+VectorStoreDiagnostics makeDiagnostics(const VectorStore& store,
+                                       std::string status,
+                                       std::string detail = {}) {
+    VectorStoreDiagnostics diagnostics;
+    diagnostics.backend = store.backendName();
+    diagnostics.status = std::move(status);
+    diagnostics.detail = std::move(detail);
+    diagnostics.ready = store.isReady();
+    diagnostics.size = store.size();
+    diagnostics.dimension = store.dimension();
+    return diagnostics;
+}
+
 std::string vectorLiteral(const std::vector<float>& values) {
     std::ostringstream out;
     out << '[';
@@ -308,6 +321,13 @@ std::string LocalHnswVectorStore::lastError() const {
     return impl_->last_error;
 }
 
+VectorStoreDiagnostics LocalHnswVectorStore::diagnostics() const {
+    if (isReady()) {
+        return makeDiagnostics(*this, "ready");
+    }
+    return makeDiagnostics(*this, "not_ready", impl_->last_error.empty() ? "index is not built or loaded" : impl_->last_error);
+}
+
 struct FaissVectorStore::Impl {
 #ifdef QORNIX_HAS_FAISS
     std::unique_ptr<faiss::IndexFlatL2> index;
@@ -490,6 +510,18 @@ std::string FaissVectorStore::lastError() const {
     return impl_->last_error;
 }
 
+VectorStoreDiagnostics FaissVectorStore::diagnostics() const {
+#ifdef QORNIX_HAS_FAISS
+    if (isReady()) {
+        return makeDiagnostics(*this, "ready");
+    }
+    return makeDiagnostics(*this, "not_ready", impl_->last_error.empty() ? "index is not built or loaded" : impl_->last_error);
+#else
+    return makeDiagnostics(*this, "dependency_unavailable",
+        "Faiss backend was not compiled; install Faiss headers/library and rebuild with QORNIX_ENABLE_FAISS=ON");
+#endif
+}
+
 QdrantVectorStore::QdrantVectorStore(VectorStoreOptions options)
     : options_(std::move(options)) {
 }
@@ -515,12 +547,13 @@ bool QdrantVectorStore::build(const std::vector<VectorRecord>& records, size_t d
         : options_.endpoint;
     const std::string collection_url = base + "/collections/" + options_.collection;
 
-    if (options_.recreate) {
-        auto delete_response = httpJsonRequest("DELETE", collection_url, "", options_.api_key);
-        if (!delete_response.error.empty()) {
-            last_error_ = "qdrant collection delete failed: " + delete_response.error;
-            return false;
-        }
+    auto delete_response = httpJsonRequest("DELETE", collection_url, "", options_.api_key);
+    if (!delete_response.error.empty()
+        || (delete_response.status != 0 && delete_response.status != 404
+            && (delete_response.status < 200 || delete_response.status >= 300))) {
+        last_error_ = "qdrant collection delete failed: " + delete_response.error
+            + " status=" + std::to_string(delete_response.status);
+        return false;
     }
 
     json::object create;
@@ -535,7 +568,24 @@ bool QdrantVectorStore::build(const std::vector<VectorRecord>& records, size_t d
         return false;
     }
 
+    const size_t batch_size = std::max<size_t>(1, options_.upsert_batch_size);
     json::array points;
+    size_t point_count = 0;
+    bool upsert_ok = true;
+    auto flush_points = [&]() {
+        if (points.empty() || !upsert_ok) {
+            return;
+        }
+        json::object upsert;
+        upsert["points"] = std::move(points);
+        auto upsert_response = httpJsonRequest("PUT", collection_url + "/points?wait=true", json::serialize(upsert), options_.api_key);
+        if (!upsert_response.error.empty() || upsert_response.status < 200 || upsert_response.status >= 300) {
+            last_error_ = "qdrant upsert failed: " + upsert_response.error + " status=" + std::to_string(upsert_response.status);
+            upsert_ok = false;
+        }
+        points = json::array();
+    };
+
     for (const auto& record : records) {
         if (record.embedding.size() != dimension) {
             continue;
@@ -548,18 +598,17 @@ bool QdrantVectorStore::build(const std::vector<VectorRecord>& records, size_t d
         }
         point["vector"] = std::move(vector);
         points.push_back(std::move(point));
+        ++point_count;
+        if (points.size() >= batch_size) {
+            flush_points();
+        }
     }
-    const auto point_count = points.size();
     if (point_count == 0) {
         last_error_ = "no vectors matched dimension";
         return false;
     }
-
-    json::object upsert;
-    upsert["points"] = std::move(points);
-    auto upsert_response = httpJsonRequest("PUT", collection_url + "/points?wait=true", json::serialize(upsert), options_.api_key);
-    if (!upsert_response.error.empty() || upsert_response.status < 200 || upsert_response.status >= 300) {
-        last_error_ = "qdrant upsert failed: " + upsert_response.error + " status=" + std::to_string(upsert_response.status);
+    flush_points();
+    if (!upsert_ok) {
         return false;
     }
 
@@ -661,6 +710,20 @@ std::string QdrantVectorStore::lastError() const {
     return last_error_;
 }
 
+VectorStoreDiagnostics QdrantVectorStore::diagnostics() const {
+    if (options_.endpoint.empty() || options_.collection.empty()) {
+        return makeDiagnostics(*this, "config_error", "qdrant endpoint and collection are required");
+    }
+#ifndef QORNIX_HAS_CURL
+    return makeDiagnostics(*this, "dependency_unavailable", "Qdrant backend requires CURL support");
+#else
+    if (isReady()) {
+        return makeDiagnostics(*this, "ready");
+    }
+    return makeDiagnostics(*this, "not_ready", last_error_.empty() ? "collection is configured but not loaded or built" : last_error_);
+#endif
+}
+
 PgVectorStore::PgVectorStore(VectorStoreOptions options)
     : options_(std::move(options)) {
 }
@@ -689,6 +752,7 @@ bool PgVectorStore::build(const std::vector<VectorRecord>& records, size_t dimen
 
     const std::string table = options_.table;
     const std::vector<std::string> statements = {
+        "BEGIN",
         "CREATE EXTENSION IF NOT EXISTS vector",
         "CREATE TABLE IF NOT EXISTS " + table + " (id BIGINT PRIMARY KEY, embedding vector(" + std::to_string(dimension) + "))",
         "TRUNCATE TABLE " + table
@@ -699,6 +763,7 @@ bool PgVectorStore::build(const std::vector<VectorRecord>& records, size_t dimen
         if (status != PGRES_COMMAND_OK) {
             last_error_ = PQerrorMessage(conn);
             PQclear(result);
+            PQexec(conn, "ROLLBACK");
             PQfinish(conn);
             return false;
         }
@@ -718,6 +783,7 @@ bool PgVectorStore::build(const std::vector<VectorRecord>& records, size_t dimen
         if (PQresultStatus(result) != PGRES_COMMAND_OK) {
             last_error_ = PQerrorMessage(conn);
             PQclear(result);
+            PQexec(conn, "ROLLBACK");
             PQfinish(conn);
             return false;
         }
@@ -725,6 +791,15 @@ bool PgVectorStore::build(const std::vector<VectorRecord>& records, size_t dimen
         ++inserted;
     }
 
+    PGresult* commit = PQexec(conn, "COMMIT");
+    if (PQresultStatus(commit) != PGRES_COMMAND_OK) {
+        last_error_ = PQerrorMessage(conn);
+        PQclear(commit);
+        PQexec(conn, "ROLLBACK");
+        PQfinish(conn);
+        return false;
+    }
+    PQclear(commit);
     PQfinish(conn);
     if (inserted == 0) {
         last_error_ = "no vectors matched dimension";
@@ -811,6 +886,20 @@ size_t PgVectorStore::dimension() const {
 
 std::string PgVectorStore::lastError() const {
     return last_error_;
+}
+
+VectorStoreDiagnostics PgVectorStore::diagnostics() const {
+    if (options_.connection_string.empty() || !isSafeSqlIdentifier(options_.table)) {
+        return makeDiagnostics(*this, "config_error", "pgvector connection_string and safe table name are required");
+    }
+#ifndef QORNIX_HAS_LIBPQ
+    return makeDiagnostics(*this, "dependency_unavailable", "pgvector backend requires libpq support");
+#else
+    if (isReady()) {
+        return makeDiagnostics(*this, "ready");
+    }
+    return makeDiagnostics(*this, "not_ready", last_error_.empty() ? "table is configured but not loaded or built" : last_error_);
+#endif
 }
 
 std::unique_ptr<VectorStore> createVectorStore(const VectorStoreOptions& options) {

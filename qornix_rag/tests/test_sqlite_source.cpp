@@ -551,6 +551,12 @@ TEST(sqlite_source_persist_index_snapshot) {
     ASSERT_EQ(2, source->countPersistedDocuments("project:test"), "Document table count");
     ASSERT_EQ(2, source->countPersistedChunks("project:test"), "Chunk table count");
     ASSERT_EQ(2, source->countPersistedEmbeddings("project:test"), "Embedding table count");
+    auto embeddings = source->listPersistedEmbeddings("project:test", "tfidf:3");
+    ASSERT_EQ(2, embeddings.size(), "Persisted embeddings can be exported");
+    ASSERT_STR_EQ("project:test", embeddings.front().source_id, "Exported embedding source id");
+    ASSERT_STR_EQ("tfidf:3", embeddings.front().model_id, "Exported embedding model id");
+    ASSERT_EQ(3, embeddings.front().vector.embedding.size(), "Exported embedding dimension");
+    ASSERT_TRUE(embeddings.front().vector.label < embeddings.back().vector.label, "Export labels are stable and increasing");
 
     auto found = source->findPersistedDocument("doc/guide.md", "project:test");
     ASSERT_TRUE(found.has_value(), "Persisted document found");

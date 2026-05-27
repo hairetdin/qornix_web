@@ -1235,6 +1235,79 @@ std::optional<Document> SQLiteSource::findPersistedDocument(const std::string& r
     return result;
 }
 
+std::vector<PersistedEmbeddingRecord> SQLiteSource::listPersistedEmbeddings(
+    const std::string& source_id,
+    const std::string& model_id,
+    size_t limit,
+    size_t offset) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<PersistedEmbeddingRecord> records;
+
+#if !QORNIX_HAS_SQLITE
+    (void)source_id;
+    (void)model_id;
+    (void)limit;
+    (void)offset;
+    return records;
+#endif
+
+    if (!db_) {
+        return records;
+    }
+
+    const std::string effective_source = source_id.empty() ? config_.source_id : source_id;
+    std::string sql =
+        "SELECT chunk_id, source_id, model_id, backend, dimension, vector, content_hash "
+        "FROM rag_embeddings WHERE source_id = ?";
+    if (!model_id.empty()) {
+        sql += " AND model_id = ?";
+    }
+    sql += " ORDER BY chunk_id, model_id";
+    if (limit > 0) {
+        sql += " LIMIT ? OFFSET ?";
+    }
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return records;
+    }
+
+    int bind_index = 1;
+    bindText(stmt, bind_index++, effective_source);
+    if (!model_id.empty()) {
+        bindText(stmt, bind_index++, model_id);
+    }
+    if (limit > 0) {
+        bindInt64(stmt, bind_index++, static_cast<std::int64_t>(limit));
+        bindInt64(stmt, bind_index++, static_cast<std::int64_t>(offset));
+    }
+
+    size_t label = offset;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        PersistedEmbeddingRecord record;
+        const unsigned char* chunk = sqlite3_column_text(stmt, 0);
+        const unsigned char* source = sqlite3_column_text(stmt, 1);
+        const unsigned char* model = sqlite3_column_text(stmt, 2);
+        const unsigned char* backend = sqlite3_column_text(stmt, 3);
+        const unsigned char* hash = sqlite3_column_text(stmt, 6);
+        record.chunk_id = chunk ? reinterpret_cast<const char*>(chunk) : "";
+        record.source_id = source ? reinterpret_cast<const char*>(source) : "";
+        record.model_id = model ? reinterpret_cast<const char*>(model) : "";
+        record.backend = backend ? reinterpret_cast<const char*>(backend) : "";
+        record.content_hash = hash ? reinterpret_cast<const char*>(hash) : "";
+        record.vector.label = label++;
+        record.vector.embedding = columnFloatVector(stmt, 5);
+        const auto dimension = static_cast<size_t>(sqlite3_column_int64(stmt, 4));
+        if (!record.chunk_id.empty() && !record.vector.embedding.empty()
+            && record.vector.embedding.size() == dimension) {
+            records.push_back(std::move(record));
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return records;
+}
+
 bool SQLiteSource::deletePersistedDocument(const std::string& relative_path,
                                            const std::string& source_id) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -1528,6 +1601,25 @@ bool SQLiteSource::bindFloatVector(sqlite3_stmt* stmt, int index, const std::vec
     }
     const auto byte_size = static_cast<int>(values.size() * sizeof(float));
     return sqlite3_bind_blob(stmt, index, values.data(), byte_size, SQLITE_TRANSIENT) == SQLITE_OK;
+#endif
+}
+
+std::vector<float> SQLiteSource::columnFloatVector(sqlite3_stmt* stmt, int index) const {
+    std::vector<float> values;
+#if !QORNIX_HAS_SQLITE
+    (void)stmt;
+    (void)index;
+    return values;
+#else
+    const void* blob = sqlite3_column_blob(stmt, index);
+    const int byte_size = sqlite3_column_bytes(stmt, index);
+    if (!blob || byte_size <= 0 || byte_size % static_cast<int>(sizeof(float)) != 0) {
+        return values;
+    }
+    const auto count = static_cast<size_t>(byte_size) / sizeof(float);
+    const auto* begin = static_cast<const float*>(blob);
+    values.assign(begin, begin + count);
+    return values;
 #endif
 }
 
