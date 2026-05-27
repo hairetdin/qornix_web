@@ -154,6 +154,7 @@ struct VectorStoreConfig {
     std::string connection_string;
     std::string table = "qornix_rag_vectors";
     std::string distance = "Cosine";
+    size_t upsert_batch_size = 512;
     bool recreate = false;
     bool auto_load = true;
     bool auto_save = false;
@@ -824,6 +825,31 @@ public:
         return last_vector_store_status_;
     }
 
+    VectorStoreDiagnostics get_vector_store_diagnostics() const {
+        if (!search_config_.use_hybrid) {
+            return VectorStoreDiagnostics{"none", "disabled", "hybrid search is disabled", false, 0, 0};
+        }
+        if (vector_store_) {
+            return vector_store_->diagnostics();
+        }
+        auto store = create_vector_store();
+        if (!store) {
+            return VectorStoreDiagnostics{
+                vector_store_config_.backend,
+                "backend_unavailable",
+                "unknown vector store backend",
+                false,
+                0,
+                0
+            };
+        }
+        auto diagnostics = store->diagnostics();
+        if (diagnostics.detail.empty() && !last_vector_store_status_.empty()) {
+            diagnostics.detail = last_vector_store_status_;
+        }
+        return diagnostics;
+    }
+
     bool is_query_expansion_enabled() const {
         return search_config_.use_query_expansion;
     }
@@ -1018,6 +1044,7 @@ private:
         options.connection_string = vector_store_config_.connection_string;
         options.table = vector_store_config_.table;
         options.distance = vector_store_config_.distance;
+        options.upsert_batch_size = vector_store_config_.upsert_batch_size;
         options.recreate = vector_store_config_.recreate;
         return createVectorStore(options);
     }

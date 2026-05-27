@@ -128,6 +128,11 @@ public:
     size_t countPersistedEmbeddings(const std::string& source_id = "") const override;
     std::optional<Document> findPersistedDocument(const std::string& relative_path,
                                                   const std::string& source_id = "") const override;
+    std::vector<PersistedEmbeddingRecord> listPersistedEmbeddings(
+        const std::string& source_id = "",
+        const std::string& model_id = "",
+        size_t limit = 0,
+        size_t offset = 0) const override;
     bool deletePersistedDocument(const std::string& relative_path,
                                  const std::string& source_id = "");
 
@@ -162,6 +167,7 @@ private:
     bool bindText(sqlite3_stmt* stmt, int index, const std::string& value) const;
     bool bindInt64(sqlite3_stmt* stmt, int index, std::int64_t value) const;
     bool bindFloatVector(sqlite3_stmt* stmt, int index, const std::vector<float>& values) const;
+    std::vector<float> columnFloatVector(sqlite3_stmt* stmt, int index) const;
     size_t countTableRows(const std::string& table, const std::string& source_id) const;
     IngestionJobRecord rowToIngestionJob(sqlite3_stmt* stmt) const;
     QASource::QAPair rowToQAPair(sqlite3_stmt* stmt) const;

@@ -30,6 +30,11 @@ Important fields:
 - `rag.embedding_dim`
 - `rag.vector_store_backend`
 - `rag.vector_store_status`
+- `rag.vector_store_health_status`
+- `rag.vector_store_health_detail`
+- `rag.vector_store_ready`
+- `rag.vector_store_size`
+- `rag.vector_store_dimension`
 - `rag.query_expansion`
 - `rag.reranking`
 - `llm.status`

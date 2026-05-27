@@ -35,6 +35,7 @@ int main() {
         flat["vector_store.connection_string"] = "postgresql://localhost/test";
         flat["vector_store.table"] = "test_vectors";
         flat["vector_store.distance"] = "Cosine";
+        flat["vector_store.upsert_batch_size"] = "128";
         flat["vector_store.recreate"] = "true";
         flat["vector_store.auto_load"] = "true";
         flat["vector_store.auto_save"] = "true";
@@ -71,6 +72,7 @@ int main() {
         assert(config.engine.vector_store.connection_string == "postgresql://localhost/test");
         assert(config.engine.vector_store.table == "test_vectors");
         assert(config.engine.vector_store.distance == "Cosine");
+        assert(config.engine.vector_store.upsert_batch_size == 128);
         assert(config.engine.vector_store.recreate);
         assert(config.engine.vector_store.auto_load);
         assert(config.engine.vector_store.auto_save);

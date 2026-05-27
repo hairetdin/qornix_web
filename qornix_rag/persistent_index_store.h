@@ -20,6 +20,15 @@ struct PersistedIndexStats {
     size_t deleted_documents = 0;
 };
 
+struct PersistedEmbeddingRecord {
+    std::string chunk_id;
+    std::string source_id;
+    std::string model_id;
+    std::string backend;
+    std::string content_hash;
+    VectorRecord vector;
+};
+
 class PersistentIndexStore {
 public:
     virtual ~PersistentIndexStore() = default;
@@ -33,4 +42,9 @@ public:
     virtual size_t countPersistedEmbeddings(const std::string& source_id = "") const = 0;
     virtual std::optional<Document> findPersistedDocument(const std::string& relative_path,
                                                           const std::string& source_id = "") const = 0;
+    virtual std::vector<PersistedEmbeddingRecord> listPersistedEmbeddings(
+        const std::string& source_id = "",
+        const std::string& model_id = "",
+        size_t limit = 0,
+        size_t offset = 0) const = 0;
 };

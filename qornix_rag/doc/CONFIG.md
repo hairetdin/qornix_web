@@ -177,6 +177,7 @@ vector_store:
   endpoint: "http://127.0.0.1:6333"
   collection: qornix_rag_vectors
   distance: Cosine
+  upsert_batch_size: 512
   auto_load: false
   auto_save: false
 ```
@@ -186,6 +187,7 @@ vector_store:
   backend: pgvector
   connection_string: "host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret"
   table: qornix_rag_vectors
+  upsert_batch_size: 512
   auto_load: false
   auto_save: false
 ```
@@ -200,6 +202,34 @@ vector_store:
 ```
 
 Qdrant requires CURL support at build time and a reachable Qdrant server. pgvector requires libpq support, PostgreSQL, and the `vector` extension in the target database. Faiss is optional; if Faiss headers/library are not available during CMake configuration, selecting `backend: faiss` reports a dependency-unavailable vector-store status instead of silently falling back.
+
+Health and diagnostics responses expose backend-specific vector fields:
+
+- `vector_store_health_status`: `ready`, `not_ready`, `config_error`, `dependency_unavailable`, `backend_unavailable`, or `disabled`;
+- `vector_store_health_detail`: configuration, dependency, or last backend error detail;
+- `vector_store_ready`, `vector_store_size`, and `vector_store_dimension`.
+
+Persisted SQLite embeddings can be migrated into a deployment-scale backend with:
+
+```bash
+qornix_rag_vector_migrate \
+  --sqlite-db qornix_rag/data/rag_kb.db \
+  --source-id local_markdown \
+  --model-id tfidf:d256 \
+  --target qdrant \
+  --endpoint http://127.0.0.1:6333 \
+  --collection qornix_rag_vectors \
+  --label-map qornix_rag/data/qdrant_label_map.json \
+  --recreate
+```
+
+For pgvector, replace the target options with:
+
+```bash
+--target pgvector \
+--connection-string "host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret" \
+--table qornix_rag_vectors
+```
 
 ## Retrieval Quality
 

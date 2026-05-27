@@ -21,6 +21,7 @@ struct VectorStoreOptions {
     std::string connection_string;
     std::string table = "qornix_rag_vectors";
     std::string distance = "cosine";
+    size_t upsert_batch_size = 512;
     bool recreate = false;
 };
 
@@ -33,6 +34,15 @@ struct VectorSearchHit {
     size_t label = 0;
     float distance = 0.0f;
     double score = 0.0;
+};
+
+struct VectorStoreDiagnostics {
+    std::string backend;
+    std::string status;
+    std::string detail;
+    bool ready = false;
+    size_t size = 0;
+    size_t dimension = 0;
 };
 
 class VectorStore {
@@ -49,6 +59,7 @@ public:
     virtual size_t size() const = 0;
     virtual size_t dimension() const = 0;
     virtual std::string lastError() const = 0;
+    virtual VectorStoreDiagnostics diagnostics() const = 0;
 };
 
 class LocalHnswVectorStore final : public VectorStore {
@@ -66,6 +77,7 @@ public:
     size_t size() const override;
     size_t dimension() const override;
     std::string lastError() const override;
+    VectorStoreDiagnostics diagnostics() const override;
 
 private:
     struct Impl;
@@ -87,6 +99,7 @@ public:
     size_t size() const override;
     size_t dimension() const override;
     std::string lastError() const override;
+    VectorStoreDiagnostics diagnostics() const override;
 
 private:
     struct Impl;
@@ -107,6 +120,7 @@ public:
     size_t size() const override;
     size_t dimension() const override;
     std::string lastError() const override;
+    VectorStoreDiagnostics diagnostics() const override;
 
 private:
     VectorStoreOptions options_;
@@ -130,6 +144,7 @@ public:
     size_t size() const override;
     size_t dimension() const override;
     std::string lastError() const override;
+    VectorStoreDiagnostics diagnostics() const override;
 
 private:
     VectorStoreOptions options_;

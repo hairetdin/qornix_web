@@ -30,6 +30,7 @@ From the build directory:
 Open:
 
 ```text
+http://127.0.0.1:8008/
 http://127.0.0.1:8008/rag
 http://127.0.0.1:8008/api/rag/health
 ```

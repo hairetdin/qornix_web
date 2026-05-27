@@ -55,6 +55,7 @@ auth:
 
 rag:
   route:
+    expose_root_ui: true
     ui_path: /rag
     api_prefix: /api/rag
 
@@ -137,6 +138,7 @@ rag:
     # connection_string: host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret
     # table: qornix_rag_vectors
     # distance: Cosine
+    upsert_batch_size: 512
     auto_load: true
     auto_save: true
 

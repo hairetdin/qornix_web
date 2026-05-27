@@ -27,6 +27,12 @@ int main() {
     assert(store.isReady());
     assert(store.size() == 3);
     assert(store.dimension() == 3);
+    auto local_diagnostics = store.diagnostics();
+    assert(local_diagnostics.backend == "local_hnsw");
+    assert(local_diagnostics.status == "ready");
+    assert(local_diagnostics.ready);
+    assert(local_diagnostics.size == 3);
+    assert(local_diagnostics.dimension == 3);
 
     auto hits = store.search({1.0f, 0.0f, 0.0f}, 2);
     assert(!hits.empty());
@@ -53,6 +59,9 @@ int main() {
     auto faiss = createVectorStore(faiss_options);
     assert(faiss);
     assert(faiss->backendName() == "faiss");
+    auto faiss_diagnostics = faiss->diagnostics();
+    assert(faiss_diagnostics.backend == "faiss");
+    assert(faiss_diagnostics.status == "not_ready" || faiss_diagnostics.status == "dependency_unavailable");
 
     VectorStoreOptions qdrant_options;
     qdrant_options.backend = "qdrant";
@@ -63,6 +72,9 @@ int main() {
     assert(qdrant->backendName() == "qdrant");
     assert(!qdrant->load("", 0));
     assert(!qdrant->lastError().empty());
+    auto qdrant_diagnostics = qdrant->diagnostics();
+    assert(qdrant_diagnostics.backend == "qdrant");
+    assert(qdrant_diagnostics.status == "not_ready" || qdrant_diagnostics.status == "dependency_unavailable");
 
     VectorStoreOptions pg_options;
     pg_options.backend = "pgvector";
@@ -73,6 +85,17 @@ int main() {
     assert(pg->backendName() == "pgvector");
     assert(!pg->load("", 0));
     assert(!pg->lastError().empty());
+    auto pg_diagnostics = pg->diagnostics();
+    assert(pg_diagnostics.backend == "pgvector");
+    assert(pg_diagnostics.status == "not_ready" || pg_diagnostics.status == "dependency_unavailable");
+
+    VectorStoreOptions bad_pg_options;
+    bad_pg_options.backend = "pgvector";
+    bad_pg_options.connection_string = "postgresql://127.0.0.1/qornix";
+    bad_pg_options.table = "bad-table-name";
+    auto bad_pg = createVectorStore(bad_pg_options);
+    assert(bad_pg);
+    assert(bad_pg->diagnostics().status == "config_error");
 
     VectorStoreOptions unknown_options;
     unknown_options.backend = "unknown";

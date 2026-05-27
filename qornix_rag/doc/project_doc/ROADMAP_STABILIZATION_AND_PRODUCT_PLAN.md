@@ -59,7 +59,7 @@ Post-stabilization 26: done
 Post-stabilization 27: done
 Post-stabilization 28: done
 Post-stabilization 29: done
-Next: Vector backend production hardening
+Next: Advanced ingestion metadata
 ```
 
 ### 0.1 Current explicit open work
@@ -70,41 +70,45 @@ The baseline stabilization scope is complete through Post-stabilization 29. The 
    - make generated `rag_app` and `--with-rag` RAG views easier to use after auth/RBAC hardening;
    - expose existing diagnostics, source attribution, ingestion progress, QA tags, import/export, and model-switching affordances coherently in the generated app UI;
    - verify the generated app UI with authenticated read/write/admin flows.
-2. Pending: Vector backend production hardening:
-   - add live integration tests for Qdrant and PostgreSQL+pgvector;
+2. Done baseline: Dedicated `rag_app` root route:
+   - expose the generated RAG UI at `/` as well as `/rag`, so the server startup URL does not lead to a 404;
+   - keep existing `--with-rag` apps from claiming `/`.
+3. Done: Vector backend production hardening:
+   - expose backend-specific vector health diagnostics for local HNSW, Faiss, Qdrant, and pgvector;
+   - add opt-in live integration tests for Qdrant and PostgreSQL+pgvector;
    - add Faiss CI coverage where Faiss is available;
-   - add migration tooling from local HNSW/Faiss persisted vectors to Qdrant or pgvector;
-   - add large-corpus batch/upsert pagination, delete synchronization, and backend-specific health diagnostics.
-3. Pending: Advanced ingestion metadata:
+   - add migration tooling from persisted SQLite embeddings to local HNSW/Faiss, Qdrant, or pgvector;
+   - add Qdrant batch upsert pagination and target synchronization, plus pgvector transactional rebuild synchronization.
+4. Pending: Advanced ingestion metadata:
    - add richer PDF metadata, outlines, attachments, page boxes, and diagnostics;
    - add richer DOCX headings, tables, footnotes/endnotes, comments, styles, and document properties;
    - add richer XLSX/CSV formulas, merged cells, workbook/table metadata, formatting signals, and typed cells;
    - add richer PPTX notes, comments, alt text, media captions, speaker metadata, and slide layout metadata;
    - add richer image/OCR EXIF, dimensions, confidence, coordinates, detected language, captions, and diagnostics.
-4. Pending: Code and chunking depth:
+5. Pending: Code and chunking depth:
    - add source-repository structure-aware chunking;
    - add AST-grade language parsers for symbols/classes/methods/functions/namespaces;
    - preserve richer parser metadata through chunking, persistence, retrieval, and citation rendering;
    - expand chunk quality tests for boundaries, metadata preservation, duplicates, tiny/large sections, and mixed Markdown/code.
-5. Pending: Embedding/model registry hardening:
+6. Pending: Embedding/model registry hardening:
    - add automatic model discovery from the local models directory;
    - add deeper model/tokenizer compatibility validation after download;
    - support common Hugging Face tokenizer JSON variants beyond the first greedy WordPiece path;
    - integrate exact active-tokenizer sizing into chunking;
    - add persistent embedding cache storage and migration/rebuild flows for model, tokenizer, dimension, pooling, and normalization changes;
    - add ONNX Runtime integration tests with a small real model fixture and clearer shape/pooling/tokenizer diagnostics.
-6. Pending: RAG quality beyond deterministic baseline:
+7. Pending: RAG quality beyond deterministic baseline:
    - add learned or model-based reranking;
    - add query rewriting and multi-query retrieval with visible diagnostics;
    - add model-based claim grounding against cited context;
    - add user feedback capture for helpfulness, missing context, bad citations, and wrong answers;
    - expand analytics and evaluation datasets for long documents and generated template apps.
-7. Pending: QA/wiki deeper quality:
+8. Pending: QA/wiki deeper quality:
    - wire duplicate warnings into the add/edit UI before save;
    - add production-grade Markdown sanitization when richer rendering is enabled;
    - add optional FTS/ORM-backed QA search and larger-scale tag autocomplete;
    - add provenance/version history beyond string metadata.
-8. Pending: Operations, deployment, and security depth:
+9. Pending: Operations, deployment, and security depth:
    - add durable audit-event persistence and export;
    - add provider-backed invite/password-reset delivery;
    - add cookie domain/max-age controls;
@@ -113,7 +117,7 @@ The baseline stabilization scope is complete through Post-stabilization 29. The 
    - add first-class backup/restore commands;
    - add upload endpoints with allowlists, MIME checks, and size enforcement;
    - add SBOM/vulnerability scanning guidance, secret mounting examples, alert examples, and full Docker Compose deploy smoke automation.
-9. Pending: Remaining LLM/provider diagnostics:
+10. Pending: Remaining LLM/provider diagnostics:
    - move model-list extraction and token-usage parsing to the structured `Boost.JSON` parser path;
    - add real-provider fixtures for Ollama, OpenAI-compatible APIs, vLLM, and LM Studio;
    - unify streaming SSE parsing with the structured parser path.
@@ -1250,18 +1254,18 @@ Target dynamic API / ORM requirements:
 
 ### 11.5 Production vector backend adapters
 
-Status: completed baseline in Post-stabilization 27; deeper production hardening remains deferred.
+Status: production hardening completed for the current roadmap scope.
 
 E1 established persistent document/chunk/embedding metadata and a `PersistentIndexStore` boundary. The first post-stabilization baselines added the retrieval-time `VectorStore` boundary, local HNSW save/load, vector index metadata sidecars, stale-index detection, and rebuild-on-stale behavior. Post-stabilization 27 added optional Faiss, Qdrant, and pgvector adapters behind the same `VectorStore` factory plus config/docs/test coverage.
 
-The following vector backend capabilities are still not complete:
+Completed production-hardening capabilities:
 
-- Keep SQLite-backed metadata as the local default, but avoid coupling retrieval to raw SQLite BLOB scans.
-- Add service-backed integration tests against live Qdrant and PostgreSQL+pgvector containers.
-- Add Faiss CI coverage in an environment with Faiss installed.
-- Add migration tooling for moving persisted local HNSW/Faiss vectors into Qdrant or pgvector.
-- Add batch/upsert pagination and delete synchronization for very large corpora.
-- Add backend-specific health diagnostics beyond dependency and connection errors.
+- Keep SQLite-backed metadata as the local default while exporting persisted embeddings through `PersistentIndexStore`;
+- add opt-in service-backed integration tests against live Qdrant and PostgreSQL+pgvector endpoints;
+- add Faiss CI coverage in environments where Faiss is installed;
+- add `qornix_rag_vector_migrate` for moving persisted SQLite embeddings into local HNSW/Faiss, Qdrant, or pgvector;
+- add Qdrant batch upsert pagination and synchronized target rebuilds, and pgvector transactional rebuild synchronization;
+- expose backend-specific health diagnostics through health, stats, and admin diagnostics APIs.
 
 ### 11.6 Advanced ingestion adapters
 

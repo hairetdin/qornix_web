@@ -10,6 +10,60 @@ It is project documentation and must stay under `qornix_rag/doc/project_doc/`.
 - `pending` - planned but not started.
 - `deferred` - intentionally moved to a later milestone.
 
+## 2026-05-27 - Generated rag_app root route fix
+
+Status: `done`
+
+Reason:
+
+- dedicated generated `rag_app` projects registered the RAG UI at `/rag`, but the shared server startup banner printed `http://localhost:8008`;
+- opening that root URL returned 404 even though `/rag` and `/api/rag/health` were healthy.
+
+Implemented:
+
+- added integrated config support for `rag.route.expose_root_ui`;
+- enabled `rag.route.expose_root_ui: true` only in the dedicated `templates/rag_app/config.yaml`;
+- when root exposure is enabled and the configured UI path is not `/`, RAG route setup now registers `/` as a UI alias in addition to `/rag`;
+- updated generator output and generated RAG app docs to list `http://127.0.0.1:8008/`.
+
+Validation:
+
+```text
+generated rag_app:
+  GET / -> 200
+  GET /rag -> 200
+  GET /api/rag/health -> 200
+```
+
+## 2026-05-27 - Vector backend production hardening completed
+
+Status: `done`
+
+Scope:
+
+- complete `0.1` item 3, Vector backend production hardening.
+
+Implemented:
+
+- added `VectorStoreDiagnostics` and `VectorStore::diagnostics()`;
+- implemented diagnostic statuses for local HNSW, Faiss, Qdrant, and pgvector;
+- exposed vector diagnostics through RAG service health, API health, stats, and admin diagnostics JSON;
+- added `PersistentIndexStore::listPersistedEmbeddings()` and SQLite-backed persisted embedding export;
+- added `vector_store.upsert_batch_size` config parsing and examples;
+- added Qdrant batch upsert pagination and synchronized full-target rebuild behavior;
+- wrapped pgvector rebuilds in a transaction while retaining truncate-based stale delete synchronization;
+- added opt-in live vector backend tests for Qdrant and PostgreSQL+pgvector through `QORNIX_TEST_QDRANT_URL` and `QORNIX_TEST_PGVECTOR_DSN`;
+- added a dedicated Faiss roundtrip test that is registered when Faiss is available at configure time;
+- added `qornix_rag_vector_migrate` for migrating persisted SQLite embeddings to local HNSW/Faiss, Qdrant, or pgvector;
+- documented the new vector diagnostic fields.
+
+Validation:
+
+```text
+cmake --build build --target test_vector_store test_vector_store_live test_faiss_vector_store test_embedding_config test_sqlite_source qornix_rag_vector_migrate qornix_rag -j2
+ctest --test-dir build -R 'test_(vector_store|vector_store_live|faiss_vector_store|embedding_config|sqlite_source)$' --output-on-failure
+```
+
 ## 2026-05-22 - Milestone 0 completed
 
 Status: `done`
@@ -2123,14 +2177,13 @@ authenticated generated rag_app smoke:
 - Post-stabilization 27 - production vector backend adapter baseline: `done`
 - Post-stabilization 28 - generated-app hardening baseline: `done`
 - Post-stabilization 29 - generated-app RAG UI polish: `done`
-- Next - Vector backend production hardening: `pending`
+- Vector backend production hardening: `done`
+- Next - Advanced ingestion metadata: `pending`
 
 ## Deferred / known follow-ups
 
 These items are intentionally not closed by the completed stabilization baselines through Post-stabilization 28. Post-stabilization 25-28 completed the first embedding/model operations, QA/wiki quality, production vector backend adapter, and generated-app hardening baselines; the items below are deeper follow-ups beyond those baselines:
 
-- live vector backend integration tests for Qdrant/PostgreSQL+pgvector and Faiss CI coverage;
-- vector backend migration tooling and large-corpus synchronization beyond the first adapter baseline;
 - arbitrary document ingestion beyond current text/Markdown/code/HTML/PDF-text/DOCX-text/CSV/XLSX-text/PPTX-text/image-OCR/QA flows;
 - richer image/OCR metadata plus richer PDF/DOCX/XLSX/CSV/PPTX structure and metadata parsing;
 - production security hardening beyond the generated-app hardening baseline, such as durable audit storage, delivered account recovery, MFA, tracing, alerting, and secret-management docs;

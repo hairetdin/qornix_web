@@ -178,6 +178,39 @@ if(NOT QORNIX_RAG_CORE_LINK_TARGET)
 endif()
 add_test(NAME test_vector_store COMMAND test_vector_store)
 
+add_executable(test_vector_store_live
+    test_vector_store_live.cpp
+)
+target_include_directories(test_vector_store_live PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+target_link_libraries(test_vector_store_live PRIVATE
+    ${QORNIX_RAG_CORE_LINK_TARGET}
+)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_vector_store_live PRIVATE
+        ../vector_store.cpp
+    )
+endif()
+add_test(NAME test_vector_store_live COMMAND test_vector_store_live)
+set_tests_properties(test_vector_store_live PROPERTIES LABELS "live;vector-store")
+
+if(QORNIX_RAG_FAISS_AVAILABLE)
+    add_executable(test_faiss_vector_store
+        test_faiss_vector_store.cpp
+    )
+    target_include_directories(test_faiss_vector_store PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+    )
+    target_link_libraries(test_faiss_vector_store PRIVATE
+        ${QORNIX_RAG_CORE_LINK_TARGET}
+    )
+    add_test(NAME test_faiss_vector_store COMMAND test_faiss_vector_store)
+    set_tests_properties(test_faiss_vector_store PROPERTIES LABELS "faiss;vector-store")
+endif()
+
 add_executable(test_embedding_config
     test_embedding_config.cpp
 )

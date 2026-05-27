@@ -6,7 +6,7 @@ Runtime ownership:
 
 - Qornix Web owns server startup, bind address, logging, and application config.
 - `qornix_rag` owns RAG indexing, search, Ask, QA storage, and RAG UI/API routes.
-- Integrated routes default to `/rag` and `/api/rag/*`.
+- Dedicated generated RAG apps expose the UI at `/` and `/rag`, with APIs under `/api/rag/*`.
 
 The generated application should be configured through its own `config.yaml`, not through the standalone `qornix_rag/config.yaml`.
 

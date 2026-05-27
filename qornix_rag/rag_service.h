@@ -181,6 +181,11 @@ struct RagServiceHealth {
     std::vector<std::string> embedding_registry_warnings;
     std::string vector_store_backend;
     std::string vector_store_status;
+    std::string vector_store_health_status;
+    std::string vector_store_health_detail;
+    bool vector_store_ready = false;
+    size_t vector_store_size = 0;
+    size_t vector_store_dimension = 0;
     bool hybrid_search = true;
     bool query_expansion = true;
     bool reranking = true;
