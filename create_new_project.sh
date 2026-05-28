@@ -89,6 +89,7 @@ replace_placeholders() {
     local with_rag_install="${10}"
     local with_rag_config="${11}"
     local with_rag_readme="${12}"
+    local with_rag_nav_link="${13}"
     local tmp_file
     tmp_file="${file}.tmp"
     if command -v python3 >/dev/null 2>&1; then
@@ -103,6 +104,7 @@ replace_placeholders() {
         WITH_RAG_INSTALL_VALUE="$with_rag_install" \
         WITH_RAG_CONFIG_VALUE="$with_rag_config" \
         WITH_RAG_README_VALUE="$with_rag_readme" \
+        WITH_RAG_NAV_LINK_VALUE="$with_rag_nav_link" \
         python3 - "$file" "$tmp_file" <<'PY'
 import os
 import sys
@@ -120,6 +122,7 @@ replacements = {
     "@WITH_RAG_INSTALL@": os.environ["WITH_RAG_INSTALL_VALUE"],
     "@WITH_RAG_CONFIG@": os.environ["WITH_RAG_CONFIG_VALUE"],
     "@WITH_RAG_README@": os.environ["WITH_RAG_README_VALUE"],
+    "@WITH_RAG_NAV_LINK@": os.environ["WITH_RAG_NAV_LINK_VALUE"],
 }
 with open(src, "r", encoding="utf-8") as handle:
     content = handle.read()
@@ -141,6 +144,7 @@ PY
             -e "s|@WITH_RAG_INSTALL@||g" \
             -e "s|@WITH_RAG_CONFIG@||g" \
             -e "s|@WITH_RAG_README@||g" \
+            -e "s|@WITH_RAG_NAV_LINK@||g" \
             "$file" > "$tmp_file"
     fi
     mv "$tmp_file" "$file"
@@ -265,12 +269,14 @@ with_rag_post_build=""
 with_rag_install=""
 with_rag_config=""
 with_rag_readme=""
+with_rag_nav_link=""
 
 if [ "$with_rag" = "true" ]; then
     with_rag_cmake_bool="\${${project_name_upper}_ENABLE_RAG}"
     with_rag_project_option="option(${project_name_upper}_ENABLE_RAG \"Enable embedded qornix_rag routes\" ON)"
     with_rag_compile_def="\$<\$<BOOL:\${${project_name_upper}_ENABLE_RAG}>:${project_name_upper}_ENABLE_RAG=1>"
     with_rag_link_lib="\$<\$<BOOL:\${${project_name_upper}_ENABLE_RAG}>:qornix::rag_extension>"
+    with_rag_nav_link="<a href=\"/rag\">RAG</a>"
     with_rag_post_build="    COMMAND \${CMAKE_COMMAND} -E copy_if_different \"\${CMAKE_CURRENT_SOURCE_DIR}/download_onnx_model.sh\" \"\${${project_name_upper}_DEPLOY_DIR}/download_onnx_model.sh\"
     COMMAND \${CMAKE_COMMAND} -E copy_directory \"\${CMAKE_CURRENT_SOURCE_DIR}/knowledge_base\" \"\${${project_name_upper}_DEPLOY_DIR}/knowledge_base\"
     COMMAND \${CMAKE_COMMAND} -E copy_directory \"\${CMAKE_CURRENT_SOURCE_DIR}/models\" \"\${${project_name_upper}_DEPLOY_DIR}/models\"
@@ -467,7 +473,7 @@ fi
 template_file_list="$(mktemp)"
 find "$project_abs_path" -type f -name '*.in' | sort > "$template_file_list"
 while IFS= read -r file; do
-    replace_placeholders "$file" "$project_name" "$project_name_upper" "$qornix_web_root_for_cmake" "$with_rag_cmake_bool" "$with_rag_project_option" "$with_rag_compile_def" "$with_rag_link_lib" "$with_rag_post_build" "$with_rag_install" "$with_rag_config" "$with_rag_readme"
+    replace_placeholders "$file" "$project_name" "$project_name_upper" "$qornix_web_root_for_cmake" "$with_rag_cmake_bool" "$with_rag_project_option" "$with_rag_compile_def" "$with_rag_link_lib" "$with_rag_post_build" "$with_rag_install" "$with_rag_config" "$with_rag_readme" "$with_rag_nav_link"
     mv "$file" "${file%.in}"
 done < "$template_file_list"
 rm -f "$template_file_list"
@@ -480,7 +486,7 @@ while IFS= read -r file; do
         *.in) continue ;;
     esac
     if grep -q '@PROJECT_NAME@\|@PROJECT_NAME_UPPER@\|@QORNIX_WEB_ROOT@\|@WITH_RAG_' "$file" 2>/dev/null; then
-        replace_placeholders "$file" "$project_name" "$project_name_upper" "$qornix_web_root_for_cmake" "$with_rag_cmake_bool" "$with_rag_project_option" "$with_rag_compile_def" "$with_rag_link_lib" "$with_rag_post_build" "$with_rag_install" "$with_rag_config" "$with_rag_readme"
+        replace_placeholders "$file" "$project_name" "$project_name_upper" "$qornix_web_root_for_cmake" "$with_rag_cmake_bool" "$with_rag_project_option" "$with_rag_compile_def" "$with_rag_link_lib" "$with_rag_post_build" "$with_rag_install" "$with_rag_config" "$with_rag_readme" "$with_rag_nav_link"
     fi
 done < "$all_file_list"
 rm -f "$all_file_list"

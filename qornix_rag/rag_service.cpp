@@ -333,9 +333,9 @@ std::string groundingStatus(double confidence, size_t context_count) {
 }
 
 bool isFallbackAnswer(const std::string& answer) {
-    return answer.rfind("LLM недоступен", 0) == 0 ||
-           answer.rfind("LLM не настроен", 0) == 0 ||
-           answer.rfind("Ошибка:", 0) == 0;
+    return answer.rfind("LLM unavailable", 0) == 0 ||
+           answer.rfind("LLM is not configured", 0) == 0 ||
+           answer.rfind("Error:", 0) == 0;
 }
 
 std::vector<std::string> uniqueOrdered(const std::vector<std::string>& values) {
@@ -1243,7 +1243,7 @@ RagServiceAskResponse RagService::ask(const std::string& question,
                 : (llm_client_->is_available() ? "ok" : "unavailable");
         }
     } else {
-        response.answer = "LLM недоступен. Вот релевантные фрагменты:\n" + context_text;
+        response.answer = "LLM unavailable. Relevant context fragments:\n" + context_text;
         response.llm_status = "unavailable";
         response.response_time_ms = 0;
     }

@@ -1659,9 +1659,9 @@ void RagApiHandler::handlePost(
                     end_time - start_time).count();
 
                 const bool llm_fallback_answer =
-                    answer.rfind("LLM недоступен", 0) == 0 ||
-                    answer.rfind("LLM не настроен", 0) == 0 ||
-                    answer.rfind("Ошибка:", 0) == 0;
+                    answer.rfind("LLM unavailable", 0) == 0 ||
+                    answer.rfind("LLM is not configured", 0) == 0 ||
+                    answer.rfind("Error:", 0) == 0;
 
                 response["answer"] = answer;
                 if (llm_result.status == "parser_error" ||
@@ -1708,7 +1708,7 @@ void RagApiHandler::handlePost(
                 }
             } else {
                 // LLM not available - return context only
-                response["answer"] = "LLM недоступен. Вот релевантные фрагменты:\n" + context;
+                response["answer"] = "LLM unavailable. Relevant context fragments:\n" + context;
                 response["llm_status"] = "unavailable";
                 response["response_time_ms"] = 0;
             }
@@ -1772,7 +1772,7 @@ void RagApiHandler::handlePost(
                 results.resize(questions.size());
                 for (size_t i = 0; i < questions.size(); i++) {
                     results[i].question = questions[i].question;
-                    results[i].answer = "LLM недоступен. Вот релевантные фрагменты:\n" + questions[i].context;
+                    results[i].answer = "LLM unavailable. Relevant context fragments:\n" + questions[i].context;
                     results[i].success = false;
                     results[i].error = "LLM not available";
                 }
@@ -3667,7 +3667,7 @@ void setupRagRoutes(HttpServer& server,
 #endif
                     , RagRouteOptions options
                     ) {
-    std::cout << "\U0001f527\U0001f4dd\u0414\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0438\u0435 RAG \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u043e\u0432..." << std::endl;
+    std::cout << "🔧📝 Adding RAG routes..." << std::endl;
     auto rag_engine = rag_service ? rag_service->engine() : nullptr;
     auto llm_client = rag_service ? rag_service->llm() : nullptr;
 
@@ -3679,7 +3679,7 @@ void setupRagRoutes(HttpServer& server,
     if (options.expose_root_ui || options.ui_path != "/") {
         const std::string api_base = options.api_prefix == "/api" ? "" : options.api_prefix;
         server.add_route(options.ui_path, std::make_shared<RagWebHandler>(templates_dir, api_base));
-        std::cout << "  \u2713 GET  " << options.ui_path << " - Web \u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441"
+        std::cout << "  \u2713 GET  " << options.ui_path << " - Web interface"
                   << " (templates: " << templates_dir << ")" << std::endl;
         if (options.expose_root_ui && options.ui_path != "/") {
             server.add_route("/", std::make_shared<RagWebHandler>(templates_dir, api_base));
@@ -3709,7 +3709,7 @@ void setupRagRoutes(HttpServer& server,
     };
 
     server.add_route(api_route("/index"), full_handler);
-    std::cout << "  \u2713 POST " << api_route("/index") << " - \u0418\u043d\u0434\u0435\u043a\u0441\u0430\u0446\u0438\u044f scan_path" << std::endl;
+    std::cout << "  \u2713 POST " << api_route("/index") << " - Index scan_path" << std::endl;
 
     server.add_route(api_route("/ingest"), full_handler);
     std::cout << "  ✓ POST " << api_route("/ingest") << " - Ingestion job" << std::endl;
@@ -3730,19 +3730,19 @@ void setupRagRoutes(HttpServer& server,
     std::cout << "  ✓ POST " << api_route("/documents/delete") << " - Delete persisted document" << std::endl;
 
     server.add_route(api_route("/search"), full_handler);
-    std::cout << "  \u2713 POST " << api_route("/search") << " - \u041f\u043e\u0438\u0441\u043a" << std::endl;
+    std::cout << "  \u2713 POST " << api_route("/search") << " - Search" << std::endl;
 
     server.add_route(api_route("/stats"), full_handler);
-    std::cout << "  \u2713 GET  " << api_route("/stats") << " - \u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430" << std::endl;
+    std::cout << "  \u2713 GET  " << api_route("/stats") << " - Statistics" << std::endl;
 
     server.add_route(api_route("/ask"), full_handler);
-    std::cout << "  \u2713 POST " << api_route("/ask") << " - \u0412\u043e\u043f\u0440\u043e\u0441 \u0441 LLM" << std::endl;
+    std::cout << "  \u2713 POST " << api_route("/ask") << " - Ask with LLM" << std::endl;
 
     server.add_route(api_route("/batch"), full_handler);
-    std::cout << "  \u2713 POST " << api_route("/batch") << " - Batch \u0432\u043e\u043f\u0440\u043e\u0441\u043e\u0432" << std::endl;
+    std::cout << "  \u2713 POST " << api_route("/batch") << " - Batch questions" << std::endl;
 
     server.add_route(api_route("/health"), full_handler);
-    std::cout << "  \u2713 GET  " << api_route("/health") << " - \u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u044f" << std::endl;
+    std::cout << "  \u2713 GET  " << api_route("/health") << " - Health check" << std::endl;
 
     server.add_route(api_route("/metrics"), full_handler);
     std::cout << "  \u2713 GET  " << api_route("/metrics") << " - Prometheus metrics" << std::endl;
@@ -3756,39 +3756,39 @@ void setupRagRoutes(HttpServer& server,
     server.add_route(api_route("/embedding/switch"), full_handler);
     std::cout << "  ✓ POST " << api_route("/embedding/switch") << " - Switch embedding model" << std::endl;
 
-    // Phase 4: Data sources management endpoints
+    // Data source management endpoints
     server.add_route(api_route("/sources"), full_handler);
-    std::cout << "  \u2713 GET  " << api_route("/sources") << " - \u0421\u043f\u0438\u0441\u043e\u043a \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u043e\u0432 \u0434\u0430\u043d\u043d\u044b\u0445" << std::endl;
+    std::cout << "  \u2713 GET  " << api_route("/sources") << " - Data source list" << std::endl;
 
     server.add_route(api_route("/sources/add"), full_handler);
-    std::cout << "  \u2713 POST " << api_route("/sources/add") << " - \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0434\u0430\u043d\u043d\u044b\u0445" << std::endl;
+    std::cout << "  \u2713 POST " << api_route("/sources/add") << " - Add data source" << std::endl;
 
     server.add_route(api_route("/sources/remove"), full_handler);
-    std::cout << "  \u2713 POST " << api_route("/sources/remove") << " - \u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0434\u0430\u043d\u043d\u044b\u0445" << std::endl;
+    std::cout << "  \u2713 POST " << api_route("/sources/remove") << " - Remove data source" << std::endl;
 
-    // Phase 4: QA knowledge base endpoints
+    // QA knowledge base endpoints
     auto qa_handler = full_handler;
 
     server.add_route(api_route("/qa/add"), qa_handler);
-    std::cout << "  ✓ POST " << api_route("/qa/add") << " - Добавить QA-пару" << std::endl;
+    std::cout << "  ✓ POST " << api_route("/qa/add") << " - Add QA pair" << std::endl;
 
     server.add_route(api_route("/qa/duplicate-check"), qa_handler);
     std::cout << "  ✓ POST " << api_route("/qa/duplicate-check") << " - QA duplicate preview" << std::endl;
 
     server.add_route(api_route("/qa/update"), qa_handler);
-    std::cout << "  ✓ POST " << api_route("/qa/update") << " - Обновить QA-пару" << std::endl;
+    std::cout << "  ✓ POST " << api_route("/qa/update") << " - Update QA pair" << std::endl;
 
     server.add_route(api_route("/qa/delete"), qa_handler);
-    std::cout << "  ✓ POST " << api_route("/qa/delete") << " - Удалить QA-пару" << std::endl;
+    std::cout << "  ✓ POST " << api_route("/qa/delete") << " - Delete QA pair" << std::endl;
 
     server.add_route(api_route("/qa/list"), qa_handler);
-    std::cout << "  ✓ GET  " << api_route("/qa/list") << " - Список QA-пар" << std::endl;
+    std::cout << "  ✓ GET  " << api_route("/qa/list") << " - QA pair list" << std::endl;
 
     server.add_route(api_route("/qa/suggest"), qa_handler);
-    std::cout << "  ✓ GET  " << api_route("/qa/suggest") << " - Подсказки QA-пар" << std::endl;
+    std::cout << "  ✓ GET  " << api_route("/qa/suggest") << " - QA pair suggestions" << std::endl;
 
     server.add_route(api_route("/qa/categories"), qa_handler);
-    std::cout << "  ✓ GET  " << api_route("/qa/categories") << " - Категории QA-пар" << std::endl;
+    std::cout << "  ✓ GET  " << api_route("/qa/categories") << " - QA pair categories" << std::endl;
 
     server.add_route(api_route("/qa/tags"), qa_handler);
     std::cout << "  ✓ GET  " << api_route("/qa/tags") << " - QA tags" << std::endl;
@@ -3812,7 +3812,7 @@ void setupRagRoutes(HttpServer& server,
         std::cout << "  \u2139\ufe0f  LLM: " << llm_client->get_model()
                   << " @ " << llm_client->get_api_url() << std::endl;
     } else {
-        std::cout << "  \u2139\ufe0f  LLM: \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d (\u0442\u043e\u043b\u044c\u043a\u043e \u043f\u043e\u0438\u0441\u043a)" << std::endl;
+        std::cout << "  \u2139\ufe0f  LLM: not configured (search-only mode)" << std::endl;
     }
 
     if (cache) {
@@ -3831,7 +3831,7 @@ void setupRagRoutes(HttpServer& server,
         std::cout << "  \U0001f4ca Prometheus metrics: enabled" << std::endl;
     }
 
-    // Phase 5: Analytics endpoints
+    // Analytics endpoints
     if (analytics) {
         server.add_route(api_route("/analytics"), full_handler);
         std::cout << "  \U0001f4c8 GET  " << api_route("/analytics") << " - Analytics report" << std::endl;
@@ -3843,7 +3843,7 @@ void setupRagRoutes(HttpServer& server,
         std::cout << "  \U0001f4c8 POST " << api_route("/analytics/export") << " - Export report" << std::endl;
     }
 
-    // Phase 5: QA dedup endpoints (semantic deduplication)
+    // QA dedup endpoints (semantic deduplication)
     if (dedup) {
         server.add_route(api_route("/qa/dedup"), full_handler);
         std::cout << "  \U0001f504 POST " << api_route("/qa/dedup") << " - Find duplicates (semantic)" << std::endl;
@@ -3852,7 +3852,7 @@ void setupRagRoutes(HttpServer& server,
         std::cout << "  \U0001f504 POST " << api_route("/qa/dedup/remove") << " - Remove duplicates" << std::endl;
     }
 
-    // Phase 5: Markdown import endpoints
+    // Markdown import endpoints
     if (markdown) {
         server.add_route(api_route("/import/markdown"), full_handler);
         std::cout << "  \U0001f4dd POST " << api_route("/import/markdown") << " - Import Markdown" << std::endl;
@@ -3861,5 +3861,5 @@ void setupRagRoutes(HttpServer& server,
         std::cout << "  \U0001f4dd GET  " << api_route("/import/history") << " - Import history" << std::endl;
     }
 
-    std::cout << "\u2705 \u0412\u0441\u0435 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u044b \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u044b" << std::endl;
+    std::cout << "✅ All routes added" << std::endl;
 }

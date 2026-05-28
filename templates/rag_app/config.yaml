@@ -55,7 +55,7 @@ auth:
 
 rag:
   route:
-    expose_root_ui: true
+    expose_root_ui: false
     ui_path: /rag
     api_prefix: /api/rag
 
@@ -206,7 +206,7 @@ rag:
     backend: memory # memory | redis
     max_size: 1000  # Memory LRU capacity; Redis capacity is controlled by Redis
     ttl_seconds: 3600
-    key_prefix: qornix_rag:
+    key_prefix: "qornix_rag:"
     redis:
       host: 127.0.0.1
       port: 6379

@@ -1,4 +1,4 @@
-# Configuration Qornix RAG standalone mode
+# Qornix RAG standalone configuration
 #
 # Defaults are intentionally local-first. Standalone qornix_rag is a
 # single-user local wiki/RAG tool; expose it to the network only when you
@@ -87,15 +87,7 @@ indexing:
   # scan_path: /path/to/project
   # If scan_path is set, this controls whether it is indexed during startup.
   auto_index_on_startup: true
-  embedding_dim: 256
   max_file_size_kb: 4096
-  skip_directories:
-    - cmake-build
-    - .git
-    - build
-    - __pycache__
-    - node_modules
-    - qornix_rag/models
 
 embedding:
   # Safe default for a fresh git clone. Works without bundled model files.
@@ -155,49 +147,40 @@ embedding:
 # Uncomment and configure to enable AI-powered Q&A
 llm:
   # API URL (OpenAI-compatible)
-  api_url: "http://localhost:11434"      # Ollama по умолчанию
-  api_key: ""                            # Если требуется
-  model: "llama3"                        # Модель
+  api_url: "http://localhost:11434"      # Ollama by default
+  api_key: ""                            # Set when required by the provider
+  model: "llama3"                        # Model name
 #  model: "qwen3.6:35b"
 
   # Request settings
-  max_tokens: 1024                       # Максимальная длина ответа
-  temperature: 0.7                       # Креативность (0-1)
+  max_tokens: 1024                       # Maximum generated answer length
+  temperature: 0.7                       # Sampling temperature (0-1)
   top_p: 0.9                             # Nucleus sampling
-  request_timeout_ms: 30000              # Таймаут запроса
+  request_timeout_ms: 30000              # Request timeout
 
   # System prompt
   system_prompt: |
-    Ты — помощник разработчика, который отвечает на вопросы
-    на основе предоставленного контекста из кода проекта.
+    You are a developer assistant that answers questions using
+    the provided project-code context.
 
-    Правила:
-    - Используй только информацию из контекста
-    - Если информации недостаточно, скажи "Недостаточно информации в локальной базе, но я нашел дополнительную информацию." и добавь информацию 
-    - Приводи примеры кода если это уместно
-    - Приводи другие примеры по контексту из любого источника, если информации слишком мало
+    Rules:
+    - Use only information from the provided context.
+    - If the context is insufficient, say that the local knowledge base does not contain enough information.
+    - Include code examples when they are useful.
+    - Cite the source files used for the answer.
 
   prompt_template: |
-    Контекст:
+    Context:
     {context}
 
-    Вопрос: {question}
-    - Отвечай на русском языке
-    - Цитируй файлы из которых взята информация
+    Question: {question}
+    - Answer in English.
+    - Cite the files used as sources.
 
   # Streaming (SSE)
-  stream: false                          # Включить streaming
+  stream: false                          # Enable streaming
 
-  # Failover (multiple LLM endpoints)
-  failover:
-    enabled: false
-    endpoints:
-      # - url: "http://localhost:8080"
-      #   model: "mistral"
-
-# ============================================================================
-# Phase 3: Caching (optional)
-# ============================================================================
+# LLM response caching (optional)
 # Cache LLM responses to speed up repeated questions
 # Backend: "memory" (default, in-process) or "redis" (external Redis over RESP; no hiredis required)
 cache:
@@ -215,9 +198,7 @@ cache:
     password: ""
     ttl_seconds: 3600
 
-# ============================================================================
-# Phase 3: Rate Limiting (optional)
-# ============================================================================
+# Rate limiting (optional)
 # Protect against DDoS and excessive LLM usage
 rate_limit:
   enabled: true                          # Enable/disable rate limiting
@@ -228,14 +209,10 @@ rate_limit:
   max_requests_per_second_per_ip: 2      # Per-IP: max requests/sec
   max_requests_per_minute_per_ip: 30     # Per-IP: max requests/min
 
-  # IP whitelist (bypass rate limiting)
-  # whitelist:
-  #   - "127.0.0.1"
-  #   - "192.168.1.100"
+  # Comma-separated IP allowlist that bypasses rate limiting.
+  # whitelist: "127.0.0.1,192.168.1.100"
 
-# ============================================================================
-# Phase 3: Batch Processing (optional)
-# ============================================================================
+# Batch processing (optional)
 # Process multiple questions concurrently
 batch:
   enabled: true                          # Enable/disable batch processing
@@ -243,21 +220,17 @@ batch:
   question_timeout_ms: 60000             # Timeout per question (60s)
   batch_timeout_ms: 300000               # Timeout for entire batch (5 min)
 
-# ============================================================================
-# Phase 3: Prompt Cache (optional)
-# ============================================================================
+# Prompt cache (optional)
 # Cache search results to avoid redundant RAG searches
 prompt_cache:
   enabled: true                          # Enable/disable prompt cache
   max_size: 500                          # Maximum cached prompts
   ttl_seconds: 1800                      # Time-to-live (30 min)
 
-# ============================================================================
-# Phase 5: Persistent knowledge base, Markdown import, analytics, dedup
-# ============================================================================
+# Persistent knowledge base, Markdown import, analytics, and deduplication
 rag:
   sqlite:
-    enabled: true                         # Persistent QA storage for Phase 5 endpoints
+    enabled: true                         # Persistent QA storage
     db_path: "qornix_rag/data/rag_kb.db"     # Created under the local standalone data directory
     source_id: "sqlite_kb"
     name: "SQLite Knowledge Base"
@@ -277,8 +250,6 @@ rag:
     similarity_threshold: 0.85
     auto_remove: false
 
-# ============================================================================
-# Phase 3: Prometheus Metrics (always enabled)
-# ============================================================================
+# Prometheus metrics (always enabled)
 # Exposed at GET /api/metrics
 # No configuration needed — always active

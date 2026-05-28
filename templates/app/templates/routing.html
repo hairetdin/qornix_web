@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Routing · @PROJECT_NAME@</title><link rel="stylesheet" href="/static/app.css"></head>
-<body><div class="qx-shell"><header class="qx-topbar"><a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Routing</small></span></a><nav class="qx-nav"><a href="/">Home</a><a href="/project-structure">Project Structure</a><a href="/docs">Docs</a><a href="/health">Health</a><a href="/docs/deployment">Deploy</a></nav></header>
+<body><div class="qx-shell"><header class="qx-topbar"><a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Routing</small></span></a><nav class="qx-nav"><a href="/">Home</a><a href="/project-structure">Project Structure</a><a href="/docs">Docs</a><a href="/health">Health</a><a href="/docs/deployment">Deploy</a>@WITH_RAG_NAV_LINK@</nav></header>
 <section class="qx-page-intro"><p class="qx-kicker">Routes and handlers</p><h1>Add application behavior through small handler classes.</h1><p class="qx-lead">Routes map URL patterns to handler objects. Handlers derive from <code>HandlerBase</code> and override the HTTP methods they support.</p></section>
 <section class="qx-grid qx-grid-2"><article class="qx-card"><h2>Minimal JSON handler</h2><pre class="qx-code">class HelloHandler : public HandlerBase {
 protected:

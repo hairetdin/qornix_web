@@ -361,7 +361,7 @@ rag:
     enabled: true
     backend: redis
     ttl_seconds: 3600
-    key_prefix: qornix_rag:
+    key_prefix: "qornix_rag:"
     redis:
       host: 127.0.0.1
       port: 6379
