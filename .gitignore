@@ -13,6 +13,7 @@ qornix_rag/models/downloaded/
 qornix_rag/models/exported/
 local/
 /doc/project_doc/
+qornix_rag/doc/project_doc/
 /build-portable/
 /dist/
 /xapian_index/

@@ -1,28 +1,21 @@
 # Knowledge Base — Qornix RAG
 
-> **Версия:** 1.0
-> **Дата:** 2026-03-18
-> **Статус:** Phase 4
+## 1. Overview
 
----
+`qornix_rag` can be used as a **knowledge base** through `QASource`, a data source that stores and searches QA pairs.
 
-## 1. Обзор
+This allows an application to:
 
-`qornix_rag` поддерживает использование в качестве **базы знаний** через `QASource` — источник данных, который хранит и ищет QA-пары (вопрос-ответ).
+- create a project knowledge base without depending on source code indexing;
+- add, update and delete knowledge dynamically through the API;
+- find answers by semantic similarity between questions;
+- combine the knowledge base with code search in hybrid mode.
 
-Это позволяет:
-- Создавать базу знаний проекта без привязки к исходному коду
-- Динамически добавлять/обновлять/удалять знания через API
-- Искать ответы по семантической схожести вопросов
-- Комбинировать базу знаний с поиском по коду (hybrid mode)
+## 2. Quick Start
 
----
+### 2.1. Configuration
 
-## 2. Быстрый старт
-
-### 2.1. Конфигурация
-
-Добавьте секцию `rag.qa_kb` в `config.yaml`:
+Add the `rag.qa_kb` section to `config.yaml`:
 
 ```yaml
 rag:
@@ -33,599 +26,497 @@ rag:
     name: "Project Knowledge Base"
     source_id: "prod_kb"
     pairs:
-      - question: "Как запустить проект?"
-        answer: "Выполните: cmake -B build && cmake --build build && ./build/qornix_web"
+      - question: "How do I start the project?"
+        answer: "Run: cmake -B build && cmake --build build && ./build/qornix_web"
         category: "setup"
-        aliases: ["запуск", "start", "build"]
-      - question: "Какие требования к системе?"
-        answer: "C++20 компилятор, Boost 1.83+, Xapian, libcurl, yaml-cpp"
-        category: "setup"
-      - question: "Как работает DI Container?"
-        answer: "DI Container управляет жизненным циклом объектов и их зависимостями"
+        aliases: ["start", "run", "build"]
+      - question: "What are the system requirements?"
+        answer: "A C++20 compiler, Boost 1.83+, Xapian, libcurl and yaml-cpp"
+        category: "requirements"
+      - question: "How does the DI Container work?"
+        answer: "The DI Container manages object lifetimes and dependencies"
         category: "architecture"
-        aliases: ["di", "dependency injection"]
 ```
 
-### 2.2. Запуск
+### 2.2. Run
 
 ```bash
-cmake -B build -DQORNIX_BUILD_RAG=ON
-cmake --build build
-./build/qornix_web
+./qornix_rag
 ```
 
-### 2.3. Проверка
+### 2.3. Check
 
 ```bash
-# Поиск по базе знаний
+# Search the knowledge base
 curl -X POST http://localhost:8008/api/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "Как запустить?", "top_k": 3}'
+  -d '{"query": "How do I start?", "top_k": 3}'
 
-# Ответ от LLM (если настроен)
+# Ask the LLM, if configured
 curl -X POST http://localhost:8008/api/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "Как запустить проект?", "top_k": 3}'
+  -d '{"question": "How do I start the project?", "top_k": 3}'
 ```
 
----
+## 3. QA Pair Structure
 
-## 3. Структура QA-пары
-
-### 3.1. Поля
+### 3.1. Fields
 
 ```cpp
 struct QAPair {
-    std::string id;                      // Уникальный идентификатор
-    std::string question;                // Текст вопроса
-    std::string answer;                  // Текст ответа
-    std::string category = "general";    // Категория/тег
-    std::vector<std::string> aliases;    // Альтернативные формулировки
-    std::map<std::string, std::string> metadata; // Доп. метаданные
+    std::string id;                      // Unique identifier
+    std::string question;                // Question text
+    std::string answer;                  // Answer text
+    std::string category = "general";    // Category/tag
+    std::vector<std::string> aliases;    // Alternative phrasings
+    std::map<std::string, std::string> metadata; // Extra metadata
 };
 ```
 
-### 3.2. Примеры
+### 3.2. Examples
 
-#### Базовая QA-пара
+#### Basic QA Pair
 
 ```json
 {
-  "id": "qa_001",
-  "question": "Что такое RAG?",
-  "answer": "RAG (Retrieval-Augmented Generation) — это паттерн, который комбинирует поиск по базе знаний с генерацией ответов LLM.",
-  "category": "ai"
+  "id": "rag_intro",
+  "question": "What is RAG?",
+  "answer": "RAG (Retrieval-Augmented Generation) is a pattern that combines knowledge-base retrieval with LLM answer generation.",
+  "category": "concepts"
 }
 ```
 
-#### QA-пара с алиасами
+#### QA Pair With Aliases
 
 ```json
 {
-  "id": "qa_002",
-  "question": "Как деплоить проект?",
-  "answer": "Используйте Docker Compose: docker-compose up -d",
+  "id": "deploy",
+  "question": "How do I deploy the project?",
+  "answer": "Use Docker Compose: docker-compose up -d",
   "category": "deployment",
-  "aliases": ["деплой", "deploy", "docker", "развертывание"]
+  "aliases": ["deploy", "docker", "production"]
 }
 ```
 
-#### QA-пара с метаданными
+#### QA Pair With Metadata
 
 ```json
 {
-  "id": "qa_003",
-  "question": "Какая версия C++ требуется?",
-  "answer": "C++20 или новее (GCC 11+, Clang 12+, MSVC 19.2+)",
+  "id": "cpp_version",
+  "question": "Which C++ version is required?",
+  "answer": "C++20 or newer (GCC 11+, Clang 12+, MSVC 19.2+)",
   "category": "requirements",
   "metadata": {
-    "author": "admin",
-    "reviewed_by": "tech_lead",
-    "last_updated": "2026-03-18",
-    "version": "1.0"
+    "owner": "platform",
+    "source": "README.md"
   }
 }
 ```
 
----
+## 4. Knowledge Base Management API
 
-## 4. API для управления базой знаний
-
-### 4.1. Добавление QA-пары
-
-**POST `/api/qa/add`**
+### 4.1. Add A QA Pair
 
 ```bash
-curl -X POST http://localhost:8008/api/qa/add \
+curl -X POST http://localhost:8008/api/qa \
   -H "Content-Type: application/json" \
   -d '{
-    "source_id": "prod_kb",
-    "question": "Как настроить логирование?",
-    "answer": "Редактируйте секцию logging в config.yaml",
+    "id": "logging",
+    "question": "How do I configure logging?",
+    "answer": "Edit the logging section in config.yaml",
     "category": "configuration",
-    "aliases": ["лог", "log"]
+    "aliases": ["log", "logging"]
   }'
 ```
 
-**Ответ:**
+**Response:**
+
 ```json
 {
   "success": true,
-  "message": "QA pair added",
-  "pair_id": "prod_kb_1711000000",
-  "source_id": "prod_kb"
+  "id": "logging"
 }
 ```
 
-### 4.2. Обновление QA-пары
-
-**POST `/api/qa/update`**
+### 4.2. Update A QA Pair
 
 ```bash
-curl -X POST http://localhost:8008/api/qa/update \
+curl -X PUT http://localhost:8008/api/qa/logging \
   -H "Content-Type: application/json" \
   -d '{
-    "pair_id": "prod_kb_1711000000",
-    "answer": "Обновленный ответ с подробной инструкцией"
+    "answer": "Updated answer with detailed instructions"
   }'
 ```
 
-### 4.3. Удаление QA-пары
-
-**POST `/api/qa/delete`**
+### 4.3. Delete A QA Pair
 
 ```bash
-curl -X POST http://localhost:8008/api/qa/delete \
-  -H "Content-Type: application/json" \
-  -d '{"pair_id": "prod_kb_1711000000"}'
+curl -X DELETE http://localhost:8008/api/qa/logging
 ```
 
-### 4.4. Список QA-пар
-
-**GET `/api/qa/list`**
+### 4.4. List QA Pairs
 
 ```bash
-# Первая страница (20 пар)
-curl "http://localhost:8008/api/qa/list"
+# First page, 20 pairs
+curl http://localhost:8008/api/qa
 
-# Конкретная страница
-curl "http://localhost:8008/api/qa/list?page=2&per_page=10"
+# Specific page
+curl "http://localhost:8008/api/qa?page=2&limit=20"
 
-# Конкретный источник
-curl "http://localhost:8008/api/qa/list?source_id=prod_kb"
+# Specific source
+curl "http://localhost:8008/api/qa?source_id=prod_kb"
 ```
 
-**Ответ:**
+**Response:**
+
 ```json
 {
   "success": true,
-  "source_id": "prod_kb",
-  "total": 45,
-  "page": 1,
-  "per_page": 20,
-  "pairs": [
+  "total": 2,
+  "items": [
     {
-      "id": "qa_001",
-      "question": "Как запустить проект?",
+      "id": "start_project",
+      "question": "How do I start the project?",
       "category": "setup",
-      "aliases": ["запуск", "start"]
+      "aliases": ["start", "run"]
     },
     {
-      "id": "qa_002",
-      "question": "Какие требования к системе?",
-      "category": "setup",
-      "aliases": ["требования", "requirements"]
+      "id": "requirements",
+      "question": "What are the system requirements?",
+      "category": "requirements",
+      "aliases": ["requirements"]
     }
   ]
 }
 ```
 
-### 4.5. Добавление источника данных
-
-**POST `/api/sources/add`**
+### 4.5. Add A Data Source
 
 ```bash
-curl -X POST http://localhost:8008/api/sources/add \
+curl -X POST http://localhost:8008/api/sources \
   -H "Content-Type: application/json" \
   -d '{
-    "source_type": "qa_kb",
-    "name": "Support KB",
-    "source_id": "support_kb",
+    "type": "qa",
+    "name": "Support FAQ",
+    "source_id": "support_faq",
     "pairs": [
       {
-        "question": "Как сбросить пароль?",
-        "answer": "Используйте /api/auth/reset-password",
+        "id": "reset_password",
+        "question": "How do I reset a password?",
+        "answer": "Use /api/auth/reset-password",
         "category": "support"
       }
     ]
   }'
 ```
 
-### 4.6. Удаление источника
-
-**POST `/api/sources/remove`**
+### 4.6. Remove A Source
 
 ```bash
-curl -X POST http://localhost:8008/api/sources/remove \
-  -H "Content-Type: application/json" \
-  -d '{"source_id": "support_kb"}'
+curl -X DELETE http://localhost:8008/api/sources/support_faq
 ```
 
-### 4.7. Список источников
-
-**GET `/api/sources`**
+### 4.7. List Sources
 
 ```bash
 curl http://localhost:8008/api/sources
 ```
 
-**Ответ:**
+**Response:**
+
 ```json
 {
   "success": true,
   "sources": [
     {
       "id": "prod_kb",
-      "type": "QA_KB",
       "name": "Project Knowledge Base",
-      "document_count": 45
-    },
-    {
-      "id": "fs_1",
-      "type": "FILESYSTEM",
-      "name": "Project Code",
-      "document_count": 150
+      "type": "qa",
+      "count": 12
     }
-  ],
-  "count": 2
+  ]
 }
 ```
 
----
+## 5. Use Cases
 
-## 5. Сценарии использования
-
-### 5.1. Техническая документация
+### 5.1. Technical Documentation
 
 ```yaml
 rag:
   qa_kb:
     enabled: true
     pairs:
-      - question: "Как добавить новый endpoint?"
-        answer: "Создайте handler в handlers/ и зарегистрируйте маршрут в routes.h"
+      - question: "How do I add a new endpoint?"
+        answer: "Create a handler in handlers/ and register the route in routes.h"
         category: "development"
-        aliases: ["endpoint", "route", "маршрут"]
-      
-      - question: "Как работает middleware?"
-        answer: "Middleware выполняется до и после handler. Используйте addMiddleware()"
-        category: "development"
-```
+        aliases: ["endpoint", "route"]
 
-### 5.2. FAQ поддержка
-
-```yaml
-rag:
-  qa_kb:
-    enabled: true
-    pairs:
-      - question: "Как исправить ошибку компиляции?"
-        answer: "Убедитесь, что все зависимости установлены: ./depend_install.sh"
-        category: "support"
-        aliases: ["ошибка", "compile", "build error"]
-      
-      - question: "Почему сервер не запускается?"
-        answer: "Проверьте, что порт 8008 свободен, и config.yaml существует"
-        category: "support"
-        aliases: ["не запускается", "port", "startup"]
-```
-
-### 5.3. Onboarding новых разработчиков
-
-```yaml
-rag:
-  qa_kb:
-    enabled: true
-    pairs:
-      - question: "Как начать работать над проектом?"
-        answer: "1. Клонируйте репозиторий\n2. Установите зависимости\n3. Соберите проект\n4. Запустите тесты"
-        category: "onboarding"
-        aliases: ["начать", "first steps", "setup"]
-      
-      - question: "Какой код-ревью процесс?"
-        answer: "Создайте PR, получите approval от 2+maintainers, пройдите CI"
-        category: "onboarding"
-```
-
-### 5.4. Hybrid Mode (код + база знаний)
-
-```yaml
-rag:
-  enabled: true
-  
-  # База знаний
-  qa_kb:
-    enabled: true
-    pairs:
-      - question: "Архитектура проекта"
-        answer: "qornix_web состоит из ServerManager, HttpServer, DI Container"
+      - question: "How does middleware work?"
+        answer: "Middleware runs before and after the handler. Use addMiddleware()"
         category: "architecture"
-  
-  # Поиск по коду
-  filesystem:
-    enabled: true
-    path: "/path/to/project"
-    include_extensions: [".cpp", ".h"]
 ```
 
----
+### 5.2. Support FAQ
 
-## 6. Программное использование
+```yaml
+rag:
+  qa_kb:
+    enabled: true
+    pairs:
+      - question: "How do I fix a compilation error?"
+        answer: "Make sure all dependencies are installed: ./depend_install.sh"
+        category: "support"
+        aliases: ["compile", "build error"]
 
-### 6.1. C++ API
+      - question: "Why does the server not start?"
+        answer: "Check that port 8008 is free and config.yaml exists"
+        category: "support"
+        aliases: ["port", "startup"]
+```
+
+### 5.3. Developer Onboarding
+
+```yaml
+rag:
+  qa_kb:
+    enabled: true
+    pairs:
+      - question: "How do I start working on the project?"
+        answer: "1. Clone the repository\n2. Install dependencies\n3. Build the project\n4. Run tests"
+        category: "onboarding"
+        aliases: ["first steps", "setup"]
+
+      - question: "What is the code review process?"
+        answer: "Create a PR, get approval from 2+ maintainers, and pass CI"
+        category: "process"
+```
+
+### 5.4. Hybrid Mode: Code And Knowledge Base
+
+```yaml
+rag:
+  qa_kb:
+    enabled: true
+    pairs:
+      - question: "Project architecture"
+        answer: "qornix_web consists of ServerManager, HttpServer and DI Container"
+        category: "architecture"
+
+  indexing:
+    enabled: true
+    scan_path: "."
+```
+
+In this mode, RAG can search both curated QA entries and indexed project files.
+
+## 6. Programmatic Usage
+
+### 6.1. QASource
 
 ```cpp
-#include "qa_source.h"
+#include "core.h"
 
-// Создание базы знаний
-QASource::Config config;
-config.name = "My Knowledge Base";
-config.source_id = "my_kb";
+using namespace qornix::rag;
 
-auto qa_source = std::make_shared<QASource>(config);
+// Create a knowledge base
+auto qa_source = std::make_shared<QASource>("Project KB", "prod_kb");
 
-// Добавление QA-пары
-QASource::QAPair pair;
-pair.id = "qa_001";
-pair.question = "Что такое DI?";
-pair.answer = "Dependency Injection — паттерн внедрения зависимостей";
+// Add a QA pair
+QAPair pair;
+pair.id = "di";
+pair.question = "What is DI?";
+pair.answer = "Dependency Injection is a pattern for providing dependencies to objects";
 pair.category = "architecture";
-pair.aliases = {"di", "injection"};
-
 qa_source->addQAPair(pair);
 
-// Поиск
-auto found = qa_source->findQAPair("qa_001");
-if (found) {
-    std::cout << "Answer: " << found.value().answer << std::endl;
-}
+// Search
+auto docs = qa_source->getDocuments();
 
-// Поиск по категории
-auto arch_pairs = qa_source->searchByCategory("architecture");
+// Search by category
+auto setup_pairs = qa_source->getByCategory("setup");
 
-// Получение всех пар
-auto all = qa_source->getAllPairs();
+// Get all pairs
+auto all_pairs = qa_source->getAllPairs();
 ```
 
-### 6.2. Интеграция с RagEngine
+### 6.2. RagEngine Integration
 
 ```cpp
-#include "rag_engine.h"
-#include "qa_source.h"
-#include "file_source.h"
+RagEngine engine(config);
 
-RagEngineConfig engine_config;
-RagEngine engine(engine_config);
+// Add a QA source
+auto qa_source = std::make_shared<QASource>("Project KB", "prod_kb");
+engine.addDataSource(qa_source);
 
-// Добавление QA-источника
-QASource::Config qa_config;
-qa_config.name = "Project KB";
-qa_config.source_id = "prod_kb";
-qa_config.pairs = { /* ... */ };
-engine.addDataSource(std::make_shared<QASource>(qa_config));
+// Add a filesystem source
+auto fs_source = std::make_shared<FileSystemSource>(".", "code");
+engine.addDataSource(fs_source);
 
-// Добавление filesystem-источника
-FileSource::Config file_config;
-file_config.root_path = "/path/to/project";
-engine.addDataSource(std::make_shared<FileSource>(file_config));
+// Index
+engine.indexAllSources();
 
-// Индексация
-engine.indexSources();
-
-// Поиск (ищет по всем источникам)
-auto results = engine.search("Как работает DI?", 10);
+// Search all sources
+auto results = engine.search("How does DI work?", 10);
 ```
 
----
+## 7. Best Practices
 
-## 7. Лучшие практики
+### 7.1. Category Structure
 
-### 7.1. Структура категорий
-
-Используйте иерархию категорий для организации:
+Use a category hierarchy to organize knowledge:
 
 ```yaml
 categories:
-  - "setup"          # Установка и настройка
-  - "development"    # Разработка
-  - "deployment"     # Деплой
-  - "support"        # Поддержка
-  - "onboarding"     # Онбординг
-  - "architecture"   # Архитектура
-  - "security"       # Безопасность
-  - "performance"    # Производительность
+  - "setup"          # Installation and setup
+  - "development"    # Development
+  - "deployment"     # Deployment
+  - "support"        # Support
+  - "onboarding"     # Onboarding
+  - "architecture"   # Architecture
+  - "security"       # Security
+  - "performance"    # Performance
 ```
 
-### 7.2. Алиасы
+### 7.2. Aliases
 
-Добавляйте алиасы для каждого вопроса:
+Add aliases for each question:
 
 ```json
 {
-  "question": "Как деплоить?",
-  "aliases": ["деплой", "deploy", "docker", "развертывание", "production"]
+  "question": "How do I deploy?",
+  "aliases": ["deploy", "docker", "production"]
 }
 ```
 
-### 7.3. Метаданные
+### 7.3. Metadata
 
-Используйте метаданные для отслеживания:
+Use metadata for tracking:
 
 ```json
 {
   "metadata": {
-    "author": "john_doe",
-    "reviewed_by": "jane_smith",
-    "last_updated": "2026-03-18",
-    "version": "1.2",
-    "priority": "high"
+    "owner": "platform",
+    "source": "docs/deploy.md",
+    "reviewed": "true"
   }
 }
 ```
 
-### 7.4. Регулярное обновление
+### 7.4. Regular Maintenance
 
-- Проверяйте актуальность QA-пар ежемесячно
-- Удаляйте устаревшие пары
-- Обновляйте версии и ссылки
+- Review QA pairs regularly.
+- Remove outdated pairs.
+- Update versions, commands and links when behavior changes.
 
----
+## 8. Limitations
 
-## 8. Ограничения
+1. **`findQAPair()` is exact-match lookup** - it searches an exact question or alias. Use `RagEngine::search()` for semantic search.
+2. **Duplicate detection is not automatic in this API** - add and maintain pairs intentionally.
+3. **No answer version history** - previous answer versions are not stored by this data source.
+4. **Text only** - attachments should be indexed as documents through the document ingestion pipeline.
+5. **One source should use one primary language** - this keeps lexical and semantic retrieval behavior easier to tune.
 
-1. **findQAPair — точное совпадение** — метод `findQAPair()` ищет точный match вопроса/алиаса; для семантического поиска используйте `RagEngine::search()`
-2. **Нет автораспознавания дубликатов** — нужно добавлять вручную
-3. **Нет версионирования** — старые версии ответов не сохраняются
-4. **Нет поддержки вложений** — только текст
-5. **Нет multi-language** — один источник = один язык (рекомендуется)
+## 9. How Search Works
 
----
+### 9.1. Full-Text Search With Xapian
 
-## 9. Как работает поиск
-
-### 9.1. Полнотекстовый поиск (Xapian)
-
-При индексации QA-пары конвертируются в документы:
+During indexing, QA pairs are converted to documents:
 
 ```cpp
-doc.content = "Вопрос: " + pair.question + "\n\nОтвет: " + pair.answer;
+doc.content = "Question: " + pair.question + "\n\nAnswer: " + pair.answer;
 ```
 
-Полный контент (вопрос + ответ) индексируется Xapian. Поиск по ключевым словам из ответа **работает**:
+The full content, including both question and answer, is indexed by Xapian. Keyword search over answer text works:
 
 ```bash
-# Если в ответе есть "docker-compose", этот запрос найдёт QA-пару
+# If the answer contains "docker-compose", this query can find the QA pair
 curl -X POST http://localhost:8008/api/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "docker-compose restart", "top_k": 3}'
+  -d '{"query": "docker-compose", "top_k": 3}'
 ```
 
-### 9.2. Семантический поиск (HNSW/Embeddings)
+### 9.2. Semantic Search With HNSW/Embeddings
 
-Тот же `doc.content` используется для генерации embedding-вектора. Поиск по смыслу (не по ключевым словам) также работает:
+The same `doc.content` is used to generate the embedding vector. Meaning-based search also works even when the exact words differ:
 
 ```bash
-# Найдёт QA-пару по смыслу, даже без точного совпадения слов
+# Finds a QA pair by meaning even without exact word overlap
 curl -X POST http://localhost:8008/api/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "как перезапустить сервис", "top_k": 3}'
+  -d '{"query": "how to restart the service", "top_k": 3}'
 ```
 
-### 9.3. Гибридный поиск (Xapian + HNSW)
+### 9.3. Hybrid Search: Xapian + HNSW
 
-По умолчанию используется взвешенная комбинация:
-
-```
-fused_score = vector_weight * vector_score + text_weight * text_score
-```
-
-Настройки в `config.yaml`:
+By default, RAG uses a weighted combination:
 
 ```yaml
 rag:
   search:
-    vector_weight: 0.6
-    text_weight: 0.4
+    vector_weight: 0.7
+    lexical_weight: 0.3
 ```
 
-### 9.4. Точный поиск по ID
+### 9.4. Exact Lookup By ID
 
-Метод `findQAPair(id)` — для быстрого доступа к конкретной QA-паре без поиска.
+`findQAPair(id)` provides fast access to a specific QA pair without search.
 
----
+## 10. Examples
 
-## 10. Планы развития
-
-- [ ] Автоматическое обнаружение дубликатов
-- [ ] Версионирование QA-пар
-- [ ] Поддержка вложений (изображения, файлы)
-- [ ] Multi-language источники
-- [ ] Web UI для управления базой знаний
-- [ ] Импорт/экспорт в Markdown
-- [ ] Аналитика запросов (что ищут, но не находят)
-
----
-
-## 11. Примеры
-
-### 11.1. Полный пример config.yaml
+### 10.1. Complete `config.yaml` Example
 
 ```yaml
 rag:
   enabled: true
-
   qa_kb:
     enabled: true
-    name: "Tech Support KB"
-    source_id: "tech_support"
+    name: "Operations FAQ"
+    source_id: "ops_faq"
     pairs:
-      - question: "Как перезапустить сервис?"
-        answer: "docker-compose restart"
+      - id: "restart_service"
+        question: "How do I restart the service?"
+        answer: "Run: systemctl restart qornix-web"
         category: "operations"
-        aliases: ["restart", "перезапуск", "reload"]
-        metadata:
-          author: "devops"
-          last_updated: "2026-03-18"
+        aliases: ["restart", "reload"]
 
-      - question: "Где найти логи?"
-        answer: "logs/server.log или docker-compose logs -f"
+      - id: "find_logs"
+        question: "Where are the logs?"
+        answer: "Use logs/server.log or docker-compose logs -f"
         category: "operations"
-        aliases: ["log", "журнал", "logging"]
-        metadata:
-          author: "devops"
-          last_updated: "2026-03-18"
-
-  filesystem:
-    enabled: true
-    path: "/path/to/project"
-    include_extensions: [".cpp", ".h"]
+        aliases: ["log", "logging"]
 ```
 
-### 11.2. API workflow
+### 10.2. API Workflow
 
 ```bash
-# 1. Добавить QA-пару
-curl -X POST http://localhost:8008/api/qa/add \
+# 1. Add a QA pair
+curl -X POST http://localhost:8008/api/qa \
   -H "Content-Type: application/json" \
   -d '{
-    "question": "Как масштабировать?",
-    "answer": "Увеличьте workers в config.yaml",
+    "id": "scale",
+    "question": "How do I scale the service?",
+    "answer": "Increase workers in config.yaml",
     "category": "operations"
   }'
 
-# 2. Проверить список
-curl http://localhost:8008/api/qa/list
+# 2. Check the list
+curl http://localhost:8008/api/qa
 
-# 3. Обновить ответ
-curl -X POST http://localhost:8008/api/qa/update \
+# 3. Update the answer
+curl -X PUT http://localhost:8008/api/qa/scale \
   -H "Content-Type: application/json" \
   -d '{
-    "pair_id": "tech_support_1711000000",
-    "answer": "Используйте Kubernetes: kubectl scale deployment..."
+    "answer": "Use Kubernetes: kubectl scale deployment..."
   }'
 
-# 4. Поиск
+# 4. Search
 curl -X POST http://localhost:8008/api/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "масштабирование", "top_k": 3}'
+  -d '{"query": "scaling", "top_k": 3}'
 
-# 5. Вопрос с LLM
+# 5. Ask with LLM
 curl -X POST http://localhost:8008/api/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "Как масштабировать сервис?", "top_k": 3}'
+  -d '{"question": "How do I scale the service?", "top_k": 3}'
 ```
-
----
-
-**Last updated:** 2026-03-18
-**Current version:** v1.0 (Phase 4)

@@ -36,7 +36,7 @@
         </xs:restriction>
     </xs:simpleType>
 
-    <!-- Перечисление поддерживаемых СУБД -->
+    <!-- Supported database engines -->
     <xs:simpleType name="DatabaseEngine">
         <xs:restriction base="xs:string">
             <xs:enumeration value="postgresql"/>
@@ -45,7 +45,7 @@
         </xs:restriction>
     </xs:simpleType>
 
-    <!-- Тип для маппинга типов данных -->
+    <!-- Data type mapping type -->
     <xs:complexType name="TypeMapping">
         <xs:attribute name="genericType" type="db:DataType" use="required"/>
         <xs:attribute name="postgresql" type="xs:string" use="optional"/>
@@ -53,7 +53,7 @@
         <xs:attribute name="sqlite" type="xs:string" use="optional"/>
     </xs:complexType>
 
-    <!-- Тип для ограничений колонок -->
+    <!-- Column constraint type -->
     <xs:complexType name="ColumnConstraint">
         <xs:sequence>
             <xs:element name="primaryKey" type="xs:boolean" default="false" minOccurs="0"/>
@@ -64,7 +64,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Тип для индексов -->
+    <!-- Index type -->
     <xs:complexType name="Index">
         <xs:sequence>
             <xs:element name="columnName" type="xs:string" maxOccurs="unbounded"/>
@@ -73,7 +73,7 @@
         <xs:attribute name="unique" type="xs:boolean" default="false"/>
     </xs:complexType>
 
-    <!-- Тип для внешних ключей -->
+    <!-- Foreign key type -->
     <xs:complexType name="ForeignKey">
         <xs:sequence>
             <xs:element name="columnName" type="xs:string"/>
@@ -105,7 +105,7 @@
         <xs:attribute name="name" type="xs:string" use="required"/>
     </xs:complexType>
 
-    <!-- Тип для триггеров -->
+    <!-- Trigger type -->
     <xs:complexType name="Trigger">
         <xs:sequence>
             <xs:element name="name" type="xs:string"/>
@@ -131,7 +131,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Тип для хранимых процедур -->
+    <!-- Stored procedure type -->
     <xs:complexType name="StoredProcedure">
         <xs:sequence>
             <xs:element name="name" type="xs:string"/>
@@ -157,7 +157,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Тип для колонок таблицы -->
+    <!-- Table column type -->
     <xs:complexType name="Column">
         <xs:sequence>
             <xs:element name="name" type="xs:string"/>
@@ -170,7 +170,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Тип для таблиц -->
+    <!-- Table type -->
     <xs:complexType name="Table">
         <xs:sequence>
             <xs:element name="name" type="xs:string"/>
@@ -202,7 +202,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Тип для представлений (views) -->
+    <!-- View type -->
     <xs:complexType name="View">
         <xs:sequence>
             <xs:element name="name" type="xs:string"/>
@@ -219,7 +219,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Тип для схемы базы данных -->
+    <!-- Database schema type -->
     <xs:complexType name="DatabaseSchema">
         <xs:sequence>
             <xs:element name="name" type="xs:string"/>
@@ -256,7 +256,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Корневой элемент -->
+    <!-- Root element -->
     <xs:element name="databaseSchema" type="db:DatabaseSchema"/>
 
 </xs:schema>

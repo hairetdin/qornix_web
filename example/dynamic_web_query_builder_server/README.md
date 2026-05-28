@@ -1,77 +1,77 @@
 # Dynamic Web Query Builder Server
 
-`dynamic_web_query_builder_server` - пример приложения на Qornix Web Server, который показывает, как поднять универсальный веб-интерфейс для динамических запросов к базе данных.
+`dynamic_web_query_builder_server` is a Qornix Web Server example application that shows how to expose a universal web UI for dynamic database queries.
 
-Пример дает:
+The example provides:
 
-- главную страницу с интерактивными API-примерами;
-- страницу `/query-builder` для сборки запросов из формы;
-- страницу `/table` для браузеринга таблиц с пагинацией;
-- страницу `/table/{table}/{id}` для просмотра и редактирования отдельных записей с inline-редактированием полей;
-- страницу `/schema-manager` для экспорта XML-схемы из БД и применения XML-схемы к БД;
-- универсальный endpoint `/api/dynamic` для SELECT/INSERT/UPDATE/DELETE через `QueryBuilder`;
-- metadata endpoint-ы для списка таблиц, полей и универсального autocomplete;
-- endpoint `/api/dynamic/schema.xml` для экспорта XML-схемы текущей demo-базы;
-- endpoint `/api/dynamic/schema/apply` для применения XML-схемы к demo-базе;
-- автоматически создаваемую SQLite demo-базу с таблицами `categories`, `products`, `customers`, `orders`;
-- Python performance test suite для проверки производительности API.
+- a home page with interactive API examples;
+- a `/query-builder` page for building queries from a form;
+- a `/table` page for browsing tables with pagination;
+- a `/table/{table}/{id}` page for viewing and editing individual records with inline field editing;
+- a `/schema-manager` page for exporting an XML schema from the database and applying an XML schema to the database;
+- a universal `/api/dynamic` endpoint for SELECT/INSERT/UPDATE/DELETE through `QueryBuilder`;
+- metadata endpoints for tables, fields and universal autocomplete;
+- `/api/dynamic/schema.xml` for exporting the current demo database XML schema;
+- `/api/dynamic/schema/apply` for applying an XML schema to the demo database;
+- an automatically created SQLite demo database with `categories`, `products`, `customers` and `orders` tables;
+- a Python performance test suite for API performance checks.
 
-## Что Делает Сервер
+## What The Server Does
 
-При запуске сервер:
+On startup, the server:
 
-1. Создает или открывает SQLite базу `dynamic_web_query_builder_demo.sqlite3`.
-2. Создает demo-схему, если ее еще нет.
-3. Заполняет demo-данные через `INSERT OR IGNORE`.
-4. Регистрирует HTML-страницы (`home`, `query-builder`, `table`, `row_view`, `schema-manager`), static-файлы и API routes.
-5. Позволяет сгенерировать XML-схему текущей demo-базы через `/api/dynamic/schema.xml`.
-6. Позволяет применить XML-схему к demo-базе через `/api/dynamic/schema/apply`.
-7. При `QORNIX_ENABLE_ASYNC_DB=ON` регистрирует CRUD routes через async Dynamic API path; для demo SQLite используется явный `sqlite_sync_offloaded` adapter, а PostgreSQL/MySQL могут использовать real async drivers при включенных backend flags.
-8. Запускает HTTP server на настройках фреймворка, по умолчанию `127.0.0.1:8008`.
+1. Creates or opens the `dynamic_web_query_builder_demo.sqlite3` SQLite database.
+2. Creates the demo schema if it does not exist yet.
+3. Seeds demo data through `INSERT OR IGNORE`.
+4. Registers HTML pages (`home`, `query-builder`, `table`, `row_view`, `schema-manager`), static files and API routes.
+5. Allows generating the current demo database XML schema through `/api/dynamic/schema.xml`.
+6. Allows applying an XML schema to the demo database through `/api/dynamic/schema/apply`.
+7. When `QORNIX_ENABLE_ASYNC_DB=ON`, registers CRUD routes through the async Dynamic API path. The SQLite demo uses the explicit `sqlite_sync_offloaded` adapter, while PostgreSQL/MySQL can use real async drivers when their backend flags are enabled.
+8. Starts the HTTP server with the framework settings, by default on `127.0.0.1:8008`.
 
-Demo-база создается в каталоге примера:
+The demo database is created in the example directory:
 
 ```text
 example/dynamic_web_query_builder_server/dynamic_web_query_builder_demo.sqlite3
 ```
 
-Файл базы не коммитится. Он игнорируется локальным `.gitignore`.
+The database file is not committed. It is ignored by the local `.gitignore`.
 
-XML-схема demo-базы генерируется по запросу и сохраняется рядом с базой:
+The demo database XML schema is generated on demand and saved next to the database:
 
 ```text
 example/dynamic_web_query_builder_server/dynamic_web_query_builder_demo.schema.xml
 ```
 
-Файл XML-схемы также не коммитится.
+The XML schema file is also not committed.
 
-## Основные URL
+## Main URLs
 
-- `/` - домашняя страница с API-примерами.
-- `/query-builder` - интерактивный Query Builder.
-- `/table` - браузер таблиц с пагинацией и autocomplete.
-- `/table/{table}/{id}` - просмотр и редактирование отдельной записи.
-- `/schema-manager` - управление XML-схемой.
-- `/static/{filename}` - static-файлы из `templates`.
-- `/api/dynamic` - динамические запросы, где таблица и метод передаются в JSON.
-- `/api/dynamic/{table}` - динамические запросы с таблицей в path.
-- `/api/dynamic/{table}/{id}` - динамические запросы с таблицей и id в path.
-- `/api/dynamic/meta/tables` - список таблиц.
-- `/api/dynamic/meta/{table}/fields` - список полей таблицы.
-- `/api/dynamic/meta/autocomplete` - универсальный autocomplete.
-- `/api/dynamic/schema.xml` - экспорт XML-схемы текущей demo SQLite базы.
-- `/api/dynamic/schema/apply` - применение XML-схемы к текущей demo SQLite базе.
+- `/` - home page with API examples.
+- `/query-builder` - interactive Query Builder.
+- `/table` - table browser with pagination and autocomplete.
+- `/table/{table}/{id}` - view and edit an individual record.
+- `/schema-manager` - XML schema management.
+- `/static/{filename}` - static files from `templates`.
+- `/api/dynamic` - dynamic requests where table and method are passed in JSON.
+- `/api/dynamic/{table}` - dynamic requests with the table in the path.
+- `/api/dynamic/{table}/{id}` - dynamic requests with table and id in the path.
+- `/api/dynamic/meta/tables` - table list.
+- `/api/dynamic/meta/{table}/fields` - field list for a table.
+- `/api/dynamic/meta/autocomplete` - universal autocomplete.
+- `/api/dynamic/schema.xml` - export the current demo SQLite database XML schema.
+- `/api/dynamic/schema/apply` - apply an XML schema to the current demo SQLite database.
 
-## Demo-Схема
+## Demo Schema
 
-Автоматически создаются таблицы:
+The server creates these tables automatically:
 
-- `categories` - категории товаров.
-- `products` - товары, привязанные к категориям.
-- `customers` - покупатели.
-- `orders` - заказы, привязанные к покупателям и товарам.
+- `categories` - product categories.
+- `products` - products linked to categories.
+- `customers` - customers.
+- `orders` - orders linked to customers and products.
 
-Связи:
+Relationships:
 
 ```text
 products.category_id -> categories.id
@@ -79,9 +79,9 @@ orders.customer_id   -> customers.id
 orders.product_id    -> products.id
 ```
 
-## Формат Запросов
+## Request Format
 
-Основной формат для UI - JSON body:
+The UI primarily sends a JSON body:
 
 ```json
 {
@@ -108,20 +108,20 @@ orders.product_id    -> products.id
 }
 ```
 
-HTTP transport на домашней странице использует `POST /api/dynamic/`, а реальная операция задается полем `"method"`. Поэтому JSON с `"method": "GET"` выполняется как SELECT через `QueryBuilder`.
+The home page HTTP transport uses `POST /api/dynamic/`, while the actual operation is selected by the `"method"` field. A JSON request with `"method": "GET"` is therefore executed as a SELECT through `QueryBuilder`.
 
-URL DSL вида `?query=(method:GET;table:...)` также поддерживается backend-ом, но для сложных JOIN/фильтров в UI используется JSON, чтобы не зависеть от URL encoding.
+The backend also supports the URL DSL form `?query=(method:GET;table:...)`, but the UI uses JSON for complex JOIN/filter requests so it does not depend on URL encoding.
 
-## Запуск
+## Running
 
-Из корня репозитория:
+From the repository root:
 
 ```bash
 cmake --build build --target dynamic_web_query_builder_server
 ./build/example/dynamic_web_query_builder_server/dynamic_web_query_builder_server
 ```
 
-После запуска открыть:
+After startup, open:
 
 ```text
 http://localhost:8008/
@@ -130,44 +130,44 @@ http://localhost:8008/table
 http://localhost:8008/schema-manager
 ```
 
-Если build-директория еще не создана:
+If the build directory does not exist yet:
 
 ```bash
 cmake -S . -B build
 cmake --build build --target dynamic_web_query_builder_server
 ```
 
-## Важные Файлы
+## Important Files
 
-- `main.cpp` - точка входа примера.
-- `routes.h` - регистрация routes.
+- `main.cpp` - example entry point.
+- `routes.h` - route registration.
 - `handlers.h` - HTML/API handlers.
-- `demo_database.h` - создание SQLite demo-базы, схемы и seed-данных.
-- `example_paths.h` - вычисление путей к templates и demo-базе.
-- `config.yaml` - YAML конфигурация demo SQLite подключения.
-- `schema_roundtrip_test.cpp` - C++ тест round-trip генерации XML-схемы.
-- `templates/home.html` - домашняя страница с API-примерами.
-- `templates/query_builder.html` - интерактивный Query Builder.
-- `templates/table.html` - браузер таблиц с пагинацией.
-- `templates/row_view.html` - просмотр и редактирование отдельной записи.
-- `templates/schema_manager.html` - управление XML-схемой.
-- `templates/app.js` - JS для домашней страницы.
-- `templates/schema_manager.js` - JS для страницы управления схемой.
-- `templates/styles.css` - общие стили.
+- `demo_database.h` - SQLite demo database, schema and seed data creation.
+- `example_paths.h` - template and demo database path resolution.
+- `config.yaml` - YAML configuration for the demo SQLite connection.
+- `schema_roundtrip_test.cpp` - C++ round-trip XML schema generation test.
+- `templates/home.html` - home page with API examples.
+- `templates/query_builder.html` - interactive Query Builder.
+- `templates/table.html` - table browser with pagination.
+- `templates/row_view.html` - view and edit an individual record.
+- `templates/schema_manager.html` - XML schema management.
+- `templates/app.js` - JavaScript for the home page.
+- `templates/schema_manager.js` - JavaScript for the schema management page.
+- `templates/styles.css` - shared styles.
 - `perf_test/` - Python performance test suite.
-- `CMakeLists.txt` - сборка standalone target примера.
+- `CMakeLists.txt` - standalone example target build.
 
-## Как Был Создан Этот Пример
+## How This Example Was Built
 
-1. Создан каталог примера:
+1. The example directory was created:
 
 ```text
 example/dynamic_web_query_builder_server
 ```
 
-2. Добавлена точка входа `main.cpp`.
+2. The `main.cpp` entry point was added.
 
-В ней создается `ServerManager`, затем регистрируется пользовательская функция маршрутов:
+It creates `ServerManager` and then registers a custom route function:
 
 ```cpp
 auto server_manager = create_server_manager(argc, argv);
@@ -175,72 +175,72 @@ server_manager->addRouteFunction(setupDynamicRoutes);
 server_manager->run();
 ```
 
-3. Добавлен `routes.h`.
+3. `routes.h` was added.
 
-В `setupDynamicRoutes(HttpServer& server)` зарегистрированы:
+`setupDynamicRoutes(HttpServer& server)` registers:
 
-- `/` для домашней страницы;
-- `/query-builder` для интерфейса Query Builder;
-- `/table` для браузеринга таблиц;
-- `/table/{table}/{id}` для просмотра записей;
-- `/schema-manager` для управления XML-схемой;
-- `/static/{filename}` для CSS/JS;
-- `/api/dynamic...` для динамических запросов;
-- `/api/dynamic/meta...` для metadata и autocomplete;
-- `/api/dynamic/schema.xml` и `/api/dynamic/schema/apply` для экспорта/импорта схемы.
+- `/` for the home page;
+- `/query-builder` for the Query Builder UI;
+- `/table` for table browsing;
+- `/table/{table}/{id}` for record viewing;
+- `/schema-manager` for XML schema management;
+- `/static/{filename}` for CSS/JS;
+- `/api/dynamic...` for dynamic requests;
+- `/api/dynamic/meta...` for metadata and autocomplete;
+- `/api/dynamic/schema.xml` and `/api/dynamic/schema/apply` for schema export/import.
 
-4. Добавлен `handlers.h`.
+4. `handlers.h` was added.
 
-В нем созданы handlers:
+It defines these handlers:
 
-- `ApiDescriptionHandler` - отдает `home.html`;
-- `QueryBuilderInterfaceHandler` - отдает `query_builder.html`;
-- `TableInterfaceHandler` - отдает `table.html` для браузеринга таблиц;
-- `RowViewInterfaceHandler` - отдает `row_view.html` для редактирования записей;
-- `SchemaManagerPageHandler` - отдает `schema_manager.html`;
-- `QueryBuilderHandler` - принимает JSON/query DSL, вызывает ORM `QueryBuilder`;
-- `SchemaExportHandler` - экспортирует XML-схему из demo-базы;
-- `SchemaApplyHandler` - применяет XML-схему к demo-базе;
-- `QueryMetadataHandler` - возвращает таблицы, поля и autocomplete для UI.
+- `ApiDescriptionHandler` - serves `home.html`;
+- `QueryBuilderInterfaceHandler` - serves `query_builder.html`;
+- `TableInterfaceHandler` - serves `table.html` for table browsing;
+- `RowViewInterfaceHandler` - serves `row_view.html` for record editing;
+- `SchemaManagerPageHandler` - serves `schema_manager.html`;
+- `QueryBuilderHandler` - accepts JSON/query DSL and calls ORM `QueryBuilder`;
+- `SchemaExportHandler` - exports an XML schema from the demo database;
+- `SchemaApplyHandler` - applies an XML schema to the demo database;
+- `QueryMetadataHandler` - returns tables, fields and autocomplete data for the UI.
 
-5. Подключен ORM `QueryBuilder`.
+5. ORM `QueryBuilder` was integrated.
 
-`QueryBuilderHandler` передает входной запрос в `QueryBuilder::parseRequest(...)`, затем вызывает `exec()`. `QueryBuilder` валидирует имена таблиц/полей, строит SQL и выполняет его через `DatabaseInterface`.
+`QueryBuilderHandler` passes the incoming request to `QueryBuilder::parseRequest(...)` and then calls `exec()`. `QueryBuilder` validates table and field names, builds SQL and executes it through `DatabaseInterface`.
 
-6. Добавлена demo SQLite база.
+6. The demo SQLite database was added.
 
-В `demo_database.h` реализованы:
+`demo_database.h` implements:
 
-- `ensureDemoDatabase()` - создает файл SQLite, таблицы и данные;
-- `demoDatabaseConfig()` - возвращает `DatabaseConfig` для SQLite.
+- `ensureDemoDatabase()` - creates the SQLite file, tables and data;
+- `demoDatabaseConfig()` - returns `DatabaseConfig` for SQLite.
 
-Это сделано программно, чтобы пример запускался без внешнего PostgreSQL/MySQL и без ручной подготовки базы.
+This keeps the example runnable without external PostgreSQL/MySQL services and without manual database preparation.
 
-7. Добавлен переносимый расчет путей.
+7. Portable path resolution was added.
 
-В `example_paths.h` путь к каталогу примера берется из CMake definition:
+`example_paths.h` reads the example directory path from the CMake definition:
 
 ```cpp
 DYNAMIC_WEB_QUERY_BUILDER_SERVER_SOURCE_DIR
 ```
 
-Это убрало абсолютные локальные пути из `routes.h` и `handlers.h`.
+This removed absolute local paths from `routes.h` and `handlers.h`.
 
-8. Настроена сборка в `CMakeLists.txt`.
+8. The build was configured in `CMakeLists.txt`.
 
-Определяются два target-а:
+It defines two targets:
 
-- `dynamic_web_query_builder_server` - основное приложение;
-- `dynamic_web_query_builder_schema_roundtrip_test` - тест round-trip генерации XML-схемы.
+- `dynamic_web_query_builder_server` - the main application;
+- `dynamic_web_query_builder_schema_roundtrip_test` - the XML schema generation round-trip test.
 
-Target `dynamic_web_query_builder_server` собирает:
+The `dynamic_web_query_builder_server` target builds:
 
-- server-файлы Qornix Web;
-- ORM core/database файлы;
-- PostgreSQL/SQLite/MySQL драйверы;
-- сам пример.
+- Qornix Web server files;
+- ORM core/database files;
+- PostgreSQL/SQLite/MySQL drivers;
+- the example itself.
 
-Для примера также передается compile definition с source dir:
+The example also receives a compile definition with the source directory:
 
 ```cmake
 target_compile_definitions(dynamic_web_query_builder_server PRIVATE
@@ -249,23 +249,23 @@ target_compile_definitions(dynamic_web_query_builder_server PRIVATE
 )
 ```
 
-9. Добавлены HTML-шаблоны.
+9. HTML templates were added.
 
-`home.html` содержит интерактивные формы для CRUD-примеров. `query_builder.html` содержит полноценный UI для построения запросов, autocomplete таблиц/полей и отображение результата. `table.html` обеспечивает браузеринг таблиц с пагинацией и autocomplete. `row_view.html` позволяет просматривать и редактировать отдельные записи с inline-редактированием полей. `schema_manager.html` предоставляет UI для экспорта и импорта XML-схемы.
+`home.html` contains interactive forms for CRUD examples. `query_builder.html` provides a full query-building UI, table/field autocomplete and result display. `table.html` provides table browsing with pagination and autocomplete. `row_view.html` allows viewing and editing individual records with inline field editing. `schema_manager.html` provides the UI for XML schema export and import.
 
-10. Актуализированы demo-запросы.
+10. Demo requests were updated.
 
-Начальные примеры на главной странице используют реальные таблицы demo SQLite базы:
+The initial examples on the home page use real tables from the demo SQLite database:
 
 - GET: JOIN `orders`, `products`, `customers`;
-- POST: создание товара в `products`;
-- PUT: обновление товара `products.id=2`;
-- PATCH: обновление заказа `orders.id=4`;
-- DELETE: удаление заказа `orders.id=6`.
+- POST: create a product in `products`;
+- PUT: update product `products.id=2`;
+- PATCH: update order `orders.id=4`;
+- DELETE: delete order `orders.id=6`.
 
-11. Добавлен локальный `.gitignore`.
+11. A local `.gitignore` was added.
 
-Он исключает созданную SQLite базу, XML-схемы и sidecar-файлы:
+It excludes the generated SQLite database, XML schemas and sidecar files:
 
 ```text
 dynamic_web_query_builder_demo.sqlite3
@@ -275,22 +275,22 @@ dynamic_web_query_builder_uploaded.schema.xml
 /perf_test/report.json
 ```
 
-## Проверка
+## Verification
 
-Сборка target:
+Build the target:
 
 ```bash
 cmake --build build --target dynamic_web_query_builder_server
 ```
 
-Проверка metadata после запуска:
+Check metadata after startup:
 
 ```bash
 curl http://localhost:8008/api/dynamic/meta/tables
 curl http://localhost:8008/api/dynamic/meta/products/fields
 ```
 
-Проверка dynamic query:
+Check a dynamic query:
 
 ```bash
 curl -X POST http://localhost:8008/api/dynamic/ \
@@ -298,30 +298,30 @@ curl -X POST http://localhost:8008/api/dynamic/ \
   -d '{"method":"GET","table":"products","query":{"fields":["id","name","price","stock"],"limit":10}}'
 ```
 
-Проверка экспорта XML-схемы:
+Check XML schema export:
 
 ```bash
 curl http://localhost:8008/api/dynamic/schema.xml
 ```
 
-Также XML-схему можно сгенерировать со страницы `/schema-manager`. На этой странице можно открыть XML-файл с диска и затем применить его к текущей demo SQLite базе.
+The XML schema can also be generated from `/schema-manager`. On that page, you can open an XML file from disk and apply it to the current demo SQLite database.
 
-После запроса будет создан файл:
+After the request, this file is created:
 
 ```text
 example/dynamic_web_query_builder_server/dynamic_web_query_builder_demo.schema.xml
 ```
 
-Проверка round-trip генерации схемы без запуска HTTP server:
+Run the schema generation round-trip test without starting the HTTP server:
 
 ```bash
 cmake --build build --target dynamic_web_query_builder_schema_roundtrip_test
 ./build/example/dynamic_web_query_builder_server/dynamic_web_query_builder_schema_roundtrip_test
 ```
 
-Тест выполняет сценарий `SQLite DB -> XML -> SchemaDefinition -> DB apply` и проверяет, что в схеме есть таблицы `categories`, `products`, `customers`, `orders`, ключевые поля, индексы, foreign keys, CHECK constraint, view и trigger.
+The test runs the `SQLite DB -> XML -> SchemaDefinition -> DB apply` scenario and checks that the schema contains `categories`, `products`, `customers`, `orders`, key fields, indexes, foreign keys, a CHECK constraint, a view and a trigger.
 
-Проверка применения XML-схемы через HTTP:
+Check XML schema apply through HTTP:
 
 ```bash
 curl -X POST http://localhost:8008/api/dynamic/schema/apply \
@@ -329,7 +329,7 @@ curl -X POST http://localhost:8008/api/dynamic/schema/apply \
   --data-binary @example/dynamic_web_query_builder_server/dynamic_web_query_builder_demo.schema.xml
 ```
 
-Матрица поддержки драйверов для XML export описана в:
+The XML export driver support matrix is documented in:
 
 ```text
 doc/xml_schema_export_driver_support.md
@@ -337,25 +337,25 @@ doc/xml_schema_export_driver_support.md
 
 ## Performance Tests
 
-В каталоге `perf_test/` находится Python performance test suite для проверки производительности API.
+The `perf_test/` directory contains a Python performance test suite for checking API performance.
 
-Тесты включают 6 фаз:
+The suite has six phases:
 
-1. **simple_reads** - простые запросы GET по имени таблицы и по ID (7 endpoint patterns);
-2. **complex_queries** - JOINs, фильтры, сортировка, пагинация (4 query patterns);
-3. **metadata_endpoints** - таблицы, поля, autocomplete, schema.xml (9 endpoint patterns);
-4. **write_operations** - POST create, PUT update, PATCH partial, DELETE (создает и очищает тестовые данные);
-5. **concurrent_load** - тестирование на конкурентность уровнях 1, 5, 10, 20, 50, 100;
-6. **stress_test** - sustained high-load across 6 endpoints.
+1. **simple_reads** - simple GET requests by table name and by ID, using seven endpoint patterns.
+2. **complex_queries** - JOINs, filters, sorting and pagination, using four query patterns.
+3. **metadata_endpoints** - tables, fields, autocomplete and `schema.xml`, using nine endpoint patterns.
+4. **write_operations** - POST create, PUT update, PATCH partial update and DELETE. The test creates and cleans up test data.
+5. **concurrent_load** - concurrency levels 1, 5, 10, 20, 50 and 100.
+6. **stress_test** - sustained high load across six endpoints.
 
-Запуск:
+Run:
 
 ```bash
 cd perf_test
 ./run_perf_test.sh
 ```
 
-Скрипт автоматически собирает target, запускает сервер, выполняет тесты и останавливает сервер. Результат сохраняется в `perf_test/report.json`.
+The script builds the target, starts the server, runs the tests and stops the server automatically. Results are written to `perf_test/report.json`.
 
 ## License
 

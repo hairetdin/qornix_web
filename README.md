@@ -4,21 +4,6 @@ Website: https://qornix.org
 
 Live demo: https://demo.qornix.org
 
-## Быстрые ответы
-
-Если вы индексируете этот репозиторий через `qornix_rag`, начните с [`doc/WHAT_IS_QORNIX_RAG_RU.md`](doc/WHAT_IS_QORNIX_RAG_RU.md). Там есть прямые ответы на базовые вопросы:
-
-- что такое `qornix_web`;
-- что такое `qornix_orm`;
-- для чего нужен `qornix_web`;
-- для чего нужен `qornix_orm`;
-- что такое `qornix_rag`;
-- для чего нужен `qornix_rag`;
-- что такое RAG;
-- как связаны `qornix_web`, `qornix_orm` и `qornix_rag`.
-
-English version: [`doc/WHAT_IS_QORNIX_EN.md`](doc/WHAT_IS_QORNIX_EN.md).
-
 ## Schema-driven Dynamic API
 
 Qornix Web is designed for C++ schema-driven backend applications. The central workflow is:
@@ -129,7 +114,6 @@ These templates keep the Dynamic API backend, move backend/admin pages under `/b
 | `templates/dynamic_api_angular_app` | Schema-driven Dynamic API + Angular frontend template |
 | `create_new_project.sh` | Standalone application generator |
 | `doc/qornix_create_new_app_instruction.md` | Detailed application creation guide |
-| `doc/roadmap_step_by_step_example.md` | Step-by-step application example based on the framework |
 | `qornix_orm` | ORM module located as a directory inside the repository |
 | `example/dynamic_web_query_builder_server` | Schema-driven dynamic API, QueryBuilder UI and XML schema manager example |
 
@@ -186,7 +170,7 @@ XML schema -> ORM metadata -> QueryBuilder -> Dynamic API -> UI
 
 ## Quick start: creating a new application
 
-A detailed step-by-step guide is available in [`doc/qornix_create_new_app_instruction.md`](doc/qornix_create_new_app_instruction.md). The end-to-end application development example is described in [`doc/roadmap_step_by_step_example.md`](doc/project_doc/roadmap_step_by_step_example.md).
+A detailed step-by-step guide is available in [`doc/qornix_create_new_app_instruction.md`](doc/qornix_create_new_app_instruction.md).
 
 Go to the framework directory:
 
@@ -1071,7 +1055,7 @@ The dedicated async DB foundation lives in `include/db/*` and `qornix_orm/databa
 - `SyncOffloadedAsyncDriver` for explicitly marked legacy blocking drivers;
 - `AsyncDatabaseInterface` and `AsyncTableManager` for ORM-facing coroutine code.
 
-See `doc/async_db.md` for usage examples and `doc/project_doc/roadmap_async_db_changelog.md` for implementation status. For standalone `qornix_orm` async DB usage, also read `qornix_orm/Readme.md`, `qornix_orm/doc/standalone_usage.md`, `qornix_orm/doc/async_db_api.md`, `qornix_orm/doc/configuration.md` and `qornix_orm/doc/testing.md`. Real async PostgreSQL and MySQL driver paths are available behind `QORNIX_ENABLE_ASYNC_POSTGRES=ON` and `QORNIX_ENABLE_ASYNC_MYSQL=ON`; live benchmark runs are produced by `scripts/db_benchmark.py` and stored in `doc/benchmark_async_db.md`.
+See `doc/async_db.md` for usage examples. For standalone `qornix_orm` async DB usage, also read `qornix_orm/Readme.md`, `qornix_orm/doc/standalone_usage.md`, `qornix_orm/doc/async_db_api.md`, `qornix_orm/doc/configuration.md` and `qornix_orm/doc/testing.md`. Real async PostgreSQL and MySQL driver paths are available behind `QORNIX_ENABLE_ASYNC_POSTGRES=ON` and `QORNIX_ENABLE_ASYNC_MYSQL=ON`; live benchmark runs are produced by `scripts/db_benchmark.py` and stored in `doc/benchmark_async_db.md`.
 
 Graceful shutdown stops accepting new connections, waits for active requests until a deadline, then stops the `io_context`:
 

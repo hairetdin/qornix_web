@@ -4,7 +4,7 @@
 
 The current implementation includes document ingestion, parser metadata, structure-aware chunking, TF-IDF or ONNX embeddings, local/external vector stores, Xapian lexical indexing, hybrid retrieval, citations, QA/wiki persistence, upload UI/API, LLM provider diagnostics, analytics and feedback.
 
-Короткий русскоязычный FAQ по базовым вопросам проекта находится в [`../doc/WHAT_IS_QORNIX_RAG_RU.md`](../doc/WHAT_IS_QORNIX_RAG_RU.md), английская версия — в [`../doc/WHAT_IS_QORNIX_EN.md`](../doc/WHAT_IS_QORNIX_EN.md). Обзор только RAG-модуля находится в [`doc/OVERVIEW_RU.md`](doc/OVERVIEW_RU.md) и [`doc/OVERVIEW_EN.md`](doc/OVERVIEW_EN.md). Эти документы специально написаны так, чтобы RAG мог уверенно отвечать на вопросы вроде "что такое qornix_rag?", "what is qornix_rag?", "для чего нужен qornix_web?" и "what is RAG?".
+The short FAQ for core project questions is available in English at [`../doc/WHAT_IS_QORNIX_EN.md`](../doc/WHAT_IS_QORNIX_EN.md) and in Russian at [`../doc/WHAT_IS_QORNIX_RAG_RU.md`](../doc/WHAT_IS_QORNIX_RAG_RU.md). The RAG-only overview is available in English at [`doc/OVERVIEW_EN.md`](doc/OVERVIEW_EN.md) and in Russian at [`doc/OVERVIEW_RU.md`](doc/OVERVIEW_RU.md). These documents are written so RAG can answer questions such as "what is qornix_rag?", "what is qornix_web for?", and "what is RAG?".
 
 For the complete product guide, dependencies, models, databases and run profiles, start here:
 
@@ -237,7 +237,7 @@ cmake --build build --target qornix_rag -j$(nproc)
 - [Standalone guide](doc/STANDALONE.md) — local `run.sh` usage.
 - [Configuration reference](doc/CONFIG.md) — YAML keys and operational profiles.
 - [API reference](doc/API.md) — endpoint contract.
-- [Data sources](doc/DATA_SOURCES.md) — QA/wiki/source integration.
+- [Data sources](doc/project_doc/DATA_SOURCES.md) — QA/wiki/source integration.
 - [Knowledge base](doc/KNOWLEDGE_BASE.md) — QA/wiki and Markdown KB usage.
 - [Portable bundle guide](doc/PORTABLE.md) — portable Linux bundle.
 - [qornix_web integration](doc/INTEGRATION_QORNIX_WEB.md) — embedded module integration.

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
 
-    <!-- Определение корневого элемента.
+    <!-- Root element definition.
          schemaFormatVersion is the XML contract version used by qornix_orm.
          It is optional for backward compatibility with existing schemas; omitted
          values are treated as 1.0.
@@ -40,7 +40,7 @@
         </xs:restriction>
     </xs:simpleType>
 
-    <!-- Тип для конфигурации приложения -->
+    <!-- Application configuration type -->
     <xs:complexType name="ConfigurationType">
         <xs:sequence>
             <xs:element name="DbConnectionString" type="xs:string"/>
@@ -50,7 +50,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Перечисление поддерживаемых СУБД -->
+    <!-- Supported database engines -->
     <xs:simpleType name="DatabaseEngineType">
         <xs:restriction base="xs:string">
             <xs:enumeration value="postgresql"/>
@@ -59,7 +59,7 @@
         </xs:restriction>
     </xs:simpleType>
 
-    <!-- Перечисление уровней логирования -->
+    <!-- Supported logging levels -->
     <xs:simpleType name="LogLevelType">
         <xs:restriction base="xs:string">
             <xs:enumeration value="DEBUG"/>
@@ -125,7 +125,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Тип для структуры данных -->
+    <!-- Data structure type -->
     <xs:complexType name="DataStructureType">
         <xs:sequence>
             <xs:element name="Entity" minOccurs="0" maxOccurs="unbounded">
@@ -188,7 +188,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Базовый тип для всех полей -->
+    <!-- Base type for all fields -->
     <xs:complexType name="FieldType">
         <xs:sequence>
             <!-- sequence to accommodate enum values -->
@@ -217,7 +217,7 @@
         <xs:attribute name="scale" type="xs:string" use="optional"/>
     </xs:complexType>
 
-    <!-- Специализированный тип для поля внешнего ключа -->
+    <!-- Specialized type for a foreign key field -->
     <xs:complexType name="ForeignKeyFieldType">
         <xs:complexContent>
             <xs:extension base="FieldType">
@@ -230,7 +230,7 @@
         </xs:complexContent>
     </xs:complexType>
 
-    <!-- Перечисление действий для внешних ключей -->
+    <!-- Foreign key action values -->
     <xs:simpleType name="ForeignKeyActionType">
         <xs:restriction base="xs:string">
             <xs:enumeration value="NO_ACTION"/>
@@ -243,7 +243,7 @@
         </xs:restriction>
     </xs:simpleType>
 
-    <!-- Хранимые процедуры БД -->
+    <!-- Database stored procedures -->
     <xs:complexType name="StoredProceduresType">
         <xs:sequence>
             <xs:element name="StoredProcedure" maxOccurs="unbounded">
@@ -464,7 +464,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Тип для функций сущности -->
+    <!-- Entity function type -->
     <xs:complexType name="FunctionsType">
         <xs:sequence>
             <xs:element name="Function" maxOccurs="unbounded">
@@ -496,7 +496,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Перечисление языков программирования для функций -->
+    <!-- Function programming language values -->
     <xs:simpleType name="FunctionLanguageType">
         <xs:restriction base="xs:string">
             <xs:enumeration value="python"/>
@@ -507,7 +507,7 @@
         </xs:restriction>
     </xs:simpleType>
 
-    <!-- Тип для индекса -->
+    <!-- Index type -->
     <xs:complexType name="IndexType">
         <xs:sequence>
             <xs:element name="FieldName" type="xs:string" maxOccurs="unbounded"/>
@@ -530,7 +530,7 @@
         </xs:restriction>
     </xs:simpleType>
 
-    <!-- Тип для маппинга между приложением и базой данных -->
+    <!-- Application-to-database mapping type -->
     <xs:complexType name="DatabaseMappingType">
         <xs:sequence>
             <xs:element name="EntityMapping" maxOccurs="unbounded">
@@ -554,7 +554,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Тип для маппинга типов данных -->
+    <!-- Data type mapping type -->
     <xs:complexType name="TypeMappingType">
         <xs:sequence>
             <xs:element name="TypeMap" maxOccurs="unbounded">
@@ -568,7 +568,7 @@
         </xs:sequence>
     </xs:complexType>
 
-    <!-- Перечисление типов данных приложения -->
+    <!-- Application data type values -->
     <xs:simpleType name="DataTypeEnum">
         <xs:restriction base="xs:string">
             <xs:enumeration value="INTEGER"/>
@@ -588,7 +588,7 @@
         </xs:restriction>
     </xs:simpleType>
 
-    <!-- Перечисление типов данных базы данных -->
+    <!-- Database data type values -->
     <xs:simpleType name="DatabaseTypeEnum">
         <xs:restriction base="xs:string">
             <xs:enumeration value="INTEGER"/>
