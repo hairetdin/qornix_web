@@ -1,0 +1,2190 @@
+/*
+ * Copyright (c) 2026 https://github.com/hairetdin
+ *
+ * This file is part of Qornix project.
+ * Licensed under GNU GPL v3.0 (see LICENSE file) or commercial license.
+ */
+
+#include "sqlite_source.h"
+#include "core.h"
+
+#include <sstream>
+#include <iomanip>
+#include <ctime>
+#include <algorithm>
+#include <cctype>
+#include <set>
+#include <boost/json.hpp>
+
+namespace {
+
+std::vector<std::string> jsonStringArray(const std::string& json) {
+    std::vector<std::string> values;
+    if (json.empty()) {
+        return values;
+    }
+    try {
+        auto parsed = boost::json::parse(json);
+        if (!parsed.is_array()) {
+            return values;
+        }
+        for (const auto& value : parsed.as_array()) {
+            if (value.is_string()) {
+                values.emplace_back(value.as_string().c_str());
+            }
+        }
+    } catch (...) {
+    }
+    return values;
+}
+
+std::string stringArrayJson(const std::vector<std::string>& values) {
+    boost::json::array array;
+    for (const auto& value : values) {
+        if (!value.empty()) {
+            array.emplace_back(value);
+        }
+    }
+    return boost::json::serialize(array);
+}
+
+
+std::vector<std::string> tagsFromMetadataJson(const std::string& metadata_json) {
+    std::vector<std::string> tags;
+    if (metadata_json.empty()) {
+        return tags;
+    }
+    try {
+        auto parsed = boost::json::parse(metadata_json);
+        if (!parsed.is_object()) {
+            return tags;
+        }
+        auto it = parsed.as_object().find("tags");
+        if (it == parsed.as_object().end()) {
+            return tags;
+        }
+        if (it->value().is_array()) {
+            for (const auto& value : it->value().as_array()) {
+                if (value.is_string()) {
+                    tags.emplace_back(value.as_string().c_str());
+                }
+            }
+            return tags;
+        }
+        if (it->value().is_string()) {
+            tags = jsonStringArray(it->value().as_string().c_str());
+            if (!tags.empty()) {
+                return tags;
+            }
+            std::stringstream ss(std::string(it->value().as_string().c_str()));
+            std::string tag;
+            while (std::getline(ss, tag, ',')) {
+                tag.erase(tag.begin(), std::find_if(tag.begin(), tag.end(), [](unsigned char c) {
+                    return !std::isspace(c);
+                }));
+                tag.erase(std::find_if(tag.rbegin(), tag.rend(), [](unsigned char c) {
+                    return !std::isspace(c);
+                }).base(), tag.end());
+                if (!tag.empty()) {
+                    tags.push_back(tag);
+                }
+            }
+        }
+    } catch (...) {
+    }
+    return tags;
+}
+
+std::string sqliteText(sqlite3_stmt* stmt, int column) {
+    const unsigned char* value = sqlite3_column_text(stmt, column);
+    return value ? reinterpret_cast<const char*>(value) : std::string{};
+}
+
+} // namespace
+
+// Simple join implementation (replacement for boost::algorithm::join)
+template<typename T>
+std::string join_strings(const std::vector<T>& items, const std::string& delimiter) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) oss << delimiter;
+        oss << items[i];
+    }
+    return oss.str();
+}
+
+#if !QORNIX_HAS_SQLITE
+#error "SQLiteSource requires QORNIX_HAS_SQLITE to be defined"
+#endif
+
+// ============================================================================
+// SQLiteSource implementation
+// ============================================================================
+
+SQLiteSource::SQLiteSource(Config config)
+    : config_(std::move(config)) {
+}
+
+SQLiteSource::~SQLiteSource() {
+    cleanup();
+}
+
+bool SQLiteSource::initialize() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    std::cerr << "SQLiteSource: SQLite3 not available" << std::endl;
+    return false;
+#endif
+
+    if (db_) {
+        return true; // Already connected
+    }
+
+    if (!connect()) {
+        return false;
+    }
+
+    if (config_.auto_migrate) {
+        return migrate();
+    }
+
+    return true;
+}
+
+void SQLiteSource::cleanup() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if QORNIX_HAS_SQLITE
+    if (db_) {
+        sqlite3_close(db_);
+        db_ = nullptr;
+    }
+#endif
+}
+
+bool SQLiteSource::connect() {
+#if QORNIX_HAS_SQLITE
+    int rc = sqlite3_open_v2(config_.db_path.c_str(), &db_,
+                             SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_FULLMUTEX,
+                             nullptr);
+    if (rc != SQLITE_OK) {
+        std::cerr << "SQLiteSource: Failed to open database: "
+                  << sqlite3_errmsg(db_) << std::endl;
+        db_ = nullptr;
+        return false;
+    }
+
+    // Enable WAL mode for better concurrency
+    executeStatement("PRAGMA journal_mode=WAL");
+
+    // Enable foreign keys
+    executeStatement("PRAGMA foreign_keys=ON");
+
+    // Set busy timeout (5 seconds)
+    sqlite3_busy_timeout(db_, 5000);
+
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool SQLiteSource::migrate() {
+    if (!db_ && !connect()) {
+        return false;
+    }
+
+    const char* create_tables = R"(
+        -- QA Pairs table
+        CREATE TABLE IF NOT EXISTS qa_pairs (
+            id TEXT PRIMARY KEY,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            category TEXT DEFAULT 'general',
+            aliases TEXT DEFAULT '[]',
+            metadata TEXT DEFAULT '{}',
+            version INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            source_id TEXT NOT NULL,
+            hash TEXT NOT NULL,
+            UNIQUE(source_id, hash)
+        );
+
+        -- Normalized QA tags table for scalable server-side tag autocomplete/filtering.
+        CREATE TABLE IF NOT EXISTS qa_tags (
+            pair_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(pair_id, source_id, tag),
+            FOREIGN KEY(pair_id) REFERENCES qa_pairs(id) ON DELETE CASCADE
+        );
+
+        -- Append-only QA provenance/version history.
+        CREATE TABLE IF NOT EXISTS qa_pair_history (
+            history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pair_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            question TEXT DEFAULT '',
+            answer TEXT DEFAULT '',
+            category TEXT DEFAULT 'general',
+            aliases TEXT DEFAULT '[]',
+            metadata TEXT DEFAULT '{}',
+            changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Search Log table
+        CREATE TABLE IF NOT EXISTS search_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query TEXT NOT NULL,
+            result_count INTEGER DEFAULT 0,
+            has_answer INTEGER DEFAULT 0,
+            response_time_ms INTEGER,
+            client_ip TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            top_result_path TEXT
+        );
+
+        -- Import History table
+        CREATE TABLE IF NOT EXISTS import_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path TEXT NOT NULL,
+            documents_imported INTEGER DEFAULT 0,
+            duplicates_found INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'completed',
+            error_message TEXT,
+            imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Persistent indexed document metadata.
+        CREATE TABLE IF NOT EXISTS rag_documents (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            type TEXT,
+            language TEXT,
+            content_hash TEXT NOT NULL,
+            size_bytes INTEGER DEFAULT 0,
+            lines_count INTEGER DEFAULT 0,
+            metadata TEXT DEFAULT '{}',
+            last_modified INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(source_id, relative_path)
+        );
+
+        -- Persistent chunks derived from indexed documents.
+        CREATE TABLE IF NOT EXISTS rag_chunks (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            char_start INTEGER DEFAULT 0,
+            char_end INTEGER DEFAULT 0,
+            token_count INTEGER DEFAULT 0,
+            metadata TEXT DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(document_id) REFERENCES rag_documents(id) ON DELETE CASCADE,
+            UNIQUE(document_id, chunk_index)
+        );
+
+        -- Persistent embedding vectors for chunks.
+        CREATE TABLE IF NOT EXISTS rag_embeddings (
+            chunk_id TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            backend TEXT NOT NULL,
+            dimension INTEGER NOT NULL,
+            vector BLOB NOT NULL,
+            content_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(chunk_id, model_id),
+            FOREIGN KEY(chunk_id) REFERENCES rag_chunks(id) ON DELETE CASCADE
+        );
+
+        -- Embedding model metadata. Kept minimal until the model registry expands.
+        CREATE TABLE IF NOT EXISTS rag_embedding_models (
+            model_id TEXT PRIMARY KEY,
+            backend TEXT NOT NULL,
+            dimension INTEGER NOT NULL,
+            metadata TEXT DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Durable ingestion job history for filesystem/project ingestion.
+        CREATE TABLE IF NOT EXISTS rag_ingestion_jobs (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            root_path TEXT NOT NULL,
+            status TEXT NOT NULL,
+            files_seen INTEGER DEFAULT 0,
+            documents_imported INTEGER DEFAULT 0,
+            duplicates_found INTEGER DEFAULT 0,
+            skipped INTEGER DEFAULT 0,
+            errors INTEGER DEFAULT 0,
+            error_message TEXT DEFAULT '',
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            finished_at TIMESTAMP
+        );
+
+        -- Indexes for performance
+        CREATE INDEX IF NOT EXISTS idx_qa_pairs_source ON qa_pairs(source_id);
+        CREATE INDEX IF NOT EXISTS idx_qa_pairs_category ON qa_pairs(category);
+        CREATE INDEX IF NOT EXISTS idx_qa_pairs_hash ON qa_pairs(hash);
+        CREATE INDEX IF NOT EXISTS idx_qa_pairs_question ON qa_pairs(question COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_qa_tags_source_tag ON qa_tags(source_id, tag);
+        CREATE INDEX IF NOT EXISTS idx_qa_tags_pair ON qa_tags(source_id, pair_id);
+        CREATE INDEX IF NOT EXISTS idx_qa_pair_history_pair ON qa_pair_history(source_id, pair_id, version DESC);
+        CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_search_log_query ON search_log(query);
+        CREATE INDEX IF NOT EXISTS idx_import_history_file ON import_history(file_path);
+        CREATE INDEX IF NOT EXISTS idx_rag_documents_source ON rag_documents(source_id);
+        CREATE INDEX IF NOT EXISTS idx_rag_documents_path ON rag_documents(source_id, relative_path);
+        CREATE INDEX IF NOT EXISTS idx_rag_chunks_document ON rag_chunks(document_id);
+        CREATE INDEX IF NOT EXISTS idx_rag_chunks_source ON rag_chunks(source_id);
+        CREATE INDEX IF NOT EXISTS idx_rag_embeddings_model ON rag_embeddings(model_id);
+        CREATE INDEX IF NOT EXISTS idx_rag_ingestion_jobs_started ON rag_ingestion_jobs(started_at);
+        CREATE INDEX IF NOT EXISTS idx_rag_ingestion_jobs_source ON rag_ingestion_jobs(source_id);
+    )";
+
+    char* error_msg = nullptr;
+    int rc = sqlite3_exec(db_, create_tables, nullptr, nullptr, &error_msg);
+
+    if (rc != SQLITE_OK) {
+        std::cerr << "SQLiteSource: Migration failed: "
+                  << (error_msg ? error_msg : "unknown error") << std::endl;
+        if (error_msg) {
+            sqlite3_free(error_msg);
+        }
+        return false;
+    }
+
+    initializeQAAuxiliaryTables();
+    rebuildQAAuxiliaryTables();
+
+    std::cout << "✅ SQLiteSource: Migration completed successfully" << std::endl;
+    return true;
+}
+
+size_t SQLiteSource::count() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    return 0;
+#endif
+
+    if (!db_) {
+        return 0;
+    }
+
+    std::string sql = "SELECT COUNT(*) FROM qa_pairs WHERE source_id = '"
+                      + config_.source_id + "'";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return 0;
+    }
+
+    rc = sqlite3_step(stmt);
+    size_t result = 0;
+    if (rc == SQLITE_ROW) {
+        result = sqlite3_column_int(stmt, 0);
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+std::vector<Document> SQLiteSource::getDocuments() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<Document> docs;
+
+#if !QORNIX_HAS_SQLITE
+    return docs;
+#endif
+
+    if (!db_) {
+        return docs;
+    }
+
+    std::string sql = "SELECT id, question, answer, category, aliases, metadata "
+                      "FROM qa_pairs WHERE source_id = '" + config_.source_id + "'";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return docs;
+    }
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        QASource::QAPair pair = rowToQAPair(stmt);
+        Document doc = qaPairToDocument(pair);
+        docs.push_back(doc);
+    }
+
+    sqlite3_finalize(stmt);
+    return docs;
+}
+
+void SQLiteSource::addDocument(const Document& doc) {
+    // Extract QA pair data from document metadata
+    std::string id = doc.metadata.count("qa_id") ? doc.metadata.at("qa_id") : doc.path;
+    std::string question, answer, category = "general";
+    std::string aliases = "[]";
+
+    // Parse content for question/answer
+    size_t question_pos = doc.content.find("Вопрос: ");
+    size_t answer_pos = doc.content.find("\n\nОтвет: ");
+
+    if (question_pos != std::string::npos && answer_pos != std::string::npos) {
+        question = doc.content.substr(question_pos + 8, answer_pos - question_pos - 8);
+        answer = doc.content.substr(answer_pos + 6);
+    }
+
+    if (doc.metadata.count("category")) {
+        category = doc.metadata.at("category");
+    }
+
+    addQAPair(id, question, answer, category, aliases);
+}
+
+void SQLiteSource::removeDocument(const std::string& id) {
+    deleteQAPair(id);
+}
+
+bool SQLiteSource::addQAPair(const std::string& id, const std::string& question,
+                              const std::string& answer, const std::string& category,
+                              const std::string& aliases, const std::string& metadata) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    return false;
+#endif
+
+    if (!db_) {
+        return false;
+    }
+
+    std::string hash = computeHash(id, question, answer);
+
+    // Check for duplicate hash
+    std::string check_sql = "SELECT COUNT(*) FROM qa_pairs WHERE source_id = ? AND hash = ?";
+    sqlite3_stmt* check_stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, check_sql.c_str(), -1, &check_stmt, nullptr);
+    if (rc == SQLITE_OK) {
+        sqlite3_bind_text(check_stmt, 1, config_.source_id.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(check_stmt, 2, hash.c_str(), -1, SQLITE_STATIC);
+
+        rc = sqlite3_step(check_stmt);
+        if (rc == SQLITE_ROW && sqlite3_column_int(check_stmt, 0) > 0) {
+            sqlite3_finalize(check_stmt);
+            return false;
+        }
+        sqlite3_finalize(check_stmt);
+    }
+
+    // Insert new pair
+    auto now_time = std::chrono::system_clock::now()
+                    .time_since_epoch()
+                    .count();
+    std::string now_str = std::to_string(now_time);
+    std::string insert_sql = "INSERT OR IGNORE INTO qa_pairs "
+                             "(id, question, answer, category, aliases, metadata, "
+                             "created_at, updated_at, source_id, hash) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    const bool inserted = executePreparedStatement(insert_sql, {
+        id, question, answer, category, aliases, metadata,
+        now_str, now_str, config_.source_id, hash
+    });
+    if (inserted) {
+        syncQAAuxiliaryRows(id, question, answer, category, aliases, metadata);
+        insertQAHistory(id, 1, "create", question, answer, category, aliases, metadata);
+    }
+    return inserted;
+}
+
+bool SQLiteSource::updateQAPair(const std::string& id, const std::string& answer,
+                                 const std::string& category, const std::string& aliases,
+                                 const std::string& question,
+                                 const std::string& metadata) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    return false;
+#endif
+
+    if (!db_) {
+        return false;
+    }
+
+    std::string current_question;
+    std::string current_answer;
+    std::string current_category;
+    std::string current_aliases;
+    std::string current_metadata;
+    std::int64_t current_version = 1;
+    {
+        std::string select_sql = "SELECT question, answer, category, aliases, metadata, version FROM qa_pairs WHERE id = ? AND source_id = ?";
+        sqlite3_stmt* stmt = nullptr;
+        int rc = sqlite3_prepare_v2(db_, select_sql.c_str(), -1, &stmt, nullptr);
+        if (rc != SQLITE_OK) {
+            return false;
+        }
+
+        sqlite3_bind_text(stmt, 1, id.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, config_.source_id.c_str(), -1, SQLITE_STATIC);
+
+        rc = sqlite3_step(stmt);
+        if (rc != SQLITE_ROW) {
+            sqlite3_finalize(stmt);
+            return false;
+        }
+
+        current_question = sqliteText(stmt, 0);
+        current_answer = sqliteText(stmt, 1);
+        current_category = sqliteText(stmt, 2);
+        current_aliases = sqliteText(stmt, 3);
+        current_metadata = sqliteText(stmt, 4);
+        current_version = sqlite3_column_int64(stmt, 5);
+        sqlite3_finalize(stmt);
+    }
+
+    std::string update_sql = "UPDATE qa_pairs SET ";
+    std::vector<std::string> set_clauses;
+    std::vector<std::string> bind_values;
+
+    if (!question.empty()) {
+        set_clauses.push_back("question = ?");
+        bind_values.push_back(question);
+    }
+    if (!answer.empty()) {
+        set_clauses.push_back("answer = ?");
+        bind_values.push_back(answer);
+    }
+    if (!category.empty()) {
+        set_clauses.push_back("category = ?");
+        bind_values.push_back(category);
+    }
+    if (!aliases.empty()) {
+        set_clauses.push_back("aliases = ?");
+        bind_values.push_back(aliases);
+    }
+    if (!metadata.empty()) {
+        set_clauses.push_back("metadata = ?");
+        bind_values.push_back(metadata);
+    }
+
+    if (!question.empty() || !answer.empty()) {
+        const std::string final_question = question.empty() ? current_question : question;
+        const std::string final_answer = answer.empty() ? current_answer : answer;
+        set_clauses.push_back("hash = ?");
+        bind_values.push_back(computeHash(id, final_question, final_answer));
+    }
+
+    if (set_clauses.empty()) {
+        return true; // Nothing to update
+    }
+
+    set_clauses.push_back("updated_at = CURRENT_TIMESTAMP");
+    set_clauses.push_back("version = version + 1");
+
+    update_sql += join_strings(set_clauses, ", ");
+    update_sql += " WHERE id = ? AND source_id = ?";
+
+    bind_values.push_back(id);
+    bind_values.push_back(config_.source_id);
+
+    const bool updated = executePreparedStatement(update_sql, bind_values);
+    if (updated) {
+        const std::string final_question = question.empty() ? current_question : question;
+        const std::string final_answer = answer.empty() ? current_answer : answer;
+        const std::string final_category = category.empty() ? current_category : category;
+        const std::string final_aliases = aliases.empty() ? current_aliases : aliases;
+        const std::string final_metadata = metadata.empty() ? current_metadata : metadata;
+        syncQAAuxiliaryRows(id, final_question, final_answer, final_category, final_aliases, final_metadata);
+        insertQAHistory(id, current_version + 1, "update", final_question, final_answer, final_category, final_aliases, final_metadata);
+    }
+    return updated;
+}
+
+bool SQLiteSource::deleteQAPair(const std::string& id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    return false;
+#endif
+
+    if (!db_) {
+        return false;
+    }
+
+    std::string current_question;
+    std::string current_answer;
+    std::string current_category;
+    std::string current_aliases;
+    std::string current_metadata;
+    std::int64_t current_version = 1;
+    {
+        const std::string select_sql = "SELECT question, answer, category, aliases, metadata, version FROM qa_pairs WHERE id = ? AND source_id = ?";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db_, select_sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            bindText(stmt, 1, id);
+            bindText(stmt, 2, config_.source_id);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                current_question = sqliteText(stmt, 0);
+                current_answer = sqliteText(stmt, 1);
+                current_category = sqliteText(stmt, 2);
+                current_aliases = sqliteText(stmt, 3);
+                current_metadata = sqliteText(stmt, 4);
+                current_version = sqlite3_column_int64(stmt, 5);
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    std::string delete_sql = "DELETE FROM qa_pairs WHERE id = ? AND source_id = ?";
+    const bool deleted = executePreparedStatement(delete_sql, {id, config_.source_id});
+    if (deleted) {
+        removeQAAuxiliaryRows(id);
+        insertQAHistory(id, current_version + 1, "delete", current_question, current_answer, current_category, current_aliases, current_metadata);
+    }
+    return deleted;
+}
+
+std::optional<QASource::QAPair> SQLiteSource::findQAPair(const std::string& id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    return std::nullopt;
+#endif
+
+    if (!db_) {
+        return std::nullopt;
+    }
+
+    std::string sql = "SELECT id, question, answer, category, aliases, metadata "
+                      "FROM qa_pairs WHERE id = ? AND source_id = ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return std::nullopt;
+    }
+
+    sqlite3_bind_text(stmt, 1, id.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, config_.source_id.c_str(), -1, SQLITE_STATIC);
+
+    rc = sqlite3_step(stmt);
+    std::optional<QASource::QAPair> result = std::nullopt;
+
+    if (rc == SQLITE_ROW) {
+        result = rowToQAPair(stmt);
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+std::vector<QASource::QAPair> SQLiteSource::searchByCategory(const std::string& category) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<QASource::QAPair> pairs;
+
+#if !QORNIX_HAS_SQLITE
+    return pairs;
+#endif
+
+    if (!db_) {
+        return pairs;
+    }
+
+    std::string sql = "SELECT id, question, answer, category, aliases, metadata "
+                      "FROM qa_pairs WHERE source_id = ? AND category = ? "
+                      "ORDER BY updated_at DESC";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return pairs;
+    }
+
+    sqlite3_bind_text(stmt, 1, config_.source_id.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, category.c_str(), -1, SQLITE_STATIC);
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        pairs.push_back(rowToQAPair(stmt));
+    }
+
+    sqlite3_finalize(stmt);
+    return pairs;
+}
+
+std::vector<QASource::QAPair> SQLiteSource::searchByQuestion(const std::string& query) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<QASource::QAPair> pairs;
+
+#if !QORNIX_HAS_SQLITE
+    return pairs;
+#endif
+
+    if (!db_) {
+        return pairs;
+    }
+
+    std::vector<std::string> terms;
+    std::string current;
+    for (unsigned char ch : query) {
+        if (std::isalnum(ch) || ch == '_' || ch >= 0x80) {
+            current.push_back(static_cast<char>(ch));
+        } else if (!current.empty()) {
+            if (current.size() >= 3) {
+                terms.push_back(current);
+            }
+            current.clear();
+        }
+    }
+    if (!current.empty() && current.size() >= 3) {
+        terms.push_back(current);
+    }
+
+    if (terms.empty() && !query.empty()) {
+        terms.push_back(query);
+    }
+    if (terms.size() > 8) {
+        terms.resize(8);
+    }
+
+    std::string sql = "SELECT id, question, answer, category, aliases, metadata "
+                      "FROM qa_pairs WHERE source_id = ?";
+
+    if (!terms.empty()) {
+        sql += " AND (";
+        for (size_t i = 0; i < terms.size(); ++i) {
+            if (i > 0) {
+                sql += " OR ";
+            }
+            sql += "question LIKE ? OR answer LIKE ? OR category LIKE ?";
+        }
+        sql += ")";
+    }
+    sql += " ORDER BY updated_at DESC LIMIT 50";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return pairs;
+    }
+
+    int bind_index = 1;
+    sqlite3_bind_text(stmt, bind_index++, config_.source_id.c_str(), -1, SQLITE_STATIC);
+    for (const auto& term : terms) {
+        std::string like_query = "%" + term + "%";
+        sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+    }
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        pairs.push_back(rowToQAPair(stmt));
+    }
+
+    sqlite3_finalize(stmt);
+    return pairs;
+}
+
+std::vector<QASource::QAPair> SQLiteSource::getAllPairs(size_t page, size_t per_page) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<QASource::QAPair> pairs;
+
+#if !QORNIX_HAS_SQLITE
+    return pairs;
+#endif
+
+    if (!db_) {
+        return pairs;
+    }
+
+    int offset = (page - 1) * per_page;
+
+    std::string sql = "SELECT id, question, answer, category, aliases, metadata "
+                      "FROM qa_pairs WHERE source_id = ? "
+                      "ORDER BY updated_at DESC LIMIT ? OFFSET ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return pairs;
+    }
+
+    sqlite3_bind_text(stmt, 1, config_.source_id.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, static_cast<int>(per_page));
+    sqlite3_bind_int(stmt, 3, offset);
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        pairs.push_back(rowToQAPair(stmt));
+    }
+
+    sqlite3_finalize(stmt);
+    return pairs;
+}
+
+SQLiteSource::QAListResult SQLiteSource::listQAPairs(const QAListOptions& options) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    QAListResult result;
+    result.limit = options.limit == 0 ? 25 : std::min<size_t>(options.limit, 500);
+    result.offset = options.offset;
+
+#if !QORNIX_HAS_SQLITE
+    return result;
+#endif
+
+    if (!db_) {
+        return result;
+    }
+
+    const std::string fts_query = buildQaFtsQuery(options.query);
+    const bool use_fts = qa_fts_available_ && !fts_query.empty();
+    const std::string like_query = "%" + options.query + "%";
+
+    auto addFilters = [&](std::string& sql) {
+        sql += " WHERE p.source_id = ?";
+        if (!options.category.empty()) {
+            sql += " AND p.category = ?";
+        }
+        if (!options.tag.empty()) {
+            sql += " AND EXISTS (SELECT 1 FROM qa_tags t WHERE t.source_id = p.source_id AND t.pair_id = p.id AND t.tag = ?)";
+        }
+        if (!options.query.empty()) {
+            if (use_fts) {
+                sql += " AND p.id IN (SELECT f.id FROM qa_pairs_fts f WHERE f.source_id = p.source_id AND qa_pairs_fts MATCH ?)";
+            } else {
+                sql += " AND (p.id LIKE ? OR p.question LIKE ? OR p.answer LIKE ? OR p.category LIKE ? OR p.metadata LIKE ?)";
+            }
+        }
+    };
+
+    auto bindFilters = [&](sqlite3_stmt* stmt, int& bind_index) {
+        bindText(stmt, bind_index++, config_.source_id);
+        if (!options.category.empty()) {
+            bindText(stmt, bind_index++, options.category);
+        }
+        if (!options.tag.empty()) {
+            bindText(stmt, bind_index++, options.tag);
+        }
+        if (!options.query.empty()) {
+            if (use_fts) {
+                bindText(stmt, bind_index++, fts_query);
+            } else {
+                for (int i = 0; i < 5; ++i) {
+                    bindText(stmt, bind_index++, like_query);
+                }
+            }
+        }
+    };
+
+    std::string count_sql = "SELECT COUNT(*) FROM qa_pairs p";
+    addFilters(count_sql);
+
+    sqlite3_stmt* count_stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, count_sql.c_str(), -1, &count_stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return result;
+    }
+
+    int bind_index = 1;
+    bindFilters(count_stmt, bind_index);
+
+    if (sqlite3_step(count_stmt) == SQLITE_ROW) {
+        result.total = static_cast<size_t>(sqlite3_column_int64(count_stmt, 0));
+    }
+    sqlite3_finalize(count_stmt);
+
+    std::string list_sql = "SELECT p.id, p.question, p.answer, p.category, p.aliases, p.metadata "
+                           "FROM qa_pairs p";
+    addFilters(list_sql);
+    if (use_fts) {
+        list_sql += " ORDER BY p.updated_at DESC, p.id DESC";
+    } else {
+        list_sql += " ORDER BY p.updated_at DESC, p.id DESC";
+    }
+    list_sql += " LIMIT ? OFFSET ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    rc = sqlite3_prepare_v2(db_, list_sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return result;
+    }
+
+    bind_index = 1;
+    bindFilters(stmt, bind_index);
+    bindInt64(stmt, bind_index++, static_cast<std::int64_t>(result.limit));
+    bindInt64(stmt, bind_index++, static_cast<std::int64_t>(result.offset));
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        result.items.push_back(rowToQAPair(stmt));
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+std::vector<SQLiteSource::QASuggestion> SQLiteSource::suggestQAPairs(const std::string& query, size_t limit) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<QASuggestion> suggestions;
+
+#if !QORNIX_HAS_SQLITE
+    return suggestions;
+#endif
+
+    if (!db_ || query.empty()) {
+        return suggestions;
+    }
+
+    limit = limit == 0 ? 10 : std::min<size_t>(limit, 50);
+    const std::string sql = "SELECT id, question, category FROM qa_pairs "
+                            "WHERE source_id = ? AND (question LIKE ? OR answer LIKE ? OR category LIKE ? OR id LIKE ?) "
+                            "ORDER BY CASE WHEN question LIKE ? THEN 0 ELSE 1 END, updated_at DESC "
+                            "LIMIT ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return suggestions;
+    }
+
+    const std::string like_query = "%" + query + "%";
+    const std::string prefix_query = query + "%";
+    int bind_index = 1;
+    sqlite3_bind_text(stmt, bind_index++, config_.source_id.c_str(), -1, SQLITE_STATIC);
+    for (int i = 0; i < 4; ++i) {
+        sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    sqlite3_bind_text(stmt, bind_index++, prefix_query.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, bind_index++, static_cast<sqlite3_int64>(limit));
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        QASuggestion item;
+        const auto text = [stmt](int column) -> std::string {
+            const unsigned char* value = sqlite3_column_text(stmt, column);
+            return value ? reinterpret_cast<const char*>(value) : "";
+        };
+        item.id = text(0);
+        item.question = text(1);
+        item.category = text(2);
+        suggestions.push_back(std::move(item));
+    }
+
+    sqlite3_finalize(stmt);
+    return suggestions;
+}
+
+std::vector<std::string> SQLiteSource::listQACategories(const std::string& query, size_t limit) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<std::string> categories;
+
+#if !QORNIX_HAS_SQLITE
+    return categories;
+#endif
+
+    if (!db_) {
+        return categories;
+    }
+
+    limit = limit == 0 ? 50 : std::min<size_t>(limit, 200);
+    std::string sql = "SELECT DISTINCT category FROM qa_pairs WHERE source_id = ? AND category != ''";
+    if (!query.empty()) {
+        sql += " AND category LIKE ?";
+    }
+    sql += " ORDER BY category COLLATE NOCASE ASC LIMIT ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        return categories;
+    }
+
+    int bind_index = 1;
+    sqlite3_bind_text(stmt, bind_index++, config_.source_id.c_str(), -1, SQLITE_STATIC);
+    const std::string like_query = "%" + query + "%";
+    if (!query.empty()) {
+        sqlite3_bind_text(stmt, bind_index++, like_query.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    sqlite3_bind_int64(stmt, bind_index++, static_cast<sqlite3_int64>(limit));
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        const unsigned char* value = sqlite3_column_text(stmt, 0);
+        if (value) {
+            categories.emplace_back(reinterpret_cast<const char*>(value));
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return categories;
+}
+
+PersistedIndexStats SQLiteSource::persistIndexedDocuments(
+    const std::vector<Document>& documents,
+    const std::string& source_id,
+    const std::string& embedding_model_id,
+    const std::string& embedding_backend) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    PersistedIndexStats stats;
+
+#if !QORNIX_HAS_SQLITE
+    return stats;
+#endif
+
+    if (!db_) {
+        return stats;
+    }
+
+    const std::string effective_source = source_id.empty() ? config_.source_id : source_id;
+    const std::string effective_backend = embedding_backend.empty() ? "unknown" : embedding_backend;
+
+    if (!executeStatement("BEGIN IMMEDIATE TRANSACTION")) {
+        return stats;
+    }
+
+    bool ok = true;
+    auto fail = [&]() {
+        ok = false;
+        executeStatement("ROLLBACK");
+    };
+
+    if (!executeStatement("CREATE TEMP TABLE IF NOT EXISTS rag_current_snapshot_ids (id TEXT PRIMARY KEY)")) {
+        fail();
+        return stats;
+    }
+    if (!executeStatement("DELETE FROM rag_current_snapshot_ids")) {
+        fail();
+        return stats;
+    }
+    {
+        sqlite3_stmt* stmt = nullptr;
+        const std::string sql = "DELETE FROM rag_chunks WHERE source_id = ?";
+        if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+            fail();
+            return stats;
+        }
+        bindText(stmt, 1, effective_source);
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            sqlite3_finalize(stmt);
+            fail();
+            return stats;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    std::set<std::string> persisted_document_ids;
+    const auto metadataValue = [](const Document& doc, const std::string& key) -> std::string {
+        auto it = doc.metadata.find(key);
+        return it == doc.metadata.end() ? "" : it->second;
+    };
+    const auto metadataSize = [&](const Document& doc, const std::string& key, size_t fallback) -> size_t {
+        const std::string value = metadataValue(doc, key);
+        if (value.empty()) {
+            return fallback;
+        }
+        try {
+            return static_cast<size_t>(std::stoull(value));
+        } catch (...) {
+            return fallback;
+        }
+    };
+
+    for (const auto& doc : documents) {
+        if (!ok) {
+            break;
+        }
+
+        const std::string chunk_relative_path = doc.relative_path.empty() ? doc.path : doc.relative_path;
+        const std::string source_relative_path = metadataValue(doc, "chunk_of").empty()
+            ? chunk_relative_path
+            : metadataValue(doc, "chunk_of");
+        const std::string document_id = computeDocumentId(effective_source, source_relative_path);
+        const size_t chunk_index = metadataSize(doc, "chunk_index", 0);
+        const std::string chunk_id = document_id + "#" + std::to_string(chunk_index);
+        const std::string content_hash = doc.hash.empty() ? HashCalculator::compute_md5(doc.content) : doc.hash;
+        const std::string metadata_json = metadataToJson(doc.metadata);
+        const size_t char_start = metadataSize(doc, "chunk_char_start", 0);
+        const size_t char_end = metadataSize(doc, "chunk_char_end", doc.content.size());
+        const size_t token_count = metadataSize(doc, "chunk_token_count", 0);
+        const auto modified_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+            doc.last_modified.time_since_epoch()
+        ).count();
+
+        {
+            sqlite3_stmt* stmt = nullptr;
+            const std::string sql = "INSERT OR IGNORE INTO rag_current_snapshot_ids (id) VALUES (?)";
+            if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+                fail();
+                break;
+            }
+            bindText(stmt, 1, document_id);
+            if (sqlite3_step(stmt) != SQLITE_DONE) {
+                sqlite3_finalize(stmt);
+                fail();
+                break;
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        if (persisted_document_ids.insert(document_id).second) {
+            sqlite3_stmt* stmt = nullptr;
+            const std::string sql =
+                "INSERT INTO rag_documents "
+                "(id, source_id, path, relative_path, type, language, content_hash, "
+                "size_bytes, lines_count, metadata, last_modified, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "path = excluded.path, relative_path = excluded.relative_path, "
+                "type = excluded.type, language = excluded.language, "
+                "content_hash = excluded.content_hash, size_bytes = excluded.size_bytes, "
+                "lines_count = excluded.lines_count, metadata = excluded.metadata, "
+                "last_modified = excluded.last_modified, updated_at = CURRENT_TIMESTAMP";
+
+            if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+                fail();
+                break;
+            }
+
+            bindText(stmt, 1, document_id);
+            bindText(stmt, 2, effective_source);
+            bindText(stmt, 3, doc.path);
+            bindText(stmt, 4, source_relative_path);
+            bindText(stmt, 5, doc.type);
+            bindText(stmt, 6, doc.language);
+            bindText(stmt, 7, content_hash);
+            bindInt64(stmt, 8, static_cast<std::int64_t>(doc.size_bytes));
+            bindInt64(stmt, 9, static_cast<std::int64_t>(doc.lines_count));
+            bindText(stmt, 10, metadata_json);
+            bindInt64(stmt, 11, static_cast<std::int64_t>(modified_seconds));
+
+            if (sqlite3_step(stmt) != SQLITE_DONE) {
+                sqlite3_finalize(stmt);
+                fail();
+                break;
+            }
+            sqlite3_finalize(stmt);
+            stats.documents++;
+        }
+
+        {
+            sqlite3_stmt* stmt = nullptr;
+            const std::string sql =
+                "INSERT INTO rag_chunks "
+                "(id, document_id, source_id, chunk_index, content, content_hash, "
+                "char_start, char_end, token_count, metadata, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "chunk_index = excluded.chunk_index, "
+                "content = excluded.content, content_hash = excluded.content_hash, "
+                "char_start = excluded.char_start, char_end = excluded.char_end, "
+                "token_count = excluded.token_count, metadata = excluded.metadata, "
+                "updated_at = CURRENT_TIMESTAMP";
+
+            if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+                fail();
+                break;
+            }
+
+            bindText(stmt, 1, chunk_id);
+            bindText(stmt, 2, document_id);
+            bindText(stmt, 3, effective_source);
+            bindInt64(stmt, 4, static_cast<std::int64_t>(chunk_index));
+            bindText(stmt, 5, doc.content);
+            bindText(stmt, 6, content_hash);
+            bindInt64(stmt, 7, static_cast<std::int64_t>(char_start));
+            bindInt64(stmt, 8, static_cast<std::int64_t>(char_end));
+            bindInt64(stmt, 9, static_cast<std::int64_t>(token_count));
+            bindText(stmt, 10, metadata_json);
+
+            if (sqlite3_step(stmt) != SQLITE_DONE) {
+                sqlite3_finalize(stmt);
+                fail();
+                break;
+            }
+            sqlite3_finalize(stmt);
+            stats.chunks++;
+        }
+
+        if (!doc.embedding.empty()) {
+            const std::string model_id = embedding_model_id.empty()
+                ? effective_backend + ":" + std::to_string(doc.embedding.size())
+                : embedding_model_id;
+
+            {
+                sqlite3_stmt* stmt = nullptr;
+                const std::string sql =
+                    "INSERT INTO rag_embedding_models "
+                    "(model_id, backend, dimension, metadata, updated_at) "
+                    "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(model_id) DO UPDATE SET "
+                    "backend = excluded.backend, dimension = excluded.dimension, "
+                    "metadata = excluded.metadata, updated_at = CURRENT_TIMESTAMP";
+
+                std::map<std::string, std::string> model_metadata;
+                for (const auto& key : {
+                    std::string("embedding_model_signature"),
+                    std::string("embedding_backend"),
+                    std::string("tokenizer_type"),
+                    std::string("embedding_token_limit"),
+                    std::string("embedding_estimated_tokens")
+                }) {
+                    const auto it = doc.metadata.find(key);
+                    if (it != doc.metadata.end() && !it->second.empty()) {
+                        model_metadata[key] = it->second;
+                    }
+                }
+                const std::string model_metadata_json = metadataToJson(model_metadata);
+
+                if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+                    fail();
+                    break;
+                }
+                bindText(stmt, 1, model_id);
+                bindText(stmt, 2, effective_backend);
+                bindInt64(stmt, 3, static_cast<std::int64_t>(doc.embedding.size()));
+                bindText(stmt, 4, model_metadata_json);
+                if (sqlite3_step(stmt) != SQLITE_DONE) {
+                    sqlite3_finalize(stmt);
+                    fail();
+                    break;
+                }
+                sqlite3_finalize(stmt);
+            }
+
+            sqlite3_stmt* stmt = nullptr;
+            const std::string sql =
+                "INSERT INTO rag_embeddings "
+                "(chunk_id, model_id, source_id, backend, dimension, vector, content_hash, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(chunk_id, model_id) DO UPDATE SET "
+                "source_id = excluded.source_id, backend = excluded.backend, dimension = excluded.dimension, "
+                "vector = excluded.vector, content_hash = excluded.content_hash, "
+                "created_at = CURRENT_TIMESTAMP";
+
+            if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+                fail();
+                break;
+            }
+            bindText(stmt, 1, chunk_id);
+            bindText(stmt, 2, model_id);
+            bindText(stmt, 3, effective_source);
+            bindText(stmt, 4, effective_backend);
+            bindInt64(stmt, 5, static_cast<std::int64_t>(doc.embedding.size()));
+            bindFloatVector(stmt, 6, doc.embedding);
+            bindText(stmt, 7, content_hash);
+            if (sqlite3_step(stmt) != SQLITE_DONE) {
+                sqlite3_finalize(stmt);
+                fail();
+                break;
+            }
+            sqlite3_finalize(stmt);
+            stats.embeddings++;
+        }
+    }
+
+    if (!ok) {
+        return {};
+    }
+
+    {
+        sqlite3_stmt* stmt = nullptr;
+        const std::string sql =
+            "DELETE FROM rag_documents "
+            "WHERE source_id = ? "
+            "AND id NOT IN (SELECT id FROM rag_current_snapshot_ids)";
+        if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+            fail();
+            return {};
+        }
+        bindText(stmt, 1, effective_source);
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            sqlite3_finalize(stmt);
+            fail();
+            return {};
+        }
+        stats.deleted_documents = static_cast<size_t>(std::max(0, sqlite3_changes(db_)));
+        sqlite3_finalize(stmt);
+    }
+
+    if (!executeStatement("COMMIT")) {
+        executeStatement("ROLLBACK");
+        return {};
+    }
+
+    return stats;
+}
+
+size_t SQLiteSource::countPersistedDocuments(const std::string& source_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return countTableRows("rag_documents", source_id.empty() ? config_.source_id : source_id);
+}
+
+size_t SQLiteSource::countPersistedChunks(const std::string& source_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return countTableRows("rag_chunks", source_id.empty() ? config_.source_id : source_id);
+}
+
+size_t SQLiteSource::countPersistedEmbeddings(const std::string& source_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return countTableRows("rag_embeddings", source_id.empty() ? config_.source_id : source_id);
+}
+
+std::optional<Document> SQLiteSource::findPersistedDocument(const std::string& relative_path,
+                                                            const std::string& source_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    return std::nullopt;
+#endif
+
+    if (!db_) {
+        return std::nullopt;
+    }
+
+    const std::string effective_source = source_id.empty() ? config_.source_id : source_id;
+    const std::string sql =
+        "SELECT path, relative_path, type, language, content_hash, size_bytes, "
+        "lines_count, metadata, last_modified "
+        "FROM rag_documents WHERE source_id = ? AND relative_path = ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return std::nullopt;
+    }
+    bindText(stmt, 1, effective_source);
+    bindText(stmt, 2, relative_path);
+
+    std::optional<Document> result;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        Document doc;
+        const unsigned char* path = sqlite3_column_text(stmt, 0);
+        const unsigned char* rel = sqlite3_column_text(stmt, 1);
+        const unsigned char* type = sqlite3_column_text(stmt, 2);
+        const unsigned char* language = sqlite3_column_text(stmt, 3);
+        const unsigned char* hash = sqlite3_column_text(stmt, 4);
+        const unsigned char* metadata = sqlite3_column_text(stmt, 7);
+
+        doc.path = path ? reinterpret_cast<const char*>(path) : "";
+        doc.relative_path = rel ? reinterpret_cast<const char*>(rel) : "";
+        doc.type = type ? reinterpret_cast<const char*>(type) : "";
+        doc.language = language ? reinterpret_cast<const char*>(language) : "";
+        doc.hash = hash ? reinterpret_cast<const char*>(hash) : "";
+        doc.size_bytes = static_cast<size_t>(sqlite3_column_int64(stmt, 5));
+        doc.lines_count = static_cast<size_t>(sqlite3_column_int64(stmt, 6));
+        doc.metadata = metadataFromJson(metadata ? reinterpret_cast<const char*>(metadata) : "{}");
+        const auto modified = sqlite3_column_int64(stmt, 8);
+        doc.last_modified = std::chrono::system_clock::time_point(std::chrono::seconds(modified));
+        result = std::move(doc);
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+std::vector<PersistedEmbeddingRecord> SQLiteSource::listPersistedEmbeddings(
+    const std::string& source_id,
+    const std::string& model_id,
+    size_t limit,
+    size_t offset) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<PersistedEmbeddingRecord> records;
+
+#if !QORNIX_HAS_SQLITE
+    (void)source_id;
+    (void)model_id;
+    (void)limit;
+    (void)offset;
+    return records;
+#endif
+
+    if (!db_) {
+        return records;
+    }
+
+    const std::string effective_source = source_id.empty() ? config_.source_id : source_id;
+    std::string sql =
+        "SELECT chunk_id, source_id, model_id, backend, dimension, vector, content_hash "
+        "FROM rag_embeddings WHERE source_id = ?";
+    if (!model_id.empty()) {
+        sql += " AND model_id = ?";
+    }
+    sql += " ORDER BY chunk_id, model_id";
+    if (limit > 0) {
+        sql += " LIMIT ? OFFSET ?";
+    }
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return records;
+    }
+
+    int bind_index = 1;
+    bindText(stmt, bind_index++, effective_source);
+    if (!model_id.empty()) {
+        bindText(stmt, bind_index++, model_id);
+    }
+    if (limit > 0) {
+        bindInt64(stmt, bind_index++, static_cast<std::int64_t>(limit));
+        bindInt64(stmt, bind_index++, static_cast<std::int64_t>(offset));
+    }
+
+    size_t label = offset;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        PersistedEmbeddingRecord record;
+        const unsigned char* chunk = sqlite3_column_text(stmt, 0);
+        const unsigned char* source = sqlite3_column_text(stmt, 1);
+        const unsigned char* model = sqlite3_column_text(stmt, 2);
+        const unsigned char* backend = sqlite3_column_text(stmt, 3);
+        const unsigned char* hash = sqlite3_column_text(stmt, 6);
+        record.chunk_id = chunk ? reinterpret_cast<const char*>(chunk) : "";
+        record.source_id = source ? reinterpret_cast<const char*>(source) : "";
+        record.model_id = model ? reinterpret_cast<const char*>(model) : "";
+        record.backend = backend ? reinterpret_cast<const char*>(backend) : "";
+        record.content_hash = hash ? reinterpret_cast<const char*>(hash) : "";
+        record.vector.label = label++;
+        record.vector.embedding = columnFloatVector(stmt, 5);
+        const auto dimension = static_cast<size_t>(sqlite3_column_int64(stmt, 4));
+        if (!record.chunk_id.empty() && !record.vector.embedding.empty()
+            && record.vector.embedding.size() == dimension) {
+            records.push_back(std::move(record));
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return records;
+}
+
+bool SQLiteSource::deletePersistedDocument(const std::string& relative_path,
+                                           const std::string& source_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    (void)relative_path;
+    (void)source_id;
+    return false;
+#endif
+
+    if (!db_ || relative_path.empty()) {
+        return false;
+    }
+
+    const std::string effective_source = source_id.empty() ? config_.source_id : source_id;
+    sqlite3_stmt* stmt = nullptr;
+    const std::string sql = "DELETE FROM rag_documents WHERE source_id = ? AND relative_path = ?";
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    bindText(stmt, 1, effective_source);
+    bindText(stmt, 2, relative_path);
+    const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+    const int changes = sqlite3_changes(db_);
+    sqlite3_finalize(stmt);
+    return ok && changes > 0;
+}
+
+bool SQLiteSource::recordIngestionJobStarted(const std::string& job_id,
+                                             const std::string& source_id,
+                                             const std::string& root_path) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    (void)job_id;
+    (void)source_id;
+    (void)root_path;
+    return false;
+#endif
+
+    if (!db_ || job_id.empty()) {
+        return false;
+    }
+
+    const std::string effective_source = source_id.empty() ? config_.source_id : source_id;
+    const std::string sql =
+        "INSERT INTO rag_ingestion_jobs "
+        "(id, source_id, root_path, status, started_at) "
+        "VALUES (?, ?, ?, 'running', CURRENT_TIMESTAMP) "
+        "ON CONFLICT(id) DO UPDATE SET "
+        "source_id = excluded.source_id, root_path = excluded.root_path, "
+        "status = 'running', files_seen = 0, documents_imported = 0, "
+        "duplicates_found = 0, skipped = 0, errors = 0, error_message = '', "
+        "started_at = CURRENT_TIMESTAMP, finished_at = NULL";
+    return executePreparedStatement(sql, {job_id, effective_source, root_path});
+}
+
+bool SQLiteSource::recordIngestionJobFinished(const std::string& job_id,
+                                              const std::string& status,
+                                              const qornix::rag::IngestionJobResult& result,
+                                              const std::string& error_message) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    (void)job_id;
+    (void)status;
+    (void)result;
+    (void)error_message;
+    return false;
+#endif
+
+    if (!db_ || job_id.empty()) {
+        return false;
+    }
+
+    const std::string sql =
+        "UPDATE rag_ingestion_jobs SET "
+        "status = ?, files_seen = ?, documents_imported = ?, duplicates_found = ?, "
+        "skipped = ?, errors = ?, error_message = ?, finished_at = CURRENT_TIMESTAMP "
+        "WHERE id = ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    bindText(stmt, 1, status);
+    bindInt64(stmt, 2, static_cast<std::int64_t>(result.files_seen));
+    bindInt64(stmt, 3, static_cast<std::int64_t>(result.documents_imported));
+    bindInt64(stmt, 4, static_cast<std::int64_t>(result.duplicates_found));
+    bindInt64(stmt, 5, static_cast<std::int64_t>(result.skipped));
+    bindInt64(stmt, 6, static_cast<std::int64_t>(result.errors));
+    bindText(stmt, 7, error_message);
+    bindText(stmt, 8, job_id);
+    const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+std::optional<SQLiteSource::IngestionJobRecord> SQLiteSource::findIngestionJob(
+    const std::string& job_id) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+#if !QORNIX_HAS_SQLITE
+    (void)job_id;
+    return std::nullopt;
+#endif
+
+    if (!db_ || job_id.empty()) {
+        return std::nullopt;
+    }
+
+    const std::string sql =
+        "SELECT id, source_id, root_path, status, files_seen, documents_imported, "
+        "duplicates_found, skipped, errors, error_message, started_at, finished_at "
+        "FROM rag_ingestion_jobs WHERE id = ?";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return std::nullopt;
+    }
+    bindText(stmt, 1, job_id);
+
+    std::optional<IngestionJobRecord> result;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        result = rowToIngestionJob(stmt);
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+std::vector<SQLiteSource::IngestionJobRecord> SQLiteSource::listIngestionJobs(size_t limit) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<IngestionJobRecord> jobs;
+
+#if !QORNIX_HAS_SQLITE
+    (void)limit;
+    return jobs;
+#endif
+
+    if (!db_) {
+        return jobs;
+    }
+
+    const std::string sql =
+        "SELECT id, source_id, root_path, status, files_seen, documents_imported, "
+        "duplicates_found, skipped, errors, error_message, started_at, finished_at "
+        "FROM rag_ingestion_jobs ORDER BY started_at DESC LIMIT ?";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return jobs;
+    }
+    bindInt64(stmt, 1, static_cast<std::int64_t>(limit == 0 ? 20 : limit));
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        jobs.push_back(rowToIngestionJob(stmt));
+    }
+    sqlite3_finalize(stmt);
+    return jobs;
+}
+
+
+std::vector<std::string> SQLiteSource::listQATags(const std::string& query, size_t limit) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<std::string> tags;
+
+#if !QORNIX_HAS_SQLITE
+    return tags;
+#endif
+
+    if (!db_) {
+        return tags;
+    }
+
+    limit = limit == 0 ? 50 : std::min<size_t>(limit, 500);
+    std::string sql = "SELECT DISTINCT tag FROM qa_tags WHERE source_id = ? AND tag != ''";
+    if (!query.empty()) {
+        sql += " AND tag LIKE ?";
+    }
+    sql += " ORDER BY tag COLLATE NOCASE ASC LIMIT ?";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return tags;
+    }
+    int bind_index = 1;
+    bindText(stmt, bind_index++, config_.source_id);
+    const std::string like_query = "%" + query + "%";
+    if (!query.empty()) {
+        bindText(stmt, bind_index++, like_query);
+    }
+    bindInt64(stmt, bind_index++, static_cast<std::int64_t>(limit));
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        auto tag = sqliteText(stmt, 0);
+        if (!tag.empty()) {
+            tags.push_back(tag);
+        }
+    }
+    sqlite3_finalize(stmt);
+    return tags;
+}
+
+std::vector<SQLiteSource::QAHistoryEntry> SQLiteSource::getQAPairHistory(const std::string& id, size_t limit) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<QAHistoryEntry> history;
+
+#if !QORNIX_HAS_SQLITE
+    return history;
+#endif
+
+    if (!db_ || id.empty()) {
+        return history;
+    }
+
+    limit = limit == 0 ? 25 : std::min<size_t>(limit, 200);
+    const std::string sql =
+        "SELECT pair_id, version, action, question, answer, category, aliases, metadata, changed_at, source_id "
+        "FROM qa_pair_history WHERE source_id = ? AND pair_id = ? "
+        "ORDER BY version DESC, history_id DESC LIMIT ?";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return history;
+    }
+    bindText(stmt, 1, config_.source_id);
+    bindText(stmt, 2, id);
+    bindInt64(stmt, 3, static_cast<std::int64_t>(limit));
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        history.push_back(rowToQAHistoryEntry(stmt));
+    }
+    sqlite3_finalize(stmt);
+    return history;
+}
+
+// ============================================================================
+// Internal helpers
+// ============================================================================
+
+
+bool SQLiteSource::initializeQAAuxiliaryTables() {
+#if !QORNIX_HAS_SQLITE
+    return false;
+#else
+    if (!db_) {
+        return false;
+    }
+
+    char* error_msg = nullptr;
+    const char* fts_sql =
+        "CREATE VIRTUAL TABLE IF NOT EXISTS qa_pairs_fts USING fts5("
+        "id UNINDEXED, source_id UNINDEXED, question, answer, category, aliases, tags, tokenize='unicode61');";
+    int rc = sqlite3_exec(db_, fts_sql, nullptr, nullptr, &error_msg);
+    if (rc != SQLITE_OK) {
+        qa_fts_available_ = false;
+        std::cerr << "SQLiteSource: QA FTS disabled: "
+                  << (error_msg ? error_msg : "FTS5 unavailable") << std::endl;
+        if (error_msg) {
+            sqlite3_free(error_msg);
+        }
+        return false;
+    }
+    qa_fts_available_ = true;
+    return true;
+#endif
+}
+
+bool SQLiteSource::rebuildQAAuxiliaryTables() {
+#if !QORNIX_HAS_SQLITE
+    return false;
+#else
+    if (!db_) {
+        return false;
+    }
+
+    executePreparedStatement("DELETE FROM qa_tags WHERE source_id = ?", {config_.source_id});
+    if (qa_fts_available_) {
+        executePreparedStatement("DELETE FROM qa_pairs_fts WHERE source_id = ?", {config_.source_id});
+    }
+
+    const std::string sql = "SELECT id, question, answer, category, aliases, metadata FROM qa_pairs WHERE source_id = ?";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    bindText(stmt, 1, config_.source_id);
+    bool ok = true;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        ok = syncQAAuxiliaryRows(sqliteText(stmt, 0),
+                                 sqliteText(stmt, 1),
+                                 sqliteText(stmt, 2),
+                                 sqliteText(stmt, 3),
+                                 sqliteText(stmt, 4),
+                                 sqliteText(stmt, 5)) && ok;
+    }
+    sqlite3_finalize(stmt);
+    return ok;
+#endif
+}
+
+bool SQLiteSource::syncQAAuxiliaryRows(const std::string& id,
+                                       const std::string& question,
+                                       const std::string& answer,
+                                       const std::string& category,
+                                       const std::string& aliases,
+                                       const std::string& metadata) {
+#if !QORNIX_HAS_SQLITE
+    (void)id; (void)question; (void)answer; (void)category; (void)aliases; (void)metadata;
+    return false;
+#else
+    if (!db_ || id.empty()) {
+        return false;
+    }
+
+    removeQAAuxiliaryRows(id);
+    const auto tags = tagsFromMetadataJson(metadata);
+    for (const auto& tag : tags) {
+        if (!tag.empty()) {
+            executePreparedStatement(
+                "INSERT OR IGNORE INTO qa_tags (pair_id, source_id, tag) VALUES (?, ?, ?)",
+                {id, config_.source_id, tag});
+        }
+    }
+
+    if (qa_fts_available_) {
+        executePreparedStatement(
+            "INSERT INTO qa_pairs_fts (id, source_id, question, answer, category, aliases, tags) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            {id, config_.source_id, question, answer, category, aliases, stringArrayJson(tags)});
+    }
+    return true;
+#endif
+}
+
+bool SQLiteSource::removeQAAuxiliaryRows(const std::string& id) {
+#if !QORNIX_HAS_SQLITE
+    (void)id;
+    return false;
+#else
+    if (!db_ || id.empty()) {
+        return false;
+    }
+    executePreparedStatement("DELETE FROM qa_tags WHERE source_id = ? AND pair_id = ?", {config_.source_id, id});
+    if (qa_fts_available_) {
+        executePreparedStatement("DELETE FROM qa_pairs_fts WHERE source_id = ? AND id = ?", {config_.source_id, id});
+    }
+    return true;
+#endif
+}
+
+bool SQLiteSource::insertQAHistory(const std::string& id,
+                                   std::int64_t version,
+                                   const std::string& action,
+                                   const std::string& question,
+                                   const std::string& answer,
+                                   const std::string& category,
+                                   const std::string& aliases,
+                                   const std::string& metadata) {
+#if !QORNIX_HAS_SQLITE
+    (void)id; (void)version; (void)action; (void)question; (void)answer; (void)category; (void)aliases; (void)metadata;
+    return false;
+#else
+    if (!db_ || id.empty()) {
+        return false;
+    }
+    const std::string sql =
+        "INSERT INTO qa_pair_history "
+        "(pair_id, source_id, version, action, question, answer, category, aliases, metadata) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    bindText(stmt, 1, id);
+    bindText(stmt, 2, config_.source_id);
+    bindInt64(stmt, 3, version);
+    bindText(stmt, 4, action);
+    bindText(stmt, 5, question);
+    bindText(stmt, 6, answer);
+    bindText(stmt, 7, category.empty() ? std::string("general") : category);
+    bindText(stmt, 8, aliases.empty() ? std::string("[]") : aliases);
+    bindText(stmt, 9, metadata.empty() ? std::string("{}") : metadata);
+    const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    return ok;
+#endif
+}
+
+std::string SQLiteSource::buildQaFtsQuery(const std::string& query) const {
+    std::vector<std::string> tokens;
+    std::string current;
+    for (unsigned char c : query) {
+        if (std::isalnum(c) || c == '_' || c >= 128) {
+            current.push_back(static_cast<char>(std::tolower(c)));
+        } else if (!current.empty()) {
+            tokens.push_back(current);
+            current.clear();
+        }
+    }
+    if (!current.empty()) {
+        tokens.push_back(current);
+    }
+    if (tokens.empty()) {
+        return "";
+    }
+    std::ostringstream oss;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (i > 0) {
+            oss << " AND ";
+        }
+        oss << tokens[i] << "*";
+    }
+    return oss.str();
+}
+
+SQLiteSource::QAHistoryEntry SQLiteSource::rowToQAHistoryEntry(sqlite3_stmt* stmt) const {
+    QAHistoryEntry entry;
+    entry.pair_id = sqliteText(stmt, 0);
+    entry.version = sqlite3_column_int64(stmt, 1);
+    entry.action = sqliteText(stmt, 2);
+    entry.question = sqliteText(stmt, 3);
+    entry.answer = sqliteText(stmt, 4);
+    entry.category = sqliteText(stmt, 5);
+    entry.aliases = sqliteText(stmt, 6);
+    entry.metadata = sqliteText(stmt, 7);
+    entry.changed_at = sqliteText(stmt, 8);
+    entry.source_id = sqliteText(stmt, 9);
+    return entry;
+}
+
+bool SQLiteSource::executeStatement(const std::string& sql) {
+#if !QORNIX_HAS_SQLITE
+    return false;
+#endif
+
+    if (!db_) {
+        return false;
+    }
+
+    char* error_msg = nullptr;
+    int rc = sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, &error_msg);
+
+    if (rc != SQLITE_OK) {
+        std::cerr << "SQLiteSource: Statement failed: "
+                  << (error_msg ? error_msg : "unknown error") << std::endl;
+        if (error_msg) {
+            sqlite3_free(error_msg);
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool SQLiteSource::executePreparedStatement(const std::string& sql,
+                                              const std::vector<std::string>& bind_values) {
+#if !QORNIX_HAS_SQLITE
+    return false;
+#endif
+
+    if (!db_) {
+        return false;
+    }
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        std::cerr << "SQLiteSource: Prepare failed: "
+                  << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+
+    // Bind values
+    const auto parameter_count = static_cast<size_t>(sqlite3_bind_parameter_count(stmt));
+    for (size_t i = 0; i < bind_values.size() && i < parameter_count; ++i) {
+        sqlite3_bind_text(stmt, static_cast<int>(i + 1),
+                          bind_values[i].c_str(), -1, SQLITE_TRANSIENT);
+    }
+
+    rc = sqlite3_step(stmt);
+    bool result = (rc == SQLITE_OK || rc == SQLITE_DONE);
+
+    if (!result) {
+        std::cerr << "SQLiteSource: Execute failed: "
+                  << sqlite3_errmsg(db_) << std::endl;
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+std::string SQLiteSource::computeDocumentId(const std::string& source_id,
+                                            const std::string& relative_path) const {
+    return source_id + ":" + HashCalculator::compute_md5(relative_path);
+}
+
+std::string SQLiteSource::metadataToJson(const std::map<std::string, std::string>& metadata) const {
+    boost::json::object object;
+    for (const auto& [key, value] : metadata) {
+        object[key] = value;
+    }
+    return boost::json::serialize(object);
+}
+
+std::map<std::string, std::string> SQLiteSource::metadataFromJson(const std::string& json) const {
+    std::map<std::string, std::string> metadata;
+    if (json.empty()) {
+        return metadata;
+    }
+
+    try {
+        auto parsed = boost::json::parse(json);
+        if (!parsed.is_object()) {
+            return metadata;
+        }
+        for (const auto& entry : parsed.as_object()) {
+            if (entry.value().is_string()) {
+                metadata[std::string(entry.key())] = entry.value().as_string().c_str();
+            }
+        }
+    } catch (...) {
+        return {};
+    }
+
+    return metadata;
+}
+
+bool SQLiteSource::bindText(sqlite3_stmt* stmt, int index, const std::string& value) const {
+#if !QORNIX_HAS_SQLITE
+    (void)stmt;
+    (void)index;
+    (void)value;
+    return false;
+#else
+    return sqlite3_bind_text(stmt, index, value.c_str(), -1, SQLITE_TRANSIENT) == SQLITE_OK;
+#endif
+}
+
+bool SQLiteSource::bindInt64(sqlite3_stmt* stmt, int index, std::int64_t value) const {
+#if !QORNIX_HAS_SQLITE
+    (void)stmt;
+    (void)index;
+    (void)value;
+    return false;
+#else
+    return sqlite3_bind_int64(stmt, index, static_cast<sqlite3_int64>(value)) == SQLITE_OK;
+#endif
+}
+
+bool SQLiteSource::bindFloatVector(sqlite3_stmt* stmt, int index, const std::vector<float>& values) const {
+#if !QORNIX_HAS_SQLITE
+    (void)stmt;
+    (void)index;
+    (void)values;
+    return false;
+#else
+    if (values.empty()) {
+        return sqlite3_bind_blob(stmt, index, "", 0, SQLITE_STATIC) == SQLITE_OK;
+    }
+    const auto byte_size = static_cast<int>(values.size() * sizeof(float));
+    return sqlite3_bind_blob(stmt, index, values.data(), byte_size, SQLITE_TRANSIENT) == SQLITE_OK;
+#endif
+}
+
+std::vector<float> SQLiteSource::columnFloatVector(sqlite3_stmt* stmt, int index) const {
+    std::vector<float> values;
+#if !QORNIX_HAS_SQLITE
+    (void)stmt;
+    (void)index;
+    return values;
+#else
+    const void* blob = sqlite3_column_blob(stmt, index);
+    const int byte_size = sqlite3_column_bytes(stmt, index);
+    if (!blob || byte_size <= 0 || byte_size % static_cast<int>(sizeof(float)) != 0) {
+        return values;
+    }
+    const auto count = static_cast<size_t>(byte_size) / sizeof(float);
+    const auto* begin = static_cast<const float*>(blob);
+    values.assign(begin, begin + count);
+    return values;
+#endif
+}
+
+size_t SQLiteSource::countTableRows(const std::string& table, const std::string& source_id) const {
+#if !QORNIX_HAS_SQLITE
+    (void)table;
+    (void)source_id;
+    return 0;
+#endif
+
+    if (!db_) {
+        return 0;
+    }
+
+    if (table != "rag_documents" && table != "rag_chunks" && table != "rag_embeddings") {
+        return 0;
+    }
+
+    std::string sql = "SELECT COUNT(*) FROM " + table;
+    if (!source_id.empty()) {
+        sql += " WHERE source_id = ?";
+    }
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return 0;
+    }
+    if (!source_id.empty()) {
+        bindText(stmt, 1, source_id);
+    }
+
+    size_t count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = static_cast<size_t>(sqlite3_column_int64(stmt, 0));
+    }
+
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+std::string SQLiteSource::computeHash(const std::string& id, const std::string& question,
+                                       const std::string& answer) const {
+    (void)id;
+    std::string combined = question + "|" + answer;
+    return HashCalculator::compute_md5(combined);
+}
+
+SQLiteSource::IngestionJobRecord SQLiteSource::rowToIngestionJob(sqlite3_stmt* stmt) const {
+    IngestionJobRecord job;
+    const auto text = [&](int column) -> std::string {
+        const unsigned char* value = sqlite3_column_text(stmt, column);
+        return value ? reinterpret_cast<const char*>(value) : "";
+    };
+
+    job.id = text(0);
+    job.source_id = text(1);
+    job.root_path = text(2);
+    job.status = text(3);
+    job.files_seen = static_cast<size_t>(sqlite3_column_int64(stmt, 4));
+    job.documents_imported = static_cast<size_t>(sqlite3_column_int64(stmt, 5));
+    job.duplicates_found = static_cast<size_t>(sqlite3_column_int64(stmt, 6));
+    job.skipped = static_cast<size_t>(sqlite3_column_int64(stmt, 7));
+    job.errors = static_cast<size_t>(sqlite3_column_int64(stmt, 8));
+    job.error_message = text(9);
+    job.started_at = text(10);
+    job.finished_at = text(11);
+    return job;
+}
+
+QASource::QAPair SQLiteSource::rowToQAPair(sqlite3_stmt* stmt) const {
+    QASource::QAPair pair;
+
+    pair.id = sqliteText(stmt, 0);
+    pair.question = sqliteText(stmt, 1);
+    pair.answer = sqliteText(stmt, 2);
+    pair.category = sqliteText(stmt, 3);
+
+    const char* aliases_json = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
+    if (aliases_json) {
+        pair.aliases = jsonStringArray(aliases_json);
+    }
+
+    const char* metadata_json = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
+    if (metadata_json) {
+        pair.metadata = metadataFromJson(metadata_json);
+        auto tags_it = pair.metadata.find("tags");
+        if (tags_it != pair.metadata.end()) {
+            pair.tags = jsonStringArray(tags_it->second);
+            if (pair.tags.empty() && !tags_it->second.empty()) {
+                std::stringstream ss(tags_it->second);
+                std::string tag;
+                while (std::getline(ss, tag, ',')) {
+                    tag.erase(tag.begin(), std::find_if(tag.begin(), tag.end(), [](unsigned char c) {
+                        return !std::isspace(c);
+                    }));
+                    tag.erase(std::find_if(tag.rbegin(), tag.rend(), [](unsigned char c) {
+                        return !std::isspace(c);
+                    }).base(), tag.end());
+                    if (!tag.empty()) {
+                        pair.tags.push_back(tag);
+                    }
+                }
+            }
+        }
+    }
+
+    return pair;
+}
+
+Document SQLiteSource::qaPairToDocument(const QASource::QAPair& pair) const {
+    Document doc;
+    doc.path = "sqlite://" + pair.id;
+    doc.relative_path = "sqlite://" + pair.id;
+    doc.content = "Вопрос: " + pair.question + "\n\nОтвет: " + pair.answer;
+    doc.type = "qa_pair";
+    doc.language = "text";
+    doc.size_bytes = doc.content.size();
+    doc.lines_count = 3;
+    doc.hash = computeHash(pair.id, pair.question, pair.answer);
+    doc.last_modified = std::chrono::system_clock::now();
+
+    // Store metadata
+    doc.metadata["qa_id"] = pair.id;
+    doc.metadata["category"] = pair.category;
+    if (!pair.aliases.empty()) {
+        doc.metadata["aliases"] = stringArrayJson(pair.aliases);
+    }
+    if (!pair.tags.empty()) {
+        doc.metadata["tags"] = stringArrayJson(pair.tags);
+    }
+    for (const auto& [key, value] : pair.metadata) {
+        doc.metadata[key] = value;
+    }
+
+    return doc;
+}

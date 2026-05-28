@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Configuration · @PROJECT_NAME@</title><link rel="stylesheet" href="/static/app.css"></head>
-<body><div class="qx-shell"><header class="qx-topbar"><a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Configuration</small></span></a><nav class="qx-nav"><a href="/">Home</a><a href="/project-structure">Project Structure</a><a href="/docs">Docs</a><a href="/docs/routing">Routing</a><a href="/docs/deployment">Deploy</a></nav></header>
+<body><div class="qx-shell"><header class="qx-topbar"><a class="qx-brand" href="/"><span class="qx-brand-mark">Qx</span><span><strong>@PROJECT_NAME@</strong><small>Configuration</small></span></a><nav class="qx-nav"><a href="/">Home</a><a href="/project-structure">Project Structure</a><a href="/docs">Docs</a><a href="/docs/routing">Routing</a><a href="/docs/deployment">Deploy</a>@WITH_RAG_NAV_LINK@</nav></header>
 <section class="qx-page-intro"><p class="qx-kicker">Runtime settings</p><h1>Configure host, port and logging through config.yaml.</h1><p class="qx-lead">The server manager loads <code>config.yaml</code> from the current location or near the executable, which makes the generated deploy bundle self-contained.</p></section>
 <section class="qx-grid qx-grid-2"><article class="qx-card"><h2>Common settings</h2><pre class="qx-code">server:
   address: "127.0.0.1"

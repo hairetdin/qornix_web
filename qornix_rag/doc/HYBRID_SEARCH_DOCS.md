@@ -54,8 +54,10 @@ v                                                     v
 | Component | Purpose | Technology |
 |-----------|---------|------------|
 | **RagEngine** | Main engine | C++ class |
-| **TfidfVectorizer** | Tokenization + TF-IDF | Custom implementation |
-| **HNSWLIB Index** | Vector index | HNSW algorithm, header-only |
+| **Embedding backend** | Turns text chunks and queries into vectors | TF-IDF by default, optional ONNX Runtime |
+| **TfidfVectorizer** | Dependency-light lexical embeddings | Custom implementation |
+| **ONNX embedding model** | Neural semantic embeddings | ONNX Runtime C++ SDK + compatible text encoder |
+| **HNSWLIB Index** | Local vector index | HNSW algorithm, header-only |
 | **Xapian DB** | Text index | Probabilistic IR |
 | **HybridSearchConfig** | Search settings | Configuration |
 
@@ -67,7 +69,15 @@ v                                                     v
 
 ### How it works
 
-#### 1. TF-IDF embedding generation
+#### 1. Embedding generation
+
+The vector side of hybrid retrieval is backend-driven. A fresh checkout uses
+`embedding.backend: tfidf`, which requires no model files. When ONNX Runtime and
+a compatible text embedding model are installed, `embedding.backend: onnx` can be
+used for neural semantic embeddings. Both backends feed vectors into the same
+vector search path.
+
+##### TF-IDF backend
 
 Each document is converted into a fixed-size vector:
 
@@ -98,6 +108,40 @@ where:
 - `tf(t, d)` is the count of term `t` in document `d` divided by the total number of terms in `d`;
 - `N` is the total number of documents;
 - `df(t)` is the number of documents containing `t`.
+
+##### ONNX backend
+
+ONNX mode uses a BERT-style text embedding model through the ONNX Runtime C++
+SDK. Text is tokenized with the configured `tokenizer.json`, encoded as model
+inputs such as `input_ids` and `attention_mask`, pooled into one vector, and
+optionally normalized for cosine-style retrieval.
+
+```yaml
+embedding:
+  backend: onnx
+  enable_fallback: true
+  active_model_id: local-semantic-v1
+  registry:
+    local-semantic-v1:
+      backend: onnx
+      model_path: qornix_rag/models/semantic_model.onnx
+      tokenizer_path: qornix_rag/models/tokenizer.json
+      tokenizer_type: WordPiece
+      pooling: mean
+      dimension: 0
+      max_seq_len: 256
+      onnx_threads: 2
+      normalize_embeddings: true
+```
+
+`dimension: 0` means Qornix discovers the model output dimension. If ONNX
+Runtime or the model cannot be loaded and `enable_fallback` is true, the runtime
+falls back to TF-IDF and reports that status in `/api/health` and
+`/api/embedding/models`.
+
+The ONNX backend is not a general ONNX runner. It expects a text embedding model,
+not an Ollama/GGUF chat model, image model, or arbitrary decoder-only LLM export.
+See `models/README.md` for model compatibility and setup.
 
 #### 2. Building the HNSW graph
 
@@ -234,7 +278,21 @@ query_parser.set_stemmer(stemmer);
 query_parser.set_stemming_strategy(Xapian::QueryParser::STEM_SOME);
 ```
 
-**Supported languages:** English, French, German, Spanish and others.
+**Supported languages:** `qornix_rag` accepts Xapian stemmer names and common two-letter aliases supported by the installed Xapian package. Examples include `en`/`english`, `de`/`german`, `fr`/`french`, `es`/`spanish`, `it`/`italian`, `pt`/`portuguese`, `nl`/`dutch`, `fi`/`finnish`, `sv`/`swedish`, `da`/`danish`, `no`/`norwegian`, `tr`/`turkish`, `ro`/`romanian`, `hu`/`hungarian`, `ru`/`russian`, and other languages documented by Xapian. See the authoritative list for your Xapian version in `Xapian::Stem`: https://xapian.org/docs/apidoc/html/classXapian_1_1Stem.html
+
+Current `qornix_rag` exposes this through config:
+
+```yaml
+search:
+  xapian_enabled: true
+  xapian_language: auto   # auto | none | Xapian language name or ISO 639 alias
+  xapian_stemming: true
+  xapian_stemming_strategy: some
+  xapian_cjk_ngrams: false
+  xapian_metadata_prefixes: true
+```
+
+The same language/stemming settings are applied during indexing and query parsing. `auto` is a small built-in heuristic, not universal language detection: Cyrillic text maps to `russian`, otherwise `english` is used. For other primary languages, configure the language explicitly.
 
 #### 3. Ranked search
 
@@ -320,7 +378,8 @@ path:include
 
 | Method | Strengths | Weaknesses |
 |--------|-----------|------------|
-| **HNSWLIB** | Semantics, synonyms | Approximate, less exact |
+| **HNSWLIB + TF-IDF** | Fast, local, no model files | Mostly lexical, weaker synonym handling |
+| **HNSWLIB + ONNX embeddings** | Stronger semantic matching and synonyms | Requires ONNX Runtime and compatible model files |
 | **Xapian** | Exactness, technical terms | No semantic understanding |
 
 The hybrid approach combines the best of both methods.
@@ -492,7 +551,26 @@ bool use_hybrid = true;             // Enable hybrid search
 
 ### Advanced tuning
 
-#### 1. Embedding dimensionality
+#### 1. Embedding backend
+
+```yaml
+embedding:
+  backend: tfidf # dependency-light default
+```
+
+Use TF-IDF for first run, small projects, and machines without ONNX Runtime.
+
+```yaml
+embedding:
+  backend: onnx
+  enable_fallback: true
+```
+
+Use ONNX when you need stronger meaning-based retrieval and have installed a
+compatible embedding model. Keep `enable_fallback: true` while validating a new
+model so the server can continue with TF-IDF if ONNX initialization fails.
+
+#### 2. Embedding dimensionality
 
 ```cpp
 static constexpr size_t EMBEDDING_DIM = 256;  // Change here
@@ -505,7 +583,10 @@ static constexpr size_t EMBEDDING_DIM = 256;  // Change here
 | 256 | 500-2000 | High | Excellent |
 | 512 | >2000 | Very high | Maximum |
 
-#### 2. HNSW parameters
+For ONNX models, prefer `dimension: 0` in config unless you intentionally want
+to enforce a specific output size.
+
+#### 3. HNSW parameters
 
 Speed-oriented:
 
@@ -521,7 +602,7 @@ M = 24;
 ef_construction = 400;
 ```
 
-#### 3. Relevance threshold
+#### 4. Relevance threshold
 
 | Value | Results | Noise |
 |-------|---------|-------|
@@ -530,7 +611,7 @@ ef_construction = 400;
 | 0.10 | Few | Low |
 | 0.20 | Very few | Minimal |
 
-#### 4. Disable hybrid search
+#### 5. Disable hybrid search
 
 ```cpp
 search_config_.use_hybrid = false; // BM25 only, faster
@@ -692,7 +773,9 @@ Possible reasons:
 1. **Project is not indexed**
 
 ```bash
-curl -X POST http://localhost:8081/api/reindex
+curl -X POST http://localhost:8081/api/index \
+  -H "Content-Type: application/json" \
+  -d '{"scan_path":"/path/to/project"}'
 ```
 
 2. **Threshold is too high**
@@ -706,6 +789,14 @@ search_config_.min_score_threshold = 0.01f; // Lower it
 ```cpp
 search_config_.vector_weight = 0.5f; // Rebalance
 search_config_.text_weight = 0.5f;
+```
+
+4. **No scan path was provided**
+
+```bash
+curl -X POST http://localhost:8081/api/index \
+  -H "Content-Type: application/json" \
+  -d '{"scan_path":"/path/to/project"}'
 ```
 
 ### Problem 5: slow search
@@ -725,7 +816,38 @@ Optimization:
 3. increase `min_score_threshold`;
 4. disable hybrid search if it is not needed.
 
-### Problem 6: segmentation fault during search
+### Problem 6: ONNX backend falls back to TF-IDF
+
+Possible reasons:
+
+1. the binary was built without ONNX Runtime C++ headers/library;
+2. `model_path` or `tokenizer_path` is missing;
+3. the model is not a supported text embedding model;
+4. the tokenizer JSON format is incompatible with the current loader.
+
+Check runtime status:
+
+```bash
+curl http://localhost:8081/api/health
+curl http://localhost:8081/api/embedding/models
+```
+
+Install or download a compatible model:
+
+```bash
+./qornix_rag/download_onnx_model.sh
+```
+
+Then rebuild/reindex the scan path so vectors are generated with the selected
+embedding model:
+
+```bash
+curl -X POST http://localhost:8081/api/index \
+  -H "Content-Type: application/json" \
+  -d '{"scan_path":"/path/to/project"}'
+```
+
+### Problem 7: segmentation fault during search
 
 **Cause:** the index was not built or is corrupted.
 
@@ -792,6 +914,7 @@ if (!hnsw_index_) {
 ### Documentation
 
 - [Xapian documentation](https://xapian.org/docs/)
+- [ONNX Runtime C++ guide](https://onnxruntime.ai/docs/get-started/with-cpp.html)
 - [HNSW algorithm paper](https://arxiv.org/abs/1603.09320)
 - [BM25 overview](https://en.wikipedia.org/wiki/Okapi_BM25)
 
@@ -806,10 +929,6 @@ curl -X POST http://localhost:8081/api/search \
   -H "Content-Type: application/json" \
   -d '{"query":"dependency injection","top_k":5}'
 ```
-
-**Documentation version:** 2.0, HNSWLIB Edition  
-**Updated:** March 2026  
-**Contact:** qornix@example.com
 
 ## Note
 

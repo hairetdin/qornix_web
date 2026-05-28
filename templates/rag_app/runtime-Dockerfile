@@ -1,0 +1,38 @@
+FROM ubuntu:24.04
+
+ARG QORNIX_UID=10001
+ARG QORNIX_GID=10001
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libboost-json1.83.0 \
+    libboost-log1.83.0 \
+    libboost-filesystem1.83.0 \
+    libboost-url1.83.0 \
+    libcurl4 \
+    libsqlite3-0 \
+    libxapian30 \
+    libyaml-cpp0.8 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY build/deploy/@PROJECT_NAME@/ /app/
+
+ENV QORNIX_APP_ROOT=/app
+ENV QORNIX_RAG_TEMPLATES_DIR=/app/templates
+
+RUN chmod +x /app/@PROJECT_NAME@ && \
+    sed -i 's/address: 127.0.0.1/address: 0.0.0.0/' /app/config.yaml && \
+    groupadd --system --gid "${QORNIX_GID}" qornix && \
+    useradd --system --uid "${QORNIX_UID}" --gid qornix --home-dir /app --no-create-home --shell /usr/sbin/nologin qornix && \
+    mkdir -p /app/data /app/logs /app/knowledge_base /app/models && \
+    chown -R qornix:qornix /app
+
+USER qornix
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8008/health || curl -fsS http://127.0.0.1:8008/api/rag/health || exit 1
+
+EXPOSE 8008
+CMD ["/app/@PROJECT_NAME@"]

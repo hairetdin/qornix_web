@@ -339,3 +339,4 @@ doc/dynamic_api_query_syntax.md
 ```
 
 Use it as the authoritative onboarding reference for JSON envelopes sent to `POST /api/dynamic`, table-specific CRUD shortcuts, metadata endpoints, structured `where`, raw `filter`, `join`, `group_by`, `having`, sorting and limits.
+@WITH_RAG_README@

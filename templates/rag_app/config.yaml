@@ -1,0 +1,223 @@
+server:
+  address: 127.0.0.1
+  port: 8008
+
+logging:
+  enabled: true
+  level: info
+  to_file: false
+  file_path: logs/server
+  rotation_size: 10485760
+  max_files: 5
+
+auth:
+  # Build support for qornix_auth is enabled in generated rag_app projects.
+  # Runtime auth remains opt-in so local development can start without login.
+  enabled: false
+  mode: session
+  registration_enabled: false
+  secure_cookies: false
+  cookie_same_site: Lax
+  cookie_path: /
+  csrf:
+    enabled: true
+    header: X-CSRF-Token
+  auto_migrate: true
+  min_password_length: 12
+  session_duration_minutes: 30
+  jwt_duration_minutes: 60
+  jwt_secret: change-this-secret-key-in-production
+  jwt_issuer: qornix-auth
+  default_roles: user
+  default_permissions: rag:read
+  required_roles:
+  required_permissions:
+  admin_permissions: auth:admin
+  rag_read_permissions: rag:read
+  rag_write_permissions: rag:write
+  rag_admin_permissions: rag:admin
+  exclude_paths: /auth/login,/auth/register,/auth/invites/accept,/auth/password-reset/request,/auth/password-reset/confirm,/health,/static
+  database:
+    driver: sqlite
+    path: data/auth.db
+    # For PostgreSQL/MySQL, change driver and provide connection_string or host/user/password/name.
+    # driver: postgresql
+    # connection_string: host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret
+    # driver: mysql
+    # connection_string: host=127.0.0.1 port=3306 dbname=qornix user=qornix password=secret
+  bootstrap_admin:
+    enabled: false
+    username: admin
+    email:
+    password_env: QORNIX_ADMIN_PASSWORD
+    roles: admin
+    permissions: rag:read,rag:write,rag:admin,auth:admin
+
+rag:
+  route:
+    expose_root_ui: false
+    ui_path: /rag
+    api_prefix: /api/rag
+
+  llm:
+    enabled: true
+    api_url: http://localhost:11434
+    model: llama3.2:3b
+    request_timeout_ms: 30000
+    temperature: 0.2
+    max_tokens: 2048
+    prompt_template: |
+      Context:
+      {context}
+
+      Question: {question}
+
+  embedding:
+    # Default is dependency-light lexical retrieval. It works without model files.
+    backend: tfidf
+    enable_fallback: true
+
+    # To enable semantic retrieval with ONNX Runtime:
+    # 1. Build with ONNX Runtime available.
+    # 2. Put the embedding model and tokenizer under models/.
+    # 3. Change backend to onnx and uncomment the paths below.
+    #
+    # backend: onnx
+    # model_id: local-semantic-v1
+    # model_name: local semantic ONNX
+    # model_version: v1
+    # model_path: models/semantic_model.onnx
+    # tokenizer_path: models/tokenizer.json
+    # tokenizer_type: WordPiece
+    # pooling: mean
+    # dimension: 0
+    # max_seq_len: 512
+    # onnx_threads: 2
+    # normalize_embeddings: true
+    # lowercase_tokens: true
+
+    # Optional model registry. The active model is applied to the embedding
+    # backend at startup; relative paths resolve from the generated app root.
+    #
+    # active_model_id: local-semantic-v1
+    # registry:
+    #   local-semantic-v1:
+    #     backend: onnx
+    #     name: local semantic ONNX
+    #     version: v1
+    #     model_path: models/semantic_model.onnx
+    #     tokenizer_path: models/tokenizer.json
+    #     tokenizer_type: WordPiece
+    #     pooling: mean
+    #     dimension: 0
+    #     max_seq_len: 512
+    #     onnx_threads: 2
+    #     normalize_embeddings: true
+    #     lowercase_tokens: true
+    #     enable_fallback: true
+    #     license: model-specific
+    #     source: local
+    #   tfidf-local:
+    #     backend: tfidf
+    #     name: local TF-IDF
+    #     dimension: 256
+
+  search:
+    use_hybrid: true
+    top_k: 5
+    min_score_threshold: 0.0
+    use_query_expansion: true
+    # Xapian lexical search hardening. Xapian is the exact/lexical
+    # side of hybrid retrieval; vector search handles semantic similarity.
+    xapian_enabled: true
+    # auto is a lightweight Cyrillic-vs-default heuristic. For deterministic
+    # single-language projects, set an explicit Xapian language such as
+    # en/english, de/german, fr/french, es/spanish, ru/russian, or none.
+    xapian_language: auto
+    xapian_stemming: true
+    xapian_stemming_strategy: some
+    xapian_cjk_ngrams: false
+    xapian_word_breaks: true
+    xapian_spelling: false
+    xapian_metadata_prefixes: true
+    use_reranking: true
+    rerank_input_multiplier: 3
+    rerank_path_boost: 0.15
+    rerank_metadata_boost: 0.10
+    rerank_exact_content_boost: 0.05
+
+  vector_store:
+    # Backends: local_hnsw, faiss, qdrant, pgvector.
+    backend: local_hnsw
+    index_path: data/hnsw_index.bin
+    metadata_path: data/hnsw_index.meta.json
+    collection: qornix_rag_vectors
+    # endpoint: http://127.0.0.1:6333
+    # connection_string: host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret
+    # table: qornix_rag_vectors
+    # distance: Cosine
+    upsert_batch_size: 512
+    auto_load: true
+    auto_save: true
+
+  security:
+    enabled: false
+    mode: admin_token
+    admin_token_env: QORNIX_RAG_ADMIN_TOKEN
+    token_header: X-Qornix-RAG-Admin-Token
+    role_header: X-Qornix-Role
+    admin_role: admin
+    protect_admin_routes: true
+    protect_write_routes: true
+
+  upload:
+    enabled: true
+    uploads_dir: data/uploads
+    max_file_size_kb: 16384
+    max_files_per_request: 20
+    auto_ingest: true
+    async_ingest: false
+    overwrite_existing: false
+    # Comma-separated allowlists are used because the integrated config loader
+    # flattens scalar YAML values. Keep this list aligned with ingestion support.
+    allowed_extensions: ".txt,.md,.rst,.adoc,.json,.yaml,.yml,.xml,.html,.htm,.csv,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
+    allowed_mime_types: "text/plain,text/markdown,text/csv,text/html,application/json,application/xml,application/pdf,application/x-yaml,application/yaml,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/tiff,image/bmp,image/webp"
+
+  indexing:
+    # Optional directory scan root. Leave unset to start in upload/API/QA mode.
+    # scan_path: knowledge_base
+    auto_index_on_startup: true
+    max_file_size_kb: 4096
+
+  sqlite:
+    enabled: true
+    db_path: data/rag_kb.db
+    source_id: local_qa
+    name: Local QA knowledge base
+    auto_migrate: true
+
+  markdown:
+    enabled: true
+    directory_path: knowledge_base
+    recursive: true
+
+  cache:
+    enabled: true
+    backend: memory # memory | redis
+    max_size: 1000  # Memory LRU capacity; Redis capacity is controlled by Redis
+    ttl_seconds: 3600
+    key_prefix: "qornix_rag:"
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      db: 0
+      password: ""
+      ttl_seconds: 3600
+
+  rate_limit:
+    enabled: false
+
+  prompt_cache:
+    enabled: true
+    max_size: 100
+    ttl_seconds: 3600

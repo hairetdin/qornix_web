@@ -1,9 +1,14 @@
-# Configuration Qornix RAG
+# Qornix RAG standalone configuration
+#
+# Defaults are intentionally local-first. Standalone qornix_rag is a
+# single-user local wiki/RAG tool; expose it to the network only when you
+# explicitly know why you need that.
 
 server:
-  host: 0.0.0.0
-  port: 8082
-  project_path: ../..
+  # Canonical bind key. The legacy key server.host is still accepted by
+  # main.cpp for compatibility, but new configs should use server.address.
+  address: 127.0.0.1
+  port: 8081
 
 search:
   use_hybrid: true
@@ -11,22 +16,240 @@ search:
   text_weight: 0.4
   top_k: 10
   min_score_threshold: 0.1
+  use_query_expansion: true
+  # Xapian lexical search hardening. Xapian is the exact/lexical
+  # side of hybrid retrieval; vector search handles semantic similarity.
+  xapian_enabled: true
+  # auto is a lightweight Cyrillic-vs-default heuristic. For deterministic
+  # single-language projects, set an explicit Xapian language such as
+  # en/english, de/german, fr/french, es/spanish, ru/russian, or none.
+  xapian_language: auto
+  xapian_stemming: true
+  xapian_stemming_strategy: some
+  xapian_cjk_ngrams: false
+  xapian_word_breaks: true
+  xapian_spelling: false
+  xapian_metadata_prefixes: true
+  use_reranking: true
+  rerank_input_multiplier: 3
+  rerank_path_boost: 0.15
+  rerank_metadata_boost: 0.10
+  rerank_exact_content_boost: 0.05
+  use_multi_query_retrieval: true
+  multi_query_max_variants: 4
+  use_embedding_reranker: true
+  rerank_embedding_boost: 0.20
+  rerank_coverage_boost: 0.08
+
+vector_store:
+  # Backends: local_hnsw (default), faiss, qdrant, pgvector.
+  # Faiss is enabled only when Faiss headers/library are available at build time.
+  # Qdrant requires endpoint + collection; pgvector requires connection_string + table.
+  backend: local_hnsw
+  index_path: "qornix_rag/data/hnsw_index.bin"
+  metadata_path: "qornix_rag/data/hnsw_index.meta.json"
+  collection: qornix_rag_vectors
+  # endpoint: "http://127.0.0.1:6333"
+  # api_key: ""
+  # connection_string: "host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret"
+  # table: qornix_rag_vectors
+  # distance: Cosine
+  upsert_batch_size: 512
+  auto_load: true
+  auto_save: true
+
+security:
+  enabled: false
+  mode: admin_token
+  admin_token_env: QORNIX_RAG_ADMIN_TOKEN
+  token_header: X-Qornix-RAG-Admin-Token
+  role_header: X-Qornix-Role
+  admin_role: admin
+  protect_admin_routes: true
+  protect_write_routes: true
+
+upload:
+  enabled: true
+  uploads_dir: qornix_rag/data/uploads
+  max_file_size_kb: 16384
+  max_files_per_request: 20
+  auto_ingest: true
+  async_ingest: false
+  overwrite_existing: false
+  # Comma-separated allowlists are used because the standalone config loader
+  # flattens scalar YAML values. Keep this list aligned with ingestion support.
+  allowed_extensions: ".txt,.md,.rst,.adoc,.json,.yaml,.yml,.xml,.html,.htm,.csv,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
+  allowed_mime_types: "text/plain,text/markdown,text/csv,text/html,application/json,application/xml,application/pdf,application/x-yaml,application/yaml,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/tiff,image/bmp,image/webp"
 
 indexing:
-  embedding_dim: 256
-  max_file_size_kb: 512
-  skip_directories:
-    - cmake-build
-    - .git
-    - build
-    - __pycache__
-    - node_modules
+  # Optional directory scan root. Leave unset to start in upload/API/QA mode
+  # without scanning the filesystem on startup.
+  # scan_path: /path/to/project
+  # If scan_path is set, this controls whether it is indexed during startup.
+  auto_index_on_startup: true
+  max_file_size_kb: 4096
 
 embedding:
-  backend: onnx
-  model_path: models/semantic_model.onnx
-  tokenizer_path: models/tokenizer.json
-  max_seq_len: 256
-  onnx_threads: 2
-  normalize_embeddings: true
+  # Safe default for a fresh git clone. Works without bundled model files.
+  backend: tfidf
   enable_fallback: true
+  models_dir: qornix_rag/models
+  auto_discover_models: true
+  validate_model_files: true
+  persistent_cache_enabled: true
+  chunk_token_margin: 2
+
+  # Optional ONNX semantic retrieval. Model files are not committed to GitHub
+  # because they are large and may have separate licenses.
+  #
+  # backend: onnx
+  # model_id: local-semantic-v1
+  # model_name: local semantic ONNX
+  # model_version: v1
+  # model_path: qornix_rag/models/semantic_model.onnx
+  # tokenizer_path: qornix_rag/models/tokenizer.json
+  # tokenizer_type: WordPiece
+  # pooling: mean
+  # dimension: 0
+  # max_seq_len: 256
+  # onnx_threads: 2
+  # normalize_embeddings: true
+  # lowercase_tokens: true
+  # chunk_token_margin: 2
+
+  # Optional model registry. The active model is applied to the embedding
+  # backend at startup; paths are validated and shown in /api/health.
+  #
+  # active_model_id: local-semantic-v1
+  # registry:
+  #   local-semantic-v1:
+  #     backend: onnx
+  #     name: local semantic ONNX
+  #     version: v1
+  #     model_path: qornix_rag/models/semantic_model.onnx
+  #     tokenizer_path: qornix_rag/models/tokenizer.json
+  #     tokenizer_type: WordPiece
+  #     pooling: mean
+  #     dimension: 0
+  #     max_seq_len: 256
+  #     onnx_threads: 2
+  #     normalize_embeddings: true
+  #     lowercase_tokens: true
+  #     enable_fallback: true
+  #     license: model-specific
+  #     source: local
+  #   tfidf-local:
+  #     backend: tfidf
+  #     name: local TF-IDF
+  #     dimension: 256
+
+# LLM Configuration (optional)
+# Uncomment and configure to enable AI-powered Q&A
+llm:
+  # API URL (OpenAI-compatible)
+  api_url: "http://localhost:11434"      # Ollama by default
+  api_key: ""                            # Set when required by the provider
+  model: "llama3"                        # Model name
+#  model: "qwen3.6:35b"
+
+  # Request settings
+  max_tokens: 1024                       # Maximum generated answer length
+  temperature: 0.7                       # Sampling temperature (0-1)
+  top_p: 0.9                             # Nucleus sampling
+  request_timeout_ms: 30000              # Request timeout
+
+  # System prompt
+  system_prompt: |
+    You are a developer assistant that answers questions using
+    the provided project-code context.
+
+    Rules:
+    - Use only information from the provided context.
+    - If the context is insufficient, say that the local knowledge base does not contain enough information.
+    - Include code examples when they are useful.
+    - Cite the source files used for the answer.
+
+  prompt_template: |
+    Context:
+    {context}
+
+    Question: {question}
+    - Answer in English.
+    - Cite the files used as sources.
+
+  # Streaming (SSE)
+  stream: false                          # Enable streaming
+
+# LLM response caching (optional)
+# Cache LLM responses to speed up repeated questions
+# Backend: "memory" (default, in-process) or "redis" (external Redis over RESP; no hiredis required)
+cache:
+  enabled: true                          # Enable/disable LLM response caching
+  backend: "memory"                      # memory | redis
+  ttl_seconds: 3600                      # Time-to-live for cache entries (1 hour)
+  max_size: 1000                         # Memory LRU capacity; Redis capacity is controlled by Redis
+  key_prefix: "qornix_rag:"              # Redis key prefix / namespace
+
+  # Redis settings (only used if backend = "redis")
+  redis:
+    host: "127.0.0.1"
+    port: 6379
+    db: 0
+    password: ""
+    ttl_seconds: 3600
+
+# Rate limiting (optional)
+# Protect against DDoS and excessive LLM usage
+rate_limit:
+  enabled: true                          # Enable/disable rate limiting
+  max_requests_per_second: 10            # Global: max requests/sec
+  max_requests_per_minute: 100           # Global: max requests/min
+
+  per_ip_limit: true                     # Enable per-IP limits
+  max_requests_per_second_per_ip: 2      # Per-IP: max requests/sec
+  max_requests_per_minute_per_ip: 30     # Per-IP: max requests/min
+
+  # Comma-separated IP allowlist that bypasses rate limiting.
+  # whitelist: "127.0.0.1,192.168.1.100"
+
+# Batch processing (optional)
+# Process multiple questions concurrently
+batch:
+  enabled: true                          # Enable/disable batch processing
+  max_concurrent: 4                      # Max concurrent LLM requests
+  question_timeout_ms: 60000             # Timeout per question (60s)
+  batch_timeout_ms: 300000               # Timeout for entire batch (5 min)
+
+# Prompt cache (optional)
+# Cache search results to avoid redundant RAG searches
+prompt_cache:
+  enabled: true                          # Enable/disable prompt cache
+  max_size: 500                          # Maximum cached prompts
+  ttl_seconds: 1800                      # Time-to-live (30 min)
+
+# Persistent knowledge base, Markdown import, analytics, and deduplication
+rag:
+  sqlite:
+    enabled: true                         # Persistent QA storage
+    db_path: "qornix_rag/data/rag_kb.db"     # Created under the local standalone data directory
+    source_id: "sqlite_kb"
+    name: "SQLite Knowledge Base"
+    auto_migrate: true
+
+  markdown:
+    enabled: true                         # Enables /api/import/markdown endpoints
+    directory_path: "qornix_rag/knowledge_base" # Optional local Markdown knowledge base
+    recursive: true
+
+  analytics:
+    max_log_entries: 100000
+    top_n: 20
+    gap_min_search_count: 3
+
+  dedup:
+    similarity_threshold: 0.85
+    auto_remove: false
+
+# Prometheus metrics (always enabled)
+# Exposed at GET /api/metrics
+# No configuration needed — always active

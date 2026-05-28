@@ -101,9 +101,15 @@ void ExtensionLoader::unloadExtensions() {
     for (auto& extension : loadedExtensions_) {
         if (extension.extension) {
             extension.extension->cleanup();
+            if (extension.destroyExtension) {
+                extension.destroyExtension(extension.extension.release());
+            } else {
+                extension.extension.reset();
+            }
         }
         if (extension.handle) {
             dlclose(extension.handle);
+            extension.handle = nullptr;
         }
     }
     loadedExtensions_.clear();

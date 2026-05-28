@@ -2,6 +2,11 @@
 
 `qornix_orm` is a standalone C++20 library inside the Qornix Web repository. It can be linked independently from the web demo application and provides schema workflow, sync DB helpers, async DB facade, QueryBuilder support and Dynamic API integration points.
 
+Short overview documents for search/RAG answers:
+
+- [`doc/OVERVIEW_EN.md`](doc/OVERVIEW_EN.md)
+- [`doc/OVERVIEW_RU.md`](doc/OVERVIEW_RU.md)
+
 ## Documentation map
 
 | Topic | Document |

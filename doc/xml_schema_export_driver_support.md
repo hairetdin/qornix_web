@@ -2,8 +2,6 @@
 
 This document records the current state of XML schema export support by database driver.
 
-Last updated: 2026-05-02
-
 ## SQLite
 
 Status: verified by an automated round-trip test.

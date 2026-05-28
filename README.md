@@ -21,11 +21,15 @@ Start with the showcase or generate an app:
 ./create_new_project.sh ../my_vue_app --with-dynamic-api-vue
 ./create_new_project.sh ../my_react_app --with-dynamic-api-react
 ./create_new_project.sh ../my_angular_app --with-dynamic-api-angular
+./create_new_project.sh ../my_rag_app --template rag_app
+./create_new_project.sh ../my_api_rag_app --with-dynamic-api --with-rag
 ```
 
 Use `--with-dynamic-api` for the backend/admin showcase, `--with-dynamic-api-vue` for a Vue/Vite frontend scaffold, `--with-dynamic-api-react` for a React/Vite frontend scaffold, or `--with-dynamic-api-angular` for an Angular frontend scaffold served from `/`.
+Use `--template rag_app` for a full Qornix Web application with embedded RAG UI at `/rag` and API routes under `/api/rag/*`.
+Use `--with-rag` to add the embedded RAG UI and `/api/rag/*` routes to the default, Dynamic API, Vue, React, or Angular host templates.
 
-See `doc/schema_driven_dynamic_api.md`, `doc/dynamic_api_vue_app_template.md`, `doc/dynamic_api_react_app_template.md`, `doc/dynamic_api_angular_app_template.md` and `example/schema_driven_backend`.
+See `doc/schema_driven_dynamic_api.md`, `doc/dynamic_api_vue_app_template.md`, `doc/dynamic_api_react_app_template.md`, `doc/dynamic_api_angular_app_template.md`, `doc/rag_app_template.md` and `example/schema_driven_backend`.
 
 ## Framework
 
@@ -110,7 +114,6 @@ These templates keep the Dynamic API backend, move backend/admin pages under `/b
 | `templates/dynamic_api_angular_app` | Schema-driven Dynamic API + Angular frontend template |
 | `create_new_project.sh` | Standalone application generator |
 | `doc/qornix_create_new_app_instruction.md` | Detailed application creation guide |
-| `doc/roadmap_step_by_step_example.md` | Step-by-step application example based on the framework |
 | `qornix_orm` | ORM module located as a directory inside the repository |
 | `example/dynamic_web_query_builder_server` | Schema-driven dynamic API, QueryBuilder UI and XML schema manager example |
 
@@ -167,7 +170,7 @@ XML schema -> ORM metadata -> QueryBuilder -> Dynamic API -> UI
 
 ## Quick start: creating a new application
 
-A detailed step-by-step guide is available in [`doc/qornix_create_new_app_instruction.md`](doc/qornix_create_new_app_instruction.md). The end-to-end application development example is described in [`doc/roadmap_step_by_step_example.md`](doc/project_doc/roadmap_step_by_step_example.md).
+A detailed step-by-step guide is available in [`doc/qornix_create_new_app_instruction.md`](doc/qornix_create_new_app_instruction.md).
 
 Go to the framework directory:
 
@@ -864,13 +867,59 @@ cmake .. -DMY_APP_ENABLE_JWT=ON
 
 ### `qornix_rag`
 
-RAG module based on Xapian and ONNX Runtime.
+RAG module for local/wiki-style retrieval, secure document upload, QA storage, source/document indexing, hybrid search and LLM Ask workflows. The modernized module supports code/text/Markdown/HTML/CSV/PDF/DOCX/XLSX/PPTX/image OCR ingestion, metadata-aware chunking, TF-IDF or ONNX embeddings, local HNSW/Xapian hybrid search, optional Faiss/Qdrant/pgvector vector stores, citations, analytics, feedback and LLM provider diagnostics.
 
-It is not built by default:
+For a dedicated generated RAG application:
 
 ```bash
-cmake .. -DQORNIX_BUILD_RAG=ON
+./create_new_project.sh ../my_rag_app --template rag_app
+cd ../my_rag_app
+cmake -S . -B build
+cmake --build build -j$(nproc)
+./build/my_rag_app
 ```
+
+Open:
+
+```text
+http://127.0.0.1:8008/
+http://127.0.0.1:8008/rag
+http://127.0.0.1:8008/api/rag/health
+```
+
+The generated app uses its own `config.yaml`, `data/`, `models/`, `data/uploads/` and `knowledge_base/` directories, links the reusable RAG extension, and does not use the standalone `qornix_rag/run.sh` launcher. It starts with TF-IDF retrieval, so no embedding model files are required for the first run. To enable ONNX semantic retrieval, install ONNX Runtime C++ SDK, place a compatible embedding model and tokenizer under the generated app's `models/` directory, and set `rag.embedding.backend: onnx`.
+
+To add RAG to another generated host application instead of using the dedicated RAG template:
+
+```bash
+./create_new_project.sh ../my_api_rag_app --with-dynamic-api --with-rag
+./create_new_project.sh ../my_react_rag_app --with-dynamic-api-react --with-rag
+```
+
+This keeps the host app's normal UI/API and mounts RAG separately at `/rag` and `/api/rag/*`.
+
+To run standalone RAG from the framework repository:
+
+```bash
+./qornix_rag/run.sh --port 8082 --scan-path /path/to/project
+```
+
+Omit `--scan-path` to start standalone RAG in upload/API/QA mode without startup filesystem scanning.
+
+To build the framework RAG module directly:
+
+```bash
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON
+cmake --build build --target qornix_rag -j$(nproc)
+```
+
+Primary RAG documentation:
+
+- [`qornix_rag/doc/FULL_RAG_GUIDE.md`](qornix_rag/doc/FULL_RAG_GUIDE.md)
+- [`qornix_rag/README.md`](qornix_rag/README.md)
+- [`qornix_rag/doc/CONFIG.md`](qornix_rag/doc/CONFIG.md)
+- [`qornix_rag/doc/API.md`](qornix_rag/doc/API.md)
+- [`doc/rag_app_template.md`](doc/rag_app_template.md)
 
 ## Common issues
 
@@ -1006,7 +1055,7 @@ The dedicated async DB foundation lives in `include/db/*` and `qornix_orm/databa
 - `SyncOffloadedAsyncDriver` for explicitly marked legacy blocking drivers;
 - `AsyncDatabaseInterface` and `AsyncTableManager` for ORM-facing coroutine code.
 
-See `doc/async_db.md` for usage examples and `doc/project_doc/roadmap_async_db_changelog.md` for implementation status. For standalone `qornix_orm` async DB usage, also read `qornix_orm/Readme.md`, `qornix_orm/doc/standalone_usage.md`, `qornix_orm/doc/async_db_api.md`, `qornix_orm/doc/configuration.md` and `qornix_orm/doc/testing.md`. Real async PostgreSQL and MySQL driver paths are available behind `QORNIX_ENABLE_ASYNC_POSTGRES=ON` and `QORNIX_ENABLE_ASYNC_MYSQL=ON`; live benchmark runs are produced by `scripts/db_benchmark.py` and stored in `doc/benchmark_async_db.md`.
+See `doc/async_db.md` for usage examples. For standalone `qornix_orm` async DB usage, also read `qornix_orm/Readme.md`, `qornix_orm/doc/standalone_usage.md`, `qornix_orm/doc/async_db_api.md`, `qornix_orm/doc/configuration.md` and `qornix_orm/doc/testing.md`. Real async PostgreSQL and MySQL driver paths are available behind `QORNIX_ENABLE_ASYNC_POSTGRES=ON` and `QORNIX_ENABLE_ASYNC_MYSQL=ON`; live benchmark runs are produced by `scripts/db_benchmark.py` and stored in `doc/benchmark_async_db.md`.
 
 Graceful shutdown stops accepting new connections, waits for active requests until a deadline, then stops the `io_context`:
 

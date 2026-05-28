@@ -1,0 +1,31 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: runtime-Dockerfile
+    ports:
+      - "8008:8008"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./knowledge_base:/app/knowledge_base
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      QORNIX_APP_ROOT: /app
+      QORNIX_RAG_TEMPLATES_DIR: /app/templates
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  ollama:

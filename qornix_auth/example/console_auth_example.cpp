@@ -20,7 +20,9 @@ void printMenu() {
 }
 
 int main() {
-    qornix_auth::AuthManager authManager;
+    qornix_auth::AuthConfig config;
+    config.minPasswordLength = 12;
+    qornix_auth::AuthManager authManager(config);
 
     std::string currentUserId;
     int choice;

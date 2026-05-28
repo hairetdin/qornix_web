@@ -106,6 +106,44 @@ Use this variant when you want a ready Dynamic API backend and a React/Vite fron
 
 This is the recommended starting point when a backend developer wants to hand a working API environment to a frontend developer.
 
+### RAG application
+
+Generate it with:
+
+```bash
+./create_new_project.sh ../my_rag_app --template rag_app
+```
+
+Equivalent template aliases:
+
+```bash
+./create_new_project.sh ../my_rag_app --template rag-app
+./create_new_project.sh ../my_rag_app --template rag
+```
+
+It uses the template:
+
+```text
+templates/rag_app
+```
+
+Use this variant when you want a full Qornix Web application with the reusable `qornix_rag` module embedded from the start. The generated application exposes the RAG UI at `/rag`, RAG APIs under `/api/rag/*`, local SQLite QA storage under `data/`, Markdown knowledge base files under `knowledge_base/`, and a deploy bundle under `build/deploy/<app>`.
+
+The generated application is configured through its own `config.yaml`. It does not use the standalone-only `qornix_rag/run.sh` launcher or the standalone `qornix_rag/config.yaml`.
+
+### Adding RAG to other templates
+
+Use `--with-rag` when you want to keep another host template and add the reusable RAG module to it:
+
+```bash
+./create_new_project.sh ../my_api_rag_app --with-dynamic-api --with-rag
+./create_new_project.sh ../my_vue_rag_app --with-dynamic-api-vue --with-rag
+./create_new_project.sh ../my_react_rag_app --with-dynamic-api-react --with-rag
+./create_new_project.sh ../my_angular_rag_app --with-dynamic-api-angular --with-rag
+```
+
+The host application's normal routes stay in place. RAG is mounted separately at `/rag` and `/api/rag/*`, with app-local `data/`, `models/`, `data/uploads/` and `knowledge_base/` directories.
+
 ## 2. Recommended workspace structure
 
 A new application does not copy framework sources into itself. It links `qornix_web` through CMake.

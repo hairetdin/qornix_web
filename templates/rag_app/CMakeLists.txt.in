@@ -1,0 +1,89 @@
+cmake_minimum_required(VERSION 3.20)
+project(@PROJECT_NAME@ LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Path to the Qornix Web framework root.
+# The generator writes a relative path here. You can override it at configure time:
+#   cmake -DQORNIX_WEB_ROOT=/path/to/qornix_web ..
+set(QORNIX_WEB_ROOT "@QORNIX_WEB_ROOT@" CACHE PATH "Path to Qornix Web framework root")
+get_filename_component(QORNIX_WEB_ROOT "${QORNIX_WEB_ROOT}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
+if(NOT EXISTS "${QORNIX_WEB_ROOT}/CMakeLists.txt")
+    message(FATAL_ERROR "QORNIX_WEB_ROOT does not point to a Qornix Web checkout: ${QORNIX_WEB_ROOT}")
+endif()
+
+# Keep the generated application build focused on this application.
+set(QORNIX_BUILD_APP OFF CACHE BOOL "Build Qornix Web demo application" FORCE)
+set(QORNIX_BUILD_EXAMPLES OFF CACHE BOOL "Build Qornix Web examples" FORCE)
+set(QORNIX_BUILD_RAG ON CACHE BOOL "Build qornix_rag reusable module" FORCE)
+set(QORNIX_BUILD_RAG_STANDALONE OFF CACHE BOOL "Build standalone qornix_rag executable" FORCE)
+set(QORNIX_BUILD_RAG_ROUTE_EXTENSION OFF CACHE BOOL "Build qornix_rag dynamic route extension" FORCE)
+set(QORNIX_BUILD_TESTS OFF CACHE BOOL "Build Qornix Web tests" FORCE)
+set(QORNIX_BUILD_ORM_TESTS OFF CACHE BOOL "Build qornix_orm tests" FORCE)
+set(QORNIX_BUILD_DYNAMIC_API OFF CACHE BOOL "Build Schema-driven Dynamic API module" FORCE)
+
+# Optional framework modules for this application.
+option(@PROJECT_NAME_UPPER@_ENABLE_AUTH "Enable qornix_auth integration" ON)
+option(@PROJECT_NAME_UPPER@_ENABLE_ORM "Enable qornix_orm integration" ON)
+option(@PROJECT_NAME_UPPER@_ENABLE_JWT "Enable JWT support in qornix_auth" OFF)
+
+set(ENABLE_AUTH ${@PROJECT_NAME_UPPER@_ENABLE_AUTH} CACHE BOOL "Enable authentication library" FORCE)
+set(ENABLE_JWT ${@PROJECT_NAME_UPPER@_ENABLE_JWT} CACHE BOOL "Enable JWT support in auth library" FORCE)
+set(QORNIX_ENABLE_ORM ${@PROJECT_NAME_UPPER@_ENABLE_ORM} CACHE BOOL "Enable qornix_orm integration" FORCE)
+
+add_subdirectory("${QORNIX_WEB_ROOT}" "${CMAKE_BINARY_DIR}/_deps/qornix_web")
+
+add_executable(@PROJECT_NAME@
+    main.cpp
+)
+
+target_include_directories(@PROJECT_NAME@
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(@PROJECT_NAME@
+    PRIVATE
+        qornix::web_core
+        qornix::rag_extension
+)
+
+target_compile_definitions(@PROJECT_NAME@ PRIVATE
+    @PROJECT_NAME_UPPER@_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    $<$<BOOL:${@PROJECT_NAME_UPPER@_ENABLE_AUTH}>:@PROJECT_NAME_UPPER@_ENABLE_AUTH=1>
+    $<$<BOOL:${@PROJECT_NAME_UPPER@_ENABLE_ORM}>:@PROJECT_NAME_UPPER@_ENABLE_ORM=1>
+)
+
+set(@PROJECT_NAME_UPPER@_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy/@PROJECT_NAME@" CACHE PATH "Deploy bundle directory")
+
+add_custom_command(TARGET @PROJECT_NAME@ POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:@PROJECT_NAME@>" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/$<TARGET_FILE_NAME:@PROJECT_NAME@>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/config.yaml" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/config.yaml"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/README.md" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/README.md"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/download_onnx_model.sh" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/download_onnx_model.sh"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/deploy_smoke.sh" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/deploy_smoke.sh"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/templates" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/templates"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/static" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/static"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/doc" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/doc"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/knowledge_base" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/knowledge_base"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/models" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/models"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/data"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/data/uploads"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/logs"
+    COMMENT "Assembling portable deploy bundle at ${@PROJECT_NAME_UPPER@_DEPLOY_DIR}"
+)
+
+add_custom_target(@PROJECT_NAME@_deploy
+    DEPENDS @PROJECT_NAME@
+    COMMENT "Deploy bundle is ready at ${@PROJECT_NAME_UPPER@_DEPLOY_DIR}"
+)
+
+install(TARGETS @PROJECT_NAME@ RUNTIME DESTINATION .)
+install(FILES config.yaml README.md download_onnx_model.sh deploy_smoke.sh DESTINATION .)
+install(DIRECTORY templates static doc knowledge_base models DESTINATION .)
+install(DIRECTORY DESTINATION data)
+install(DIRECTORY DESTINATION logs)

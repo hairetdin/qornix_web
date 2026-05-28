@@ -80,6 +80,10 @@ add_library(qornix_web_core
 
 add_library(qornix::web_core ALIAS qornix_web_core)
 
+set_target_properties(qornix_web_core PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
+
 target_include_directories(qornix_web_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -132,6 +136,10 @@ if(QORNIX_BUILD_APP)
         ${CMAKE_CURRENT_SOURCE_DIR}/handlers
     )
 
+    if(QORNIX_BUILD_RAG)
+        target_compile_definitions(qornix_web PRIVATE QORNIX_BUILD_RAG)
+    endif()
+
     target_link_libraries(qornix_web PRIVATE qornix_web_core)
 endif()
 
@@ -154,11 +162,41 @@ endif()
 
 if(QORNIX_BUILD_RAG)
     add_subdirectory(qornix_rag)
+
+    # Link the optional RAG extension into the demo app, not the framework core.
+    # qornix_web_core remains independent from qornix_rag.
+    if(QORNIX_BUILD_APP)
+        target_link_libraries(qornix_web PRIVATE qornix_rag_extension)
+    endif()
 endif()
 
 # Unit tests.
 if(QORNIX_BUILD_TESTS)
     enable_testing()
+
+    if(ENABLE_AUTH)
+        add_executable(auth_manager_test tests/auth_manager_test.cpp)
+        target_link_libraries(auth_manager_test PRIVATE qornix_auth)
+        add_test(NAME auth_manager_test COMMAND auth_manager_test)
+
+        add_executable(auth_routes_test tests/auth_routes_test.cpp)
+        target_link_libraries(auth_routes_test PRIVATE qornix_web_core)
+        add_test(NAME auth_routes_test COMMAND auth_routes_test)
+
+        add_executable(auth_middleware_policy_test tests/auth_middleware_policy_test.cpp)
+        target_link_libraries(auth_middleware_policy_test PRIVATE qornix_web_core)
+        add_test(NAME auth_middleware_policy_test COMMAND auth_middleware_policy_test)
+
+        if(QORNIX_ENABLE_ORM AND TARGET qornix_orm)
+            add_executable(auth_orm_store_test tests/auth_orm_store_test.cpp)
+            target_link_libraries(auth_orm_store_test PRIVATE qornix_auth qornix_orm)
+            add_test(NAME auth_orm_store_test COMMAND auth_orm_store_test)
+
+            add_executable(auth_orm_store_dsn_test tests/auth_orm_store_dsn_test.cpp)
+            target_link_libraries(auth_orm_store_dsn_test PRIVATE qornix_auth qornix_orm)
+            add_test(NAME auth_orm_store_dsn_test COMMAND auth_orm_store_dsn_test)
+        endif()
+    endif()
 
     add_executable(config_parser_test tests/config_parser_test.cpp)
     target_include_directories(config_parser_test PRIVATE

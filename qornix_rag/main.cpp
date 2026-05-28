@@ -13,6 +13,19 @@
 
 #include "core.h"
 #include "web.h"
+#include "llm_client.h"
+#include "llm_cache.h"
+#include "rate_limiter.h"
+#include "batch_processor.h"
+#include "prompt_cache.h"
+#include "prometheus_metrics.h"
+#include "analytics_service.h"
+#include "deduplication_service.h"
+#include "markdown_source.h"
+#include "rag_config.h"
+#if QORNIX_HAS_SQLITE
+#include "sqlite_source.h"
+#endif
 #include "../include/handler_base.h"
 #include "../include/http_server.h"
 #include <yaml-cpp/yaml.h>
@@ -23,10 +36,20 @@
 #include <filesystem>
 #include <atomic>
 #include <functional>
+#include <algorithm>
+#include <cctype>
+#include <optional>
 
 
 // Global variables
 std::shared_ptr<RagEngine> g_rag_engine;
+std::shared_ptr<LLMClient> g_llm_client;
+std::shared_ptr<AnalyticsService> g_analytics_service;
+std::shared_ptr<MarkdownSource> g_markdown_source;
+std::shared_ptr<DeduplicationService> g_dedup_service;
+#if QORNIX_HAS_SQLITE
+std::shared_ptr<SQLiteSource> g_sqlite_source;
+#endif
 std::unique_ptr<HttpServer> g_server;
 std::atomic<bool> g_running{true};
 
@@ -52,8 +75,8 @@ void print_usage(const char* program) {
     std::cout << "  " << program << " [опции]" << std::endl;
     std::cout << "\nОпции:" << std::endl;
     std::cout << "  --port, -p <port>     Порт сервера (по умолчанию: 8081)" << std::endl;
-    std::cout << "  --address, -a <addr>  Адрес (по умолчанию: 0.0.0.0)" << std::endl;
-    std::cout << "  --project, -P <path>  Путь к проекту для индексации" << std::endl;
+    std::cout << "  --address, -a <addr>  Адрес (по умолчанию: 127.0.0.1)" << std::endl;
+    std::cout << "  --scan-path, -S <path> Путь к директории для индексации (опционально)" << std::endl;
     std::cout << "  --config, -c <path>   Путь к config.yaml (по умолчанию: ./config.yaml)" << std::endl;
     std::cout << "  --help, -h            Показать эту справку" << std::endl;
 }
@@ -129,22 +152,17 @@ static std::unordered_map<std::string, std::string> loadIniWithFallback(
     return {};
 }
 
-static bool toBool(const std::string &value, bool fallback) {
-    if (value == "true" || value == "1" || value == "yes") return true;
-    if (value == "false" || value == "0" || value == "no") return false;
-    return fallback;
-}
-
 int main(int argc, char* argv[]) {
     // Default settings
-    std::string address = "0.0.0.0";
+    std::string address = "127.0.0.1";
     int port = 8081;
-    std::string project_path = ".";
+    std::optional<std::string> scan_path;
     std::string config_path = "config.yaml";
-    RagEngineConfig engine_config;
+    RagConfig rag_runtime_config;
+    bool auto_index_on_startup = true;
     bool cli_port_set = false;
     bool cli_address_set = false;
-    bool cli_project_set = false;
+    bool cli_scan_path_set = false;
     bool cli_config_set = false;
 
     // Parse command-line arguments
@@ -167,10 +185,10 @@ int main(int argc, char* argv[]) {
                 cli_address_set = true;
             }
         }
-        else if (arg == "--project" || arg == "-P") {
+        else if (arg == "--scan-path" || arg == "-S") {
             if (i + 1 < argc) {
-                project_path = argv[++i];
-                cli_project_set = true;
+                scan_path = argv[++i];
+                cli_scan_path_set = true;
             }
         }
         else if (arg == "--config" || arg == "-c") {
@@ -183,26 +201,27 @@ int main(int argc, char* argv[]) {
 
     std::string resolved_config_path;
     auto ini = loadIniWithFallback(config_path, argv[0], resolved_config_path);
-    if (!ini.empty()) {
-        if (!cli_address_set && ini.count("server.address")) address = ini["server.address"];
-        if (!cli_port_set && ini.count("server.port")) port = std::stoi(ini["server.port"]);
-        if (!cli_project_set && ini.count("server.project_path")) project_path = ini["server.project_path"];
+    rag_runtime_config = makeRagConfigFromStandaloneFlatMap(
+        ini,
+        resolved_config_path.empty() ? "standalone defaults" : resolved_config_path);
 
-        if (ini.count("search.use_hybrid")) engine_config.search.use_hybrid = toBool(ini["search.use_hybrid"], true);
-        if (ini.count("search.vector_weight")) engine_config.search.vector_weight = std::stof(ini["search.vector_weight"]);
-        if (ini.count("search.text_weight")) engine_config.search.text_weight = std::stof(ini["search.text_weight"]);
-        if (ini.count("search.top_k")) engine_config.search.top_k = static_cast<size_t>(std::stoul(ini["search.top_k"]));
-        if (ini.count("search.min_score_threshold")) engine_config.search.min_score_threshold = std::stof(ini["search.min_score_threshold"]);
-        if (ini.count("indexing.max_file_size_kb")) engine_config.max_file_size_kb = static_cast<size_t>(std::stoul(ini["indexing.max_file_size_kb"]));
-
-        if (ini.count("embedding.backend")) engine_config.embedding.backend = ini["embedding.backend"];
-        if (ini.count("embedding.model_path")) engine_config.embedding.model_path = ini["embedding.model_path"];
-        if (ini.count("embedding.tokenizer_path")) engine_config.embedding.tokenizer_path = ini["embedding.tokenizer_path"];
-        if (ini.count("embedding.max_seq_len")) engine_config.embedding.max_seq_len = static_cast<size_t>(std::stoul(ini["embedding.max_seq_len"]));
-        if (ini.count("embedding.onnx_threads")) engine_config.embedding.onnx_threads = static_cast<size_t>(std::stoul(ini["embedding.onnx_threads"]));
-        if (ini.count("embedding.normalize_embeddings")) engine_config.embedding.normalize_embeddings = toBool(ini["embedding.normalize_embeddings"], true);
-        if (ini.count("embedding.enable_fallback")) engine_config.embedding.enable_fallback = toBool(ini["embedding.enable_fallback"], true);
+    if (!cli_address_set) {
+        address = rag_runtime_config.address;
+    } else {
+        rag_runtime_config.address = address;
     }
+    if (!cli_port_set) {
+        port = rag_runtime_config.port;
+    } else {
+        rag_runtime_config.port = port;
+    }
+    if (!cli_scan_path_set) {
+        scan_path = rag_runtime_config.scan_path;
+    } else {
+        rag_runtime_config.scan_path = scan_path;
+    }
+    auto_index_on_startup = rag_runtime_config.auto_index_on_startup;
+    RagEngineConfig engine_config = rag_runtime_config.engine;
 
     // Set signal handler
     std::signal(SIGINT, signal_handler);
@@ -211,15 +230,22 @@ int main(int argc, char* argv[]) {
     print_banner();
 
     std::cout << "🚀 Запуск Qornix RAG..." << std::endl;
-    std::cout << "📡 Адрес: " << address << ":" << port << std::endl;
-    std::cout << "📂 Проект: " << project_path << std::endl;
-    if (!resolved_config_path.empty()) {
-        std::cout << "⚙️ Конфиг: " << resolved_config_path << std::endl;
-    } else if (cli_config_set) {
-        std::cout << "⚠️ Конфиг не найден по пути: " << config_path << std::endl;
-    } else {
-        std::cout << "⚠️ Конфиг не найден, используются значения по умолчанию" << std::endl;
+    std::cout << "🧭 RAG mode: " << ragRuntimeModeToString(rag_runtime_config.mode) << std::endl;
+    std::cout << "⚙️ Config source: " << rag_runtime_config.config_source << std::endl;
+    std::cout << "📡 Bind address: " << address << ":" << port << std::endl;
+    std::cout << "🌐 Local URL: http://localhost:" << port << std::endl;
+    if (address == "0.0.0.0" || address == "::") {
+        std::cout << "⚠️ Сервер слушает все сетевые интерфейсы. Для локального режима используйте 127.0.0.1." << std::endl;
     }
+    std::cout << "📂 Scan path: " << (scan_path ? *scan_path : std::string("<not configured>")) << std::endl;
+    std::cout << "🔎 Auto-index on startup: "
+              << ((auto_index_on_startup && scan_path) ? "enabled" : "disabled")
+              << std::endl;
+    if (resolved_config_path.empty() && cli_config_set) {
+        std::cout << "⚠️ Конфиг не найден по пути: " << config_path << std::endl;
+    }
+    std::cout << "🧠 Embedding backend: " << engine_config.embedding.backend << std::endl;
+    std::cout << "🛟 Embedding fallback: " << (engine_config.embedding.enable_fallback ? "enabled" : "disabled") << std::endl;
     std::cout << std::endl;
 
     try {
@@ -227,21 +253,29 @@ int main(int argc, char* argv[]) {
         std::cout << "🔍 Инициализация RAG движка..." << std::endl;
         g_rag_engine = std::make_shared<RagEngine>(engine_config);
         g_rag_engine->set_stop_flag(&g_running);
+        auto embedding_info = g_rag_engine->get_embedding_model_info();
+        std::cout << "🧬 Embedding model id: " << embedding_info.id << std::endl;
+        std::cout << "📐 Embedding dimension: " << embedding_info.dimension << std::endl;
+        std::cout << "🧾 Embedding status: " << embedding_info.status << std::endl;
 
-        // Automatic indexing on startup
-        std::cout << "📚 Индексация проекта..." << std::endl;
-        g_rag_engine->index_project(project_path);
+        if (auto_index_on_startup && scan_path) {
+            // Automatic indexing on startup is kept for the local standalone workflow.
+            std::cout << "📚 Индексация директории..." << std::endl;
+            g_rag_engine->index_project(*scan_path);
 
-        if (!g_running.load()) {
-            std::cout << "\n🛑 Получен сигнал остановки" << std::endl;
-            std::cout << "👋 Остановка во время индексации" << std::endl;
-            return 0;
+            if (!g_running.load()) {
+                std::cout << "\n🛑 Получен сигнал остановки" << std::endl;
+                std::cout << "👋 Остановка во время индексации" << std::endl;
+                return 0;
+            }
+
+            auto stats = g_rag_engine->get_statistics();
+            std::cout << "✅ Проиндексировано: " << stats.total_files << " файлов" << std::endl;
+            std::cout << "   Строк кода: " << stats.total_lines << std::endl;
+            std::cout << "   Размер: " << (stats.total_size_bytes / 1024) << " KB" << std::endl;
+        } else {
+            std::cout << "⏭️ Автоиндексация отключена; задайте indexing.scan_path/--scan-path или используйте upload/API/QA." << std::endl;
         }
-
-        auto stats = g_rag_engine->get_statistics();
-        std::cout << "✅ Проиндексировано: " << stats.total_files << " файлов" << std::endl;
-        std::cout << "   Строк кода: " << stats.total_lines << std::endl;
-        std::cout << "   Размер: " << (stats.total_size_bytes / 1024) << " KB" << std::endl;
         std::cout << std::endl;
 
         // Create and configure the server
@@ -255,14 +289,116 @@ int main(int argc, char* argv[]) {
 
         g_server = std::make_unique<HttpServer>(ioc, endpoint);
 
-        // Configure RAG routes
-        setupRagRoutes(*g_server, g_rag_engine);
+        // Initialize LLM client (if config has llm section)
+        std::cout << "🤖 Инициализация LLM клиента..." << std::endl;
+        g_llm_client = std::make_shared<LLMClient>(rag_runtime_config.llm);
+        if (g_llm_client->is_enabled()) {
+            std::cout << "  ℹ️  LLM provider: " << g_llm_client->provider_name() << std::endl;
+            std::cout << "  ℹ️  LLM model: " << g_llm_client->get_model() << std::endl;
+            std::cout << "  ℹ️  LLM API: " << g_llm_client->get_api_url() << std::endl;
+
+            const auto available_models = g_llm_client->list_available_models();
+            if (!available_models.empty()) {
+                std::cout << "  ℹ️  Available LLM models:";
+                for (const auto& model : available_models) {
+                    std::cout << " " << model;
+                }
+                std::cout << std::endl;
+            } else {
+                std::cout << "  ⚠️  Available LLM models: not reported" << std::endl;
+            }
+
+            if (g_llm_client->is_available()) {
+                std::cout << "  ✅ LLM доступен" << std::endl;
+            } else if (!available_models.empty() && !g_llm_client->configured_model_available()) {
+                std::cout << "  ⚠️  LLM model not found in provider model list; "
+                          << "search-only fallback enabled" << std::endl;
+            } else {
+                std::cout << "  ⚠️  LLM недоступен (search-only fallback enabled)" << std::endl;
+            }
+        } else {
+            std::cout << "  ℹ️  LLM не настроен (search-only mode)" << std::endl;
+        }
+
+        // Phase 3: Initialize cache and rate limiter
+        std::shared_ptr<ICache> cache;
+        std::shared_ptr<RateLimiter> rate_limiter;
+        std::shared_ptr<BatchProcessor> batch_processor;
+        std::shared_ptr<IPromptCache> prompt_cache;
+        std::shared_ptr<LLMRAGMetrics> metrics;
+
+        try {
+            cache = create_cache(rag_runtime_config.cache);
+            rate_limiter = std::make_shared<RateLimiter>(rag_runtime_config.rate_limit);
+            if (cache) {
+                g_llm_client->set_cache(cache);
+            }
+            if (rate_limiter->is_available()) {
+                g_llm_client->set_rate_limiter(rate_limiter);
+            }
+
+            batch_processor = std::make_shared<BatchProcessor>(rag_runtime_config.batch);
+            prompt_cache = create_prompt_cache(rag_runtime_config.prompt_cache);
+            metrics = std::make_shared<LLMRAGMetrics>();
+
+            auto rag_stats = g_rag_engine->get_statistics();
+            metrics->set_indexed_files(rag_stats.total_files);
+            metrics->set_indexed_lines(rag_stats.total_lines);
+
+            g_analytics_service = std::make_shared<AnalyticsService>(rag_runtime_config.analytics);
+            g_dedup_service = std::make_shared<DeduplicationService>(rag_runtime_config.dedup);
+
+#if QORNIX_HAS_SQLITE
+            if (rag_runtime_config.sqlite_enabled) {
+                g_sqlite_source = std::make_shared<SQLiteSource>(rag_runtime_config.sqlite);
+                if (g_sqlite_source->initialize()) {
+                    g_rag_engine->addDataSource(g_sqlite_source);
+                    std::cout << "  ✅ SQLiteSource: " << rag_runtime_config.sqlite.db_path << std::endl;
+                } else {
+                    std::cerr << "  ⚠️  SQLiteSource не инициализирован" << std::endl;
+                    g_sqlite_source.reset();
+                }
+            }
+#endif
+
+            if (rag_runtime_config.markdown_enabled) {
+                g_markdown_source = std::make_shared<MarkdownSource>(rag_runtime_config.markdown);
+                if (g_markdown_source->initialize()) {
+                    g_rag_engine->addDataSource(g_markdown_source);
+                    std::cout << "  ✅ MarkdownSource: " << rag_runtime_config.markdown.directory_path
+                              << " (" << g_markdown_source->count() << " документов)" << std::endl;
+                } else {
+                    std::cerr << "  ⚠️  MarkdownSource не инициализирован" << std::endl;
+                    g_markdown_source.reset();
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "⚠️  RAG runtime config error: " << e.what() << std::endl;
+        }
+        std::cout << std::endl;
+
+        // Configure RAG routes (with cache, rate limiter, batch, prompt cache, metrics)
+        setupRagRoutes(*g_server, g_rag_engine, g_llm_client, cache, rate_limiter,
+                      batch_processor, prompt_cache, metrics, g_analytics_service,
+                      g_markdown_source, g_dedup_service
+#if QORNIX_HAS_SQLITE
+                      , g_sqlite_source
+#endif
+                      , RagRouteOptions{
+                            rag_runtime_config.routes.expose_root_ui,
+                            rag_runtime_config.routes.ui_path,
+                            rag_runtime_config.routes.api_prefix,
+                            rag_runtime_config.security,
+                            rag_runtime_config.upload
+                        }
+        );
 
         g_server->run();
 
         std::cout << "✅ Сервер запущен!" << std::endl;
         std::cout << std::endl;
         std::cout << "🌐 Откройте в браузере: http://localhost:" << port << std::endl;
+        std::cout << "💚 API Health: http://localhost:" << port << "/api/health" << std::endl;
         std::cout << "📊 API Stats: http://localhost:" << port << "/api/stats" << std::endl;
         std::cout << "🔍 API Search: http://localhost:" << port << "/api/search" << std::endl;
         std::cout << std::endl;
@@ -297,6 +433,13 @@ int main(int argc, char* argv[]) {
 
         std::cout << "\n👋 Остановка сервера..." << std::endl;
         g_server.reset();
+        g_dedup_service.reset();
+        g_markdown_source.reset();
+        g_analytics_service.reset();
+#if QORNIX_HAS_SQLITE
+        g_sqlite_source.reset();
+#endif
+        g_llm_client.reset();
         g_rag_engine.reset();
 
     } catch (const std::exception& e) {

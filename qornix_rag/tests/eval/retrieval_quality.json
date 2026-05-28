@@ -1,0 +1,110 @@
+{
+  "name": "post_stabilization_7_rag_quality_beyond_baseline",
+  "documents": [
+    {
+      "path": "doc/rag_routes.md",
+      "content": "# RAG routes\nRagExtension registers the integrated RAG UI at /rag and API routes under /api/rag. The API prefix is configurable so generated host applications keep their existing home page."
+    },
+    {
+      "path": "doc/operations.md",
+      "content": "# Operations\nAdmin diagnostics are available at /api/rag/admin/diagnostics. Prometheus metrics are exposed at /api/rag/metrics for generated RAG applications."
+    },
+    {
+      "path": "knowledge_base/qa_workflow.md",
+      "content": "# QA workflow\nQA wiki pairs are local knowledge entries. They should appear in Ask context with Q citations when the question matches the stored pair."
+    },
+    {
+      "path": "doc/citations.md",
+      "content": "# Citations\nGenerated answers should use bracketed source ids from retrieved context. Citation post-processing reports answer citations, missing citations, and context citations that were not cited."
+    },
+    {
+      "path": "doc/conversation_rules.md",
+      "content": "# Conversation history\nConversation history may resolve follow-up wording, but it is not a factual source. Answers must cite retrieved sources rather than previous chat turns."
+    },
+    {
+      "path": "doc/long_ingestion_runbook.md",
+      "content": "# Long ingestion runbook\nSection 1: Background notes for operators and maintainers.\nSection 2: Background notes for operators and maintainers.\nSection 3: Background notes for operators and maintainers.\nSection 4: Background notes for operators and maintainers.\nSection 5: Background notes for operators and maintainers.\nSection 6: Background notes for operators and maintainers.\nSection 7: Background notes for operators and maintainers.\nSection 8: Background notes for operators and maintainers.\nSection 9: Background notes for operators and maintainers.\nSection 10: Background notes for operators and maintainers.\nSection 11: Background notes for operators and maintainers.\nSection 12: Background notes for operators and maintainers.\nSection 13: Background notes for operators and maintainers.\nSection 14: Background notes for operators and maintainers.\nSection 15: Background notes for operators and maintainers.\nSection 16: Background notes for operators and maintainers.\nSection 17: Background notes for operators and maintainers.\nSection 18: Background notes for operators and maintainers.\nSection 19: Background notes for operators and maintainers.\nSection 20: Background notes for operators and maintainers.\nSection 21: Background notes for operators and maintainers.\nSection 22: Background notes for operators and maintainers.\nSection 23: Background notes for operators and maintainers.\nSection 24: Background notes for operators and maintainers.\nThe long document quality check says multi query retrieval should keep the ingestion retry budget visible in diagnostics. Operators inspect retrieval_queries when long runbooks contain repeated generic sections.\nAppendix 25: Generated filler around diagnostics and route wiring.\nAppendix 26: Generated filler around diagnostics and route wiring.\nAppendix 27: Generated filler around diagnostics and route wiring.\nAppendix 28: Generated filler around diagnostics and route wiring.\nAppendix 29: Generated filler around diagnostics and route wiring.\nAppendix 30: Generated filler around diagnostics and route wiring.\nAppendix 31: Generated filler around diagnostics and route wiring.\nAppendix 32: Generated filler around diagnostics and route wiring.\nAppendix 33: Generated filler around diagnostics and route wiring.\nAppendix 34: Generated filler around diagnostics and route wiring.\nAppendix 35: Generated filler around diagnostics and route wiring.\nAppendix 36: Generated filler around diagnostics and route wiring.\nAppendix 37: Generated filler around diagnostics and route wiring.\nAppendix 38: Generated filler around diagnostics and route wiring.\nAppendix 39: Generated filler around diagnostics and route wiring.\nAppendix 40: Generated filler around diagnostics and route wiring.\nAppendix 41: Generated filler around diagnostics and route wiring.\nAppendix 42: Generated filler around diagnostics and route wiring.\nAppendix 43: Generated filler around diagnostics and route wiring.\nAppendix 44: Generated filler around diagnostics and route wiring."
+    },
+    {
+      "path": "generated/rag_app/templates/home.md",
+      "content": "# Generated RAG app home\nGenerated template apps expose a root RAG dashboard with search, ask, source attribution, ingestion job progress, feedback capture, and model switching controls."
+    }
+  ],
+  "qa_pairs": [
+    {
+      "question": "How do I rotate backup files?",
+      "answer": "Use the documented file-based backup workflow and rotate files outside the RAG process.",
+      "category": "operations"
+    }
+  ],
+  "cases": [
+    {
+      "id": "route_prefix_retrieval",
+      "type": "search",
+      "query": "How is the configurable API prefix registered?",
+      "top_k": 3,
+      "expected_top_source": "doc/rag_routes.md",
+      "expected_snippet_contains": "API prefix"
+    },
+    {
+      "id": "route_prefix_citation",
+      "type": "ask",
+      "question": "What route prefix does RagExtension use for API routes?",
+      "top_k": 3,
+      "expected_context_source": "doc/rag_routes.md",
+      "expected_citation_prefix": "S",
+      "expected_grounding_status": "grounded"
+    },
+    {
+      "id": "qa_citation",
+      "type": "ask_qa",
+      "question": "How do I rotate backup files?",
+      "top_k": 3,
+      "expected_source_type": "qa",
+      "expected_citation_prefix": "Q"
+    },
+    {
+      "id": "citation_post_processing_context",
+      "type": "ask",
+      "question": "What citation ids should generated answers use?",
+      "top_k": 3,
+      "expected_context_source": "doc/citations.md",
+      "expected_citation_prefix": "S",
+      "expected_grounding_status": "grounded"
+    },
+    {
+      "id": "conversation_history_rules",
+      "type": "ask",
+      "question": "Can conversation history be used as a factual source?",
+      "top_k": 3,
+      "expected_context_source": "doc/conversation_rules.md",
+      "expected_citation_prefix": "S",
+      "expected_grounding_status": "grounded"
+    },
+    {
+      "id": "unknown_topic_refusal",
+      "type": "ask_refusal",
+      "question": "What is the launch window for an unrelated Europa spacecraft mission?",
+      "top_k": 3,
+      "expected_grounding_status": "no_context",
+      "expected_llm_status": "unavailable"
+    },
+    {
+      "id": "long_document_multi_query_diagnostics",
+      "type": "search",
+      "query": "Where are retrieval query diagnostics described for long ingestion runbooks?",
+      "top_k": 3,
+      "expected_top_source": "doc/long_ingestion_runbook.md",
+      "expected_snippet_contains": "retrieval_queries"
+    },
+    {
+      "id": "generated_template_app_quality",
+      "type": "ask",
+      "question": "What controls are exposed by generated template RAG apps?",
+      "top_k": 3,
+      "expected_context_source": "generated/rag_app/templates/home.md",
+      "expected_citation_prefix": "S",
+      "expected_grounding_status": "grounded"
+    }
+  ]
+}

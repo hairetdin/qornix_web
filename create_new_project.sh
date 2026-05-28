@@ -12,6 +12,8 @@ Usage:
   ./create_new_project.sh <project_name_or_path> [--with-dynamic-api-vue]
   ./create_new_project.sh <project_name_or_path> [--with-dynamic-api-react]
   ./create_new_project.sh <project_name_or_path> [--with-dynamic-api-angular]
+  ./create_new_project.sh <project_name_or_path> [--with-rag]
+  ./create_new_project.sh <project_name_or_path> --template rag_app
   ./create_new_project.sh <project_name_or_path> --template dynamic-api
   ./create_new_project.sh <project_name_or_path> --template dynamic-api-vue
   ./create_new_project.sh <project_name_or_path> --template dynamic-api-react
@@ -29,6 +31,8 @@ Use --with-dynamic-api to generate a Schema-driven Dynamic API application.
 Use --with-dynamic-api-vue to generate a Schema-driven Dynamic API application with a Vue/Vite frontend scaffold.
 Use --with-dynamic-api-react to generate a Schema-driven Dynamic API application with a React/Vite frontend scaffold.
 Use --with-dynamic-api-angular to generate a Schema-driven Dynamic API application with an Angular frontend scaffold.
+Use --template rag_app to generate a Qornix Web application with embedded qornix_rag routes.
+Use --with-rag to add embedded qornix_rag routes to any non-rag_app template.
 USAGE
 }
 
@@ -77,18 +81,78 @@ replace_placeholders() {
     local project_name="$2"
     local project_name_upper="$3"
     local qornix_web_root="$4"
+    local with_rag_cmake_bool="$5"
+    local with_rag_project_option="$6"
+    local with_rag_compile_def="$7"
+    local with_rag_link_lib="$8"
+    local with_rag_post_build="$9"
+    local with_rag_install="${10}"
+    local with_rag_config="${11}"
+    local with_rag_readme="${12}"
+    local with_rag_nav_link="${13}"
     local tmp_file
     tmp_file="${file}.tmp"
-    sed \
-        -e "s|@PROJECT_NAME@|$project_name|g" \
-        -e "s|@PROJECT_NAME_UPPER@|$project_name_upper|g" \
-        -e "s|@QORNIX_WEB_ROOT@|$qornix_web_root|g" \
-        "$file" > "$tmp_file"
+    if command -v python3 >/dev/null 2>&1; then
+        PROJECT_NAME_VALUE="$project_name" \
+        PROJECT_NAME_UPPER_VALUE="$project_name_upper" \
+        QORNIX_WEB_ROOT_VALUE="$qornix_web_root" \
+        WITH_RAG_CMAKE_BOOL_VALUE="$with_rag_cmake_bool" \
+        WITH_RAG_PROJECT_OPTION_VALUE="$with_rag_project_option" \
+        WITH_RAG_COMPILE_DEF_VALUE="$with_rag_compile_def" \
+        WITH_RAG_LINK_LIB_VALUE="$with_rag_link_lib" \
+        WITH_RAG_POST_BUILD_VALUE="$with_rag_post_build" \
+        WITH_RAG_INSTALL_VALUE="$with_rag_install" \
+        WITH_RAG_CONFIG_VALUE="$with_rag_config" \
+        WITH_RAG_README_VALUE="$with_rag_readme" \
+        WITH_RAG_NAV_LINK_VALUE="$with_rag_nav_link" \
+        python3 - "$file" "$tmp_file" <<'PY'
+import os
+import sys
+
+src, dst = sys.argv[1], sys.argv[2]
+replacements = {
+    "@PROJECT_NAME@": os.environ["PROJECT_NAME_VALUE"],
+    "@PROJECT_NAME_UPPER@": os.environ["PROJECT_NAME_UPPER_VALUE"],
+    "@QORNIX_WEB_ROOT@": os.environ["QORNIX_WEB_ROOT_VALUE"],
+    "@WITH_RAG_CMAKE_BOOL@": os.environ["WITH_RAG_CMAKE_BOOL_VALUE"],
+    "@WITH_RAG_PROJECT_OPTION@": os.environ["WITH_RAG_PROJECT_OPTION_VALUE"],
+    "@WITH_RAG_COMPILE_DEF@": os.environ["WITH_RAG_COMPILE_DEF_VALUE"],
+    "@WITH_RAG_LINK_LIB@": os.environ["WITH_RAG_LINK_LIB_VALUE"],
+    "@WITH_RAG_POST_BUILD@": os.environ["WITH_RAG_POST_BUILD_VALUE"],
+    "@WITH_RAG_INSTALL@": os.environ["WITH_RAG_INSTALL_VALUE"],
+    "@WITH_RAG_CONFIG@": os.environ["WITH_RAG_CONFIG_VALUE"],
+    "@WITH_RAG_README@": os.environ["WITH_RAG_README_VALUE"],
+    "@WITH_RAG_NAV_LINK@": os.environ["WITH_RAG_NAV_LINK_VALUE"],
+}
+with open(src, "r", encoding="utf-8") as handle:
+    content = handle.read()
+for token, value in replacements.items():
+    content = content.replace(token, value)
+with open(dst, "w", encoding="utf-8") as handle:
+    handle.write(content)
+PY
+    else
+        sed \
+            -e "s|@PROJECT_NAME@|$project_name|g" \
+            -e "s|@PROJECT_NAME_UPPER@|$project_name_upper|g" \
+            -e "s|@QORNIX_WEB_ROOT@|$qornix_web_root|g" \
+            -e "s|@WITH_RAG_CMAKE_BOOL@|$with_rag_cmake_bool|g" \
+            -e "s|@WITH_RAG_PROJECT_OPTION@||g" \
+            -e "s|@WITH_RAG_COMPILE_DEF@|$with_rag_compile_def|g" \
+            -e "s|@WITH_RAG_LINK_LIB@|$with_rag_link_lib|g" \
+            -e "s|@WITH_RAG_POST_BUILD@||g" \
+            -e "s|@WITH_RAG_INSTALL@||g" \
+            -e "s|@WITH_RAG_CONFIG@||g" \
+            -e "s|@WITH_RAG_README@||g" \
+            -e "s|@WITH_RAG_NAV_LINK@||g" \
+            "$file" > "$tmp_file"
+    fi
     mv "$tmp_file" "$file"
 }
 
 project_path="${1:-}"
 template_name="app"
+with_rag="false"
 shift || true
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -96,6 +160,7 @@ while [ $# -gt 0 ]; do
         --with-dynamic-api-vue) template_name="dynamic_api_vue_app" ;;
         --with-dynamic-api-react) template_name="dynamic_api_react_app" ;;
         --with-dynamic-api-angular) template_name="dynamic_api_angular_app" ;;
+        --with-rag) with_rag="true" ;;
         --template)
             shift || fail "--template requires a value"
             case "${1:-}" in
@@ -103,6 +168,7 @@ while [ $# -gt 0 ]; do
                 dynamic-api-vue|dynamic_api_vue|dynamic_api_vue_app) template_name="dynamic_api_vue_app" ;;
                 dynamic-api-react|dynamic_api_react|dynamic_api_react_app) template_name="dynamic_api_react_app" ;;
                 dynamic-api-angular|dynamic_api_angular|dynamic_api_angular_app|angular-dynamic-api) template_name="dynamic_api_angular_app" ;;
+                rag-app|rag_app|rag) template_name="rag_app" ;;
                 app|default) template_name="app" ;;
                 *) fail "Unknown template: $1" ;;
             esac
@@ -111,6 +177,7 @@ while [ $# -gt 0 ]; do
         --template=dynamic-api-vue|--template=dynamic_api_vue|--template=dynamic_api_vue_app) template_name="dynamic_api_vue_app" ;;
         --template=dynamic-api-react|--template=dynamic_api_react|--template=dynamic_api_react_app) template_name="dynamic_api_react_app" ;;
         --template=dynamic-api-angular|--template=dynamic_api_angular|--template=dynamic_api_angular_app|--template=angular-dynamic-api) template_name="dynamic_api_angular_app" ;;
+        --template=rag-app|--template=rag_app|--template=rag) template_name="rag_app" ;;
         --template=app|--template=default) template_name="app" ;;
         *) fail "Unknown option: $1" ;;
     esac
@@ -135,6 +202,10 @@ framework_root="$(script_dir)"
 template_dir="${framework_root}/templates/${template_name}"
 [ -d "$template_dir" ] || fail "Application template not found: $template_dir"
 
+if [ "$with_rag" = "true" ] && [ "$template_name" = "rag_app" ]; then
+    fail "--with-rag is already included in --template rag_app."
+fi
+
 project_abs_path="$(absolute_path "$project_path")"
 project_name="$(basename "$project_abs_path")"
 
@@ -156,14 +227,253 @@ fi
 mkdir -p "$project_abs_path"
 cp -R "${template_dir}/." "$project_abs_path/"
 
+if [ "$with_rag" = "true" ]; then
+    command -v python3 >/dev/null 2>&1 || fail "--with-rag requires python3 for template generation"
+    rag_template_dir="${framework_root}/templates/rag_app"
+    [ -d "$rag_template_dir" ] || fail "RAG template assets not found: $rag_template_dir"
+
+    rag_backend_prefix=""
+    case "$template_name" in
+        dynamic_api_vue_app|dynamic_api_react_app|dynamic_api_angular_app)
+            rag_backend_prefix="backend/"
+            ;;
+    esac
+
+    mkdir -p \
+        "$project_abs_path/${rag_backend_prefix}templates" \
+        "$project_abs_path/${rag_backend_prefix}static" \
+        "$project_abs_path/${rag_backend_prefix}doc" \
+        "$project_abs_path/knowledge_base" \
+        "$project_abs_path/models" \
+        "$project_abs_path/data" \
+        "$project_abs_path/logs"
+
+    cp "${rag_template_dir}/templates/rag_interface.html" "$project_abs_path/${rag_backend_prefix}templates/rag_interface.html"
+    cp "${rag_template_dir}/static/rag_app.css" "$project_abs_path/${rag_backend_prefix}static/rag_app.css"
+    cp "${rag_template_dir}/doc/rag_app.md" "$project_abs_path/${rag_backend_prefix}doc/rag_app.md"
+    cp "${rag_template_dir}/doc/operations.md" "$project_abs_path/${rag_backend_prefix}doc/operations.md"
+    cp "${rag_template_dir}/knowledge_base/README.md" "$project_abs_path/knowledge_base/README.md"
+    cp "${rag_template_dir}/models/README.md" "$project_abs_path/models/README.md"
+    cp "${rag_template_dir}/download_onnx_model.sh" "$project_abs_path/download_onnx_model.sh"
+    chmod +x "$project_abs_path/download_onnx_model.sh"
+fi
+
 qornix_web_root_for_cmake="$(relative_path "$project_abs_path" "$framework_root")"
 project_name_upper="$(printf '%s' "$project_name" | tr '[:lower:]' '[:upper:]')"
+
+with_rag_cmake_bool="OFF"
+with_rag_project_option=""
+with_rag_compile_def=""
+with_rag_link_lib=""
+with_rag_post_build=""
+with_rag_install=""
+with_rag_config=""
+with_rag_readme=""
+with_rag_nav_link=""
+
+if [ "$with_rag" = "true" ]; then
+    with_rag_cmake_bool="\${${project_name_upper}_ENABLE_RAG}"
+    with_rag_project_option="option(${project_name_upper}_ENABLE_RAG \"Enable embedded qornix_rag routes\" ON)"
+    with_rag_compile_def="\$<\$<BOOL:\${${project_name_upper}_ENABLE_RAG}>:${project_name_upper}_ENABLE_RAG=1>"
+    with_rag_link_lib="\$<\$<BOOL:\${${project_name_upper}_ENABLE_RAG}>:qornix::rag_extension>"
+    with_rag_nav_link="<a href=\"/rag\">RAG</a>"
+    with_rag_post_build="    COMMAND \${CMAKE_COMMAND} -E copy_if_different \"\${CMAKE_CURRENT_SOURCE_DIR}/download_onnx_model.sh\" \"\${${project_name_upper}_DEPLOY_DIR}/download_onnx_model.sh\"
+    COMMAND \${CMAKE_COMMAND} -E copy_directory \"\${CMAKE_CURRENT_SOURCE_DIR}/knowledge_base\" \"\${${project_name_upper}_DEPLOY_DIR}/knowledge_base\"
+    COMMAND \${CMAKE_COMMAND} -E copy_directory \"\${CMAKE_CURRENT_SOURCE_DIR}/models\" \"\${${project_name_upper}_DEPLOY_DIR}/models\"
+    COMMAND \${CMAKE_COMMAND} -E make_directory \"\${${project_name_upper}_DEPLOY_DIR}/data\""
+    with_rag_install="install(FILES download_onnx_model.sh DESTINATION .)
+install(DIRECTORY knowledge_base models DESTINATION .)
+install(DIRECTORY DESTINATION data)"
+    with_rag_config="
+auth:
+  enabled: false
+  mode: session
+  registration_enabled: false
+  secure_cookies: false
+  cookie_same_site: Lax
+  cookie_path: /
+  csrf:
+    enabled: true
+    header: X-CSRF-Token
+  auto_migrate: true
+  min_password_length: 12
+  session_duration_minutes: 30
+  jwt_duration_minutes: 60
+  jwt_secret: change-this-secret-key-in-production
+  jwt_issuer: qornix-auth
+  default_roles: user
+  default_permissions: rag:read
+  required_roles:
+  required_permissions:
+  admin_permissions: auth:admin
+  rag_read_permissions: rag:read
+  rag_write_permissions: rag:write
+  rag_admin_permissions: rag:admin
+  exclude_paths: /auth/login,/auth/register,/auth/invites/accept,/auth/password-reset/request,/auth/password-reset/confirm,/health,/static
+  database:
+    driver: sqlite
+    path: data/auth.db
+  bootstrap_admin:
+    enabled: false
+    username: admin
+    email:
+    password_env: QORNIX_ADMIN_PASSWORD
+    roles: admin
+    permissions: rag:read,rag:write,rag:admin,auth:admin
+
+rag:
+  route:
+    ui_path: /rag
+    api_prefix: /api/rag
+
+  llm:
+    enabled: true
+    api_url: http://localhost:11434
+    model: llama3.2:3b
+    request_timeout_ms: 30000
+    temperature: 0.2
+    max_tokens: 2048
+    prompt_template: |
+      Context:
+      {context}
+
+      Question: {question}
+
+  embedding:
+    backend: tfidf
+    enable_fallback: true
+
+  search:
+    use_hybrid: true
+    top_k: 5
+    min_score_threshold: 0.0
+    use_query_expansion: true
+    use_reranking: true
+    rerank_input_multiplier: 3
+    rerank_path_boost: 0.15
+    rerank_metadata_boost: 0.10
+    rerank_exact_content_boost: 0.05
+
+  vector_store:
+    # Backends: local_hnsw, faiss, qdrant, pgvector.
+    backend: local_hnsw
+    index_path: data/hnsw_index.bin
+    metadata_path: data/hnsw_index.meta.json
+    collection: qornix_rag_vectors
+    # endpoint: http://127.0.0.1:6333
+    # connection_string: host=127.0.0.1 port=5432 dbname=qornix user=qornix password=secret
+    # table: qornix_rag_vectors
+    # distance: Cosine
+    upsert_batch_size: 512
+    auto_load: true
+    auto_save: true
+
+  security:
+    enabled: false
+    mode: admin_token
+    admin_token_env: QORNIX_RAG_ADMIN_TOKEN
+    token_header: X-Qornix-RAG-Admin-Token
+    role_header: X-Qornix-Role
+    admin_role: admin
+    protect_admin_routes: true
+    protect_write_routes: true
+
+  upload:
+    enabled: true
+    uploads_dir: data/uploads
+    max_file_size_kb: 16384
+    max_files_per_request: 20
+    auto_ingest: true
+    async_ingest: false
+    overwrite_existing: false
+    allowed_extensions: \".txt,.md,.rst,.adoc,.json,.yaml,.yml,.xml,.html,.htm,.csv,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp\"
+    allowed_mime_types: \"text/plain,text/markdown,text/csv,text/html,application/json,application/xml,application/pdf,application/x-yaml,application/yaml,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/tiff,image/bmp,image/webp\"
+
+  indexing:
+    # Optional directory scan root. Leave unset to start in upload/API/QA mode.
+    # scan_path: knowledge_base
+    auto_index_on_startup: true
+    max_file_size_kb: 4096
+
+  sqlite:
+    enabled: true
+    db_path: data/rag_kb.db
+    source_id: local_qa
+    name: Local QA knowledge base
+    auto_migrate: true
+
+  markdown:
+    enabled: true
+    directory_path: knowledge_base
+    recursive: true
+
+  cache:
+    enabled: true
+    backend: memory
+    max_size: 1000
+    ttl_seconds: 3600
+
+  rate_limit:
+    enabled: false
+
+  prompt_cache:
+    enabled: true
+    max_size: 100
+    ttl_seconds: 3600"
+    with_rag_readme="
+## Optional RAG module
+
+This project was generated with \`--with-rag\`. The normal host application
+home page remains at \`/\`, and the embedded RAG UI is mounted separately:
+
+\`\`\`text
+http://127.0.0.1:8008/rag
+http://127.0.0.1:8008/api/rag/health
+\`\`\`
+
+RAG routes:
+
+\`\`\`text
+GET  /rag
+GET  /api/rag/health
+POST /api/rag/ask
+POST /api/rag/search
+GET  /api/rag/sources
+POST /api/rag/index
+GET  /api/rag/qa
+POST /api/rag/qa
+PUT  /api/rag/qa/{id}
+DEL  /api/rag/qa/{id}
+\`\`\`
+
+The default config uses Ollama at \`http://localhost:11434\` and model
+\`llama3.2:3b\`. Change \`rag.llm.model\` in \`config.yaml\`, or set
+\`rag.llm.enabled: false\` for search-only mode.
+
+Disable the embedded RAG routes at build time when needed:
+
+\`\`\`bash
+cmake -D${project_name_upper}_ENABLE_RAG=OFF ..
+\`\`\`
+
+The RAG module stores local QA data in \`data/rag_kb.db\`, reads Markdown files
+from \`knowledge_base/\`, serves the RAG UI from the generated templates directory,
+and starts with dependency-light TF-IDF retrieval. It does not scan a directory
+on startup unless \`rag.indexing.scan_path\` is set; uploads, QA and explicit
+\`scan_path\` API indexing are available immediately. Optional ONNX embedding
+files can be placed under \`models/\` or downloaded with:
+
+\`\`\`bash
+./download_onnx_model.sh
+\`\`\`
+"
+fi
 
 # Rename *.in templates after placeholder replacement.
 template_file_list="$(mktemp)"
 find "$project_abs_path" -type f -name '*.in' | sort > "$template_file_list"
 while IFS= read -r file; do
-    replace_placeholders "$file" "$project_name" "$project_name_upper" "$qornix_web_root_for_cmake"
+    replace_placeholders "$file" "$project_name" "$project_name_upper" "$qornix_web_root_for_cmake" "$with_rag_cmake_bool" "$with_rag_project_option" "$with_rag_compile_def" "$with_rag_link_lib" "$with_rag_post_build" "$with_rag_install" "$with_rag_config" "$with_rag_readme" "$with_rag_nav_link"
     mv "$file" "${file%.in}"
 done < "$template_file_list"
 rm -f "$template_file_list"
@@ -175,8 +485,8 @@ while IFS= read -r file; do
     case "$file" in
         *.in) continue ;;
     esac
-    if grep -q '@PROJECT_NAME@\|@PROJECT_NAME_UPPER@\|@QORNIX_WEB_ROOT@' "$file" 2>/dev/null; then
-        replace_placeholders "$file" "$project_name" "$project_name_upper" "$qornix_web_root_for_cmake"
+    if grep -q '@PROJECT_NAME@\|@PROJECT_NAME_UPPER@\|@QORNIX_WEB_ROOT@\|@WITH_RAG_' "$file" 2>/dev/null; then
+        replace_placeholders "$file" "$project_name" "$project_name_upper" "$qornix_web_root_for_cmake" "$with_rag_cmake_bool" "$with_rag_project_option" "$with_rag_compile_def" "$with_rag_link_lib" "$with_rag_post_build" "$with_rag_install" "$with_rag_config" "$with_rag_readme" "$with_rag_nav_link"
     fi
 done < "$all_file_list"
 rm -f "$all_file_list"
@@ -185,6 +495,9 @@ mkdir -p "$project_abs_path/logs"
 
 echo "Created Qornix Web application: $project_abs_path"
 echo "Template: $template_name"
+if [ "$with_rag" = "true" ]; then
+    echo "RAG: enabled"
+fi
 echo ""
 echo "Next steps:"
 echo "  cd $project_abs_path"
@@ -204,8 +517,17 @@ echo "  docker build -f runtime-Dockerfile -t $(basename "$project_name"):runtim
 echo "  docker run --rm -p 8008:8008 $(basename "$project_name"):runtime"
 echo ""
 echo "Open in browser:"
-echo "  http://127.0.0.1:8008/"
-if [ "$template_name" = "dynamic_api_vue_app" ] || [ "$template_name" = "dynamic_api_react_app" ] || [ "$template_name" = "dynamic_api_angular_app" ]; then
+if [ "$template_name" = "rag_app" ]; then
+    echo "  http://127.0.0.1:8008/"
+    echo "  http://127.0.0.1:8008/rag"
+    echo "  http://127.0.0.1:8008/api/rag/health"
+elif [ "$with_rag" = "true" ]; then
+    echo "  http://127.0.0.1:8008/"
+    echo "  http://127.0.0.1:8008/docs"
+    echo "  http://127.0.0.1:8008/rag"
+    echo "  http://127.0.0.1:8008/api/rag/health"
+elif [ "$template_name" = "dynamic_api_vue_app" ] || [ "$template_name" = "dynamic_api_react_app" ] || [ "$template_name" = "dynamic_api_angular_app" ]; then
+    echo "  http://127.0.0.1:8008/"
     echo "  http://127.0.0.1:8008/backend-admin"
     if [ "$template_name" = "dynamic_api_react_app" ] || [ "$template_name" = "dynamic_api_angular_app" ]; then
         echo "  http://127.0.0.1:8008/project-structure"
@@ -213,8 +535,10 @@ if [ "$template_name" = "dynamic_api_vue_app" ] || [ "$template_name" = "dynamic
     echo "  http://127.0.0.1:8008/backend/schema-manager"
     echo "  http://127.0.0.1:8008/api/dynamic/openapi.json"
 elif [ "$template_name" = "dynamic_api_app" ]; then
+    echo "  http://127.0.0.1:8008/"
     echo "  http://127.0.0.1:8008/schema-manager"
     echo "  http://127.0.0.1:8008/docs"
 else
+    echo "  http://127.0.0.1:8008/"
     echo "  http://127.0.0.1:8008/docs"
 fi
