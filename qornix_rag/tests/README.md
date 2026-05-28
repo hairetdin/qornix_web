@@ -1,24 +1,24 @@
 # Qornix RAG Tests
 
-## Структура тестов
+## Test Layout
 
-```
+```text
 tests/
-├── CMakeLists.txt                    # CMake конфигурация
-├── test_llm_client.cpp              # Тесты LLM Client
-├── test_rag_api.cpp                 # Тесты API endpoints
-├── test_graceful_degradation.cpp    # Тесты graceful degradation
-├── test_health_check.cpp            # Тесты health check
-├── test_streaming.cpp               # Тесты streaming
-├── test_prompt_builder.cpp          # Тесты prompt builder
+├── CMakeLists.txt                    # CMake configuration
+├── test_llm_client.cpp               # LLM client tests
+├── test_rag_api.cpp                  # API endpoint tests
+├── test_graceful_degradation.cpp     # Graceful degradation tests
+├── test_health_check.cpp             # Health check tests
+├── test_streaming.cpp                # Streaming tests
+├── test_prompt_builder.cpp           # Prompt builder tests
 └── mocks/
-    ├── mock_llm_server.h            # Mock LLM server
-    └── test_helpers.h               # Тестовые хелперы
+    ├── mock_llm_server.h             # Mock LLM server
+    └── test_helpers.h                # Test helpers
 ```
 
-## Запуск тестов
+## Running Tests
 
-### Сборка с тестами
+### Build With Tests
 
 ```bash
 cd qornix_rag
@@ -27,13 +27,13 @@ cmake .. -DQORNIX_BUILD_TESTS=ON
 make -j$(nproc)
 ```
 
-### Запуск отдельных тестов
+### Run Individual Tests
 
 ```bash
-# Все тесты
+# All tests
 ctest --output-on-failure
 
-# Конкретный тест
+# Specific tests
 ./tests/test_llm_client
 ./tests/test_rag_api
 ./tests/test_graceful_degradation
@@ -42,48 +42,51 @@ ctest --output-on-failure
 ./tests/test_prompt_builder
 ```
 
-### Запуск с valgrind (memory leak check)
+### Run With Valgrind
 
 ```bash
 valgrind --leak-check=full --error-exitcode=1 ./tests/test_llm_client
 ```
 
-## Типы тестов
+## Test Types
 
 ### 1. Unit Tests
-- Тестирование отдельных функций
-- Mock dependencies
-- Быстрые и изолированные
+
+- Test individual functions.
+- Use mock dependencies.
+- Stay fast and isolated.
 
 ### 2. Integration Tests
-- Тестирование взаимодействия компонентов
-- Тестирование API endpoints
-- Тестирование graceful degradation
+
+- Test component interaction.
+- Test API endpoints.
+- Test graceful degradation behavior.
 
 ### 3. Performance Tests
-- Тестирование производительности
-- Stress testing
-- Memory profiling
+
+- Test performance-sensitive paths.
+- Run stress scenarios.
+- Profile memory usage.
 
 ## Coverage
 
-Для получения coverage отчёта:
+To generate a coverage report:
 
 ```bash
-# Сборка с coverage
+# Build with coverage
 cmake .. -DCMAKE_CXX_FLAGS="--coverage"
 make -j$(nproc)
 
-# Запуск тестов
+# Run tests
 ctest
 
-# Генерация отчёта
+# Generate the report
 gcovr --html-details --output coverage.html
 ```
 
 ## CI/CD
 
-Тесты автоматически запускаются в GitHub Actions:
+Tests are intended to run automatically in GitHub Actions:
 
 ```yaml
 name: qornix_rag tests
@@ -109,24 +112,24 @@ jobs:
           ctest --output-on-failure
 ```
 
-## Написание новых тестов
+## Writing New Tests
 
-### Шаблон теста
+### Test Template
 
 ```cpp
 void test_example() {
     std::cout << "\nTest: Example Test" << std::endl;
-    
+
     try {
         // Arrange
         MockLLMClient mock_llm;
-        
+
         // Act
         std::string result = mock_llm.simulate_request("test");
-        
+
         // Assert
         test_helpers::assert_contains(result, "expected", "Should contain expected");
-        
+
         test_passed("Example test");
     } catch (const std::exception& e) {
         test_failed("Example test", e.what());
@@ -134,38 +137,38 @@ void test_example() {
 }
 ```
 
-### Best practices
+### Best Practices
 
-1. **Изолированность** — каждый тест должен работать независимо
-2. **Чистота** — не оставлять после себя файлы/ресурсы
-3. **Скорость** — тесты должны быть быстрыми (< 1 сек)
-4. **Понятность** — имена тестов должны быть описательными
-5. **Покрытие** — тестировать happy path и error cases
+1. **Isolation** - each test should run independently.
+2. **Cleanup** - tests should not leave files or resources behind.
+3. **Speed** - tests should be fast, preferably under one second.
+4. **Clarity** - test names should describe the behavior under test.
+5. **Coverage** - test both happy paths and error cases.
 
 ## Troubleshooting
 
-### Тесты не собираются
+### Tests Do Not Build
 
 ```bash
-# Очистить кэш
+# Clear the cache
 rm -rf build
 mkdir build && cd build
 cmake ..
 ```
 
-### Тесты падают
+### Tests Fail
 
 ```bash
-# Запустить с подробным выводом
+# Run with detailed output
 ctest --output-on-failure --verbose
 
-# Запустить конкретный тест
+# Run a specific test
 ./tests/test_name
 ```
 
-### Memory leaks
+### Memory Leaks
 
 ```bash
-# Проверить с valgrind
+# Check with valgrind
 valgrind --leak-check=full ./tests/test_name
 ```

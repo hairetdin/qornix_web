@@ -573,7 +573,7 @@ Examples:
 ```json
 {"query":"symbol:RagUploadService"}
 {"query":"type:pdf page:5 upload"}
-{"query":"lang:russian индексация документов"}
+{"query":"lang:russian document indexing"}
 ```
 
 The effective Xapian configuration and build/search status are visible in `/api/health`, `/api/stats`, and `/api/admin/diagnostics`.

@@ -120,7 +120,6 @@ README.md
 doc/qornix_create_new_app_instruction.md
 doc/schema_driven_dynamic_api.md
 doc/dynamic_api_app_deployment.md
-doc/roadmap_step_by_step_example.md
 ```
 
 The public source repository is:
