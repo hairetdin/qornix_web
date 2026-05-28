@@ -1,6 +1,6 @@
 # Integrating Qornix RAG With qornix_web
 
-Standalone `qornix_rag` and integrated `qornix_web` usage are separate product lines.
+Standalone `qornix_rag` and integrated `qornix_web` usage are separate product lines. For the complete feature/dependency/model guide, see [FULL_RAG_GUIDE.md](FULL_RAG_GUIDE.md).
 
 - Standalone mode owns `qornix_rag/config.yaml`, binds locally by default, and can serve the UI at `/`.
 - Integrated mode uses the host application's config, should not claim `/`, and defaults to `/rag` plus `/api/rag/*`.
@@ -44,6 +44,11 @@ rag:
     model: "llama3"
   search:
     top_k: 10
+  upload:
+    enabled: true
+    uploads_dir: data/uploads
+    max_file_size_kb: 16384
+    max_files_per_request: 20
 ```
 
 Default integrated routes:
@@ -54,6 +59,8 @@ POST /api/rag/ask
 POST /api/rag/search
 GET  /api/rag/health
 GET  /api/rag/admin/diagnostics
+POST /api/rag/documents/upload
+POST /api/rag/uploads/delete
 GET  /api/rag/metrics
 GET  /api/rag/sources
 GET  /api/rag/qa/list
@@ -61,7 +68,7 @@ GET  /api/rag/qa/suggest
 GET  /api/rag/qa/categories
 ```
 
-Protect diagnostics, metrics, QA write, ingestion, and delete routes with `rag.security` or the host application's auth/proxy layer before exposing a generated app outside a trusted network. See generated `doc/operations.md` for the deployment checklist.
+Protect diagnostics, metrics, QA write, upload, ingestion, and delete routes with `rag.security` or the host application's auth/proxy layer before exposing a generated app outside a trusted network. See generated `doc/operations.md` for the deployment checklist.
 
 ## Dynamic Route Extension
 

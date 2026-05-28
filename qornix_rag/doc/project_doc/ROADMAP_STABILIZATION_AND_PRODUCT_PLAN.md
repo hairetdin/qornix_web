@@ -59,7 +59,11 @@ Post-stabilization 26: done
 Post-stabilization 27: done
 Post-stabilization 28: done
 Post-stabilization 29: done
-Next: Advanced ingestion metadata
+Advanced ingestion metadata: done
+Code and chunking depth: done
+Embedding/model registry hardening: done
+Remaining LLM/provider diagnostics: done
+Next: explicit 0.1 backlog complete
 ```
 
 ### 0.1 Current explicit open work
@@ -79,48 +83,70 @@ The baseline stabilization scope is complete through Post-stabilization 29. The 
    - add Faiss CI coverage where Faiss is available;
    - add migration tooling from persisted SQLite embeddings to local HNSW/Faiss, Qdrant, or pgvector;
    - add Qdrant batch upsert pagination and target synchronization, plus pgvector transactional rebuild synchronization.
-4. Pending: Advanced ingestion metadata:
+4. Done: Advanced ingestion metadata:
    - add richer PDF metadata, outlines, attachments, page boxes, and diagnostics;
    - add richer DOCX headings, tables, footnotes/endnotes, comments, styles, and document properties;
    - add richer XLSX/CSV formulas, merged cells, workbook/table metadata, formatting signals, and typed cells;
    - add richer PPTX notes, comments, alt text, media captions, speaker metadata, and slide layout metadata;
    - add richer image/OCR EXIF, dimensions, confidence, coordinates, detected language, captions, and diagnostics.
-5. Pending: Code and chunking depth:
+5. Done: Code and chunking depth:
    - add source-repository structure-aware chunking;
-   - add AST-grade language parsers for symbols/classes/methods/functions/namespaces;
+   - add lightweight AST-grade language parsers for symbols/classes/methods/functions/namespaces/scopes;
    - preserve richer parser metadata through chunking, persistence, retrieval, and citation rendering;
-   - expand chunk quality tests for boundaries, metadata preservation, duplicates, tiny/large sections, and mixed Markdown/code.
-6. Pending: Embedding/model registry hardening:
+   - expose metadata-aware search/ask filters for document type, source path, page, sheet, row, slide, OCR confidence, symbols, and raw metadata keys;
+   - return source locators, citation labels, and curated structural metadata in search/ask API responses;
+   - expand chunk quality tests for boundaries, metadata preservation, duplicates, tiny/large sections, mixed Markdown/code, DOCX headings, PPTX slides, and metadata-aware search.
+6. Done: Embedding/model registry hardening:
    - add automatic model discovery from the local models directory;
    - add deeper model/tokenizer compatibility validation after download;
    - support common Hugging Face tokenizer JSON variants beyond the first greedy WordPiece path;
-   - integrate exact active-tokenizer sizing into chunking;
-   - add persistent embedding cache storage and migration/rebuild flows for model, tokenizer, dimension, pooling, and normalization changes;
-   - add ONNX Runtime integration tests with a small real model fixture and clearer shape/pooling/tokenizer diagnostics.
-7. Pending: RAG quality beyond deterministic baseline:
+   - integrate active-tokenizer sizing into chunking with persisted token-budget diagnostics;
+   - add model signatures and persistent embedding-cache metadata/rebuild safety for model, tokenizer, dimension, pooling, casing, and normalization changes;
+   - add clearer shape/pooling/tokenizer diagnostics and unit coverage for local model discovery.
+7. Done: RAG quality beyond deterministic baseline:
    - add learned or model-based reranking;
    - add query rewriting and multi-query retrieval with visible diagnostics;
    - add model-based claim grounding against cited context;
    - add user feedback capture for helpfulness, missing context, bad citations, and wrong answers;
    - expand analytics and evaluation datasets for long documents and generated template apps.
-8. Pending: QA/wiki deeper quality:
-   - wire duplicate warnings into the add/edit UI before save;
-   - add production-grade Markdown sanitization when richer rendering is enabled;
-   - add optional FTS/ORM-backed QA search and larger-scale tag autocomplete;
-   - add provenance/version history beyond string metadata.
-9. Pending: Operations, deployment, and security depth:
-   - add durable audit-event persistence and export;
-   - add provider-backed invite/password-reset delivery;
-   - add cookie domain/max-age controls;
-   - add Caddy/Traefik deployment examples;
-   - add structured tracing/request ids across host routing, RAG, LLM calls, persistence, and ingestion;
-   - add first-class backup/restore commands;
-   - add upload endpoints with allowlists, MIME checks, and size enforcement;
-   - add SBOM/vulnerability scanning guidance, secret mounting examples, alert examples, and full Docker Compose deploy smoke automation.
-10. Pending: Remaining LLM/provider diagnostics:
-   - move model-list extraction and token-usage parsing to the structured `Boost.JSON` parser path;
-   - add real-provider fixtures for Ollama, OpenAI-compatible APIs, vLLM, and LM Studio;
-   - unify streaming SSE parsing with the structured parser path.
+8. Done: QA/wiki deeper quality:
+   - wired duplicate warnings into the QA add/edit UI before save through `/api/qa/duplicate-check`;
+   - added server-side safe Markdown rendering metadata and stricter link/HTML sanitization for richer QA answers;
+   - added optional SQLite FTS5-backed QA search with LIKE fallback;
+   - added normalized `qa_tags` indexing for scalable tag filtering/autocomplete;
+   - added append-only QA provenance/version history through `qa_pair_history` and `/api/qa/history`.
+9. Done: Operations, deployment, and security depth:
+   - added secure `POST /api/documents/upload` endpoint for multipart document upload;
+   - added upload UI to `rag_interface.html`;
+   - supported multiple-file upload through the `files` multipart field;
+   - enforced extension, MIME, per-file size, and max-files-per-request allowlists;
+   - stored uploaded files under configured `upload.uploads_dir`;
+   - created ingestion jobs for uploaded files by reindexing the current project root so existing local documents remain searchable;
+   - showed upload and ingestion status in the UI, including job progress and uploaded file metadata;
+   - made uploaded documents searchable after ingestion in the same HNSW/Xapian hybrid index;
+   - exposed a safe uploaded-document delete flow through `POST /api/uploads/delete`;
+   - added upload validation, multipart parsing, storage, and deletion tests;
+   - documented upload configuration/API behavior and route-auth protection for upload/delete write routes.
+10. Done: Remaining LLM/provider diagnostics:
+   - moved model-list extraction to structured `Boost.JSON` parsing for Ollama `/api/tags`, OpenAI-compatible `/v1/models`, vLLM, LM Studio, flat arrays, and single-model objects;
+   - moved token-usage parsing to structured `Boost.JSON` parsing for OpenAI-compatible `usage` objects and Ollama `prompt_eval_count`/`eval_count` fields, including SSE/NDJSON final usage chunks;
+   - added real-provider response fixtures for Ollama, OpenAI-compatible APIs, vLLM, and LM Studio;
+   - unified streaming SSE/NDJSON parsing with the same structured payload parser path used by non-streaming responses;
+   - fixed streaming request JSON construction so `stream: true` is emitted inside the object instead of appended after the closing brace.
+11. Done: Xapian language-aware retrieval hardening:
+   - added config-driven Xapian lexical search controls for enablement, language, stemming, stemming strategy, CJK ngrams, word-break mode, spelling flag, and metadata prefixes;
+   - applied the same language/stemming settings during indexing and query parsing instead of indexing with hardcoded English-only defaults;
+   - added config-driven Xapian language selection with a lightweight Cyrillic/default auto heuristic plus explicit Xapian language names and ISO 639 aliases;
+   - added Xapian field prefixes for path/source/type/language/metadata/symbol/page/sheet/slide retrieval;
+   - kept exact metadata tokens while adding fielded parser prefixes for richer technical queries;
+   - added Xapian diagnostics to health/stats/admin responses;
+   - documented Xapian language-aware configuration for standalone and generated RAG apps.
+12. Done: Redis LLM response cache backend completion:
+   - replaced the previous Redis placeholder with a working lightweight RESP TCP client;
+   - added Redis `AUTH`, `SELECT`, `PING`, `GET`, `SETEX`, `DEL`, and prefix-scoped `SCAN` clear support;
+   - parsed `cache.redis.*` and `cache.key_prefix` from standalone and generated app configs;
+   - preserved safe memory fallback when Redis is configured but unavailable;
+   - exposed cache backend/availability diagnostics and updated docs/configs/tests.
 
 ## 1. Product split
 
@@ -846,8 +872,8 @@ Needed:
 
 Document/source families still needing richer ingestion after the first text and document parser baselines:
 
-- richer image/OCR metadata beyond the first plain OCR text baseline;
-- source code repositories with structure-aware chunking.
+- source code repositories with structure-aware chunking;
+- deeper semantic/layout extraction beyond the advanced metadata baseline, where needed for citation-quality chunking.
 
 Completed baseline:
 
@@ -888,11 +914,8 @@ Remaining E2 follow-ups:
 
 - live progress streaming instead of polling-only background ingestion;
 - full incremental runtime indexing by modified time and content hash instead of rebuilding the in-memory index;
-- richer image/OCR parser metadata beyond the first text baseline; see backlog 11.6.
-- richer PPTX structure, notes, speaker comments, media captions, and slide metadata beyond the first presentation text baseline; see backlog 11.6.
-- richer XLSX/CSV structure, formulas, merged cells, and table-aware chunk metadata beyond the first spreadsheet text baseline; see backlog 11.6.
-- richer DOCX structure/metadata parsing beyond the first text extraction baseline; see backlog 11.6.
-- page-aware PDF parsing/chunk metadata beyond the first text extraction baseline; see backlog 11.6.
+- propagate the advanced parser metadata through chunking, persistence, retrieval, and citation rendering; see backlog 11.6.
+- add deeper semantic/layout-aware extraction for PDFs, Office files, OCR, and source repositories where metadata alone is not enough for high-quality chunk boundaries; see backlog 11.6.
 
 ### E3. Chunking strategies
 
@@ -1269,20 +1292,15 @@ Completed production-hardening capabilities:
 
 ### 11.6 Advanced ingestion adapters
 
-Status: partially complete after the first PDF, DOCX, CSV, XLSX, PPTX, and image OCR text extraction baselines.
+Status: completed baseline for advanced parser metadata; deeper code/chunking propagation remains deferred.
 
-E2 established the ingestion pipeline, parser interface, parser registry, durable job records, job status APIs, and persisted document delete flow. Post-stabilization 18 added a first PDF text extraction adapter backed by optional `pdftotext`. Post-stabilization 19 added a first DOCX text extraction adapter backed by optional `libzip`. Post-stabilization 20 added first CSV and XLSX spreadsheet text extraction adapters backed by built-in CSV parsing and optional `libzip` + `pugixml` for XLSX. Post-stabilization 21 added a first PPTX presentation text extraction adapter backed by optional `libzip` + `pugixml`. Post-stabilization 22 added a first image OCR text extraction adapter backed by optional `tesseract`. The following ingestion capabilities are intentionally not complete and must not be considered closed:
+E2 established the ingestion pipeline, parser interface, parser registry, durable job records, job status APIs, and persisted document delete flow. Post-stabilization 18 added a first PDF text extraction adapter backed by optional `pdftotext`. Post-stabilization 19 added a first DOCX text extraction adapter backed by optional `libzip`. Post-stabilization 20 added first CSV and XLSX spreadsheet text extraction adapters backed by built-in CSV parsing and optional `libzip` + `pugixml` for XLSX. Post-stabilization 21 added a first PPTX presentation text extraction adapter backed by optional `libzip` + `pugixml`. Post-stabilization 22 added a first image OCR text extraction adapter backed by optional `tesseract`. The advanced metadata baseline now adds PDF diagnostics/attachments/outlines/page boxes, DOCX structure/properties, CSV/XLSX typed/formula/table metadata, PPTX notes/comments/media/layout metadata, and OCR/image dimensions/confidence/region metadata. The following ingestion capabilities are intentionally not complete and must not be considered closed:
 
-- Add richer PDF parsing with page numbers, document metadata, outlines, attachments, and parser diagnostics beyond plain extracted text.
-- Add richer DOCX parsing with headings, tables, footnotes/endnotes, comments, styles, document properties, and structure metadata beyond plain extracted text.
-- Add richer XLSX/CSV ingestion with formulas, merged cells, workbook properties, multiple table regions, formatting signals, and typed cell metadata beyond plain row text.
-- Add richer PPTX ingestion with slide titles, notes, comments, alt text, media captions, speaker metadata, and slide layout metadata beyond plain slide text.
-- Add richer image OCR ingestion with image dimensions, EXIF metadata, OCR confidence, page/region coordinates, detected language, captions, and parser diagnostics beyond plain OCR text.
 - Add source-code repository structure-aware chunking beyond extension-based file parsing.
 - Add AST-grade language-specific code chunkers/parsers for symbols, classes, methods, functions, and namespaces beyond the regex-based language-aware baseline.
 - Add exact tokenizer implementations for configured embedding models, including ONNX tokenizer limits, instead of relying only on whitespace-token estimates with configured token budgets.
-- Add richer page-aware PDF chunking after the PDF parser exposes document metadata, outlines, page boxes, and page-level diagnostics.
-- Add richer table-aware spreadsheet chunking after XLSX/CSV parser plugins expose ranges, headers, merged cells, formulas, and typed row/column metadata.
+- Add richer page-aware PDF chunking that consumes the exposed document metadata, outlines, page boxes, and page-level diagnostics.
+- Add richer table-aware spreadsheet chunking that consumes exposed ranges, headers, merged cells, formulas, and typed row/column metadata.
 - Extend parser-to-chunker metadata contracts so coordinates, confidence, layout regions, captions, and source offsets survive ingestion, retrieval, persistence, and citation rendering.
 - Add chunk quality tests for overlap boundaries, metadata preservation, duplicate/near-duplicate chunks, very small sections, very large sections, and mixed Markdown/code documents.
 - Add live progress streaming for background ingestion jobs beyond the current polling baseline.

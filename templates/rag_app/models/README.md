@@ -1,167 +1,129 @@
-# Embedding Models
+# Generated App Embedding Models
 
-You do not need to add anything here for the first run.
+This directory is for optional ONNX **embedding** models used by the generated RAG app. It is not for Ollama `.gguf` chat models.
 
-The generated application starts with lexical/TF-IDF retrieval:
+The app works without files in this directory because the default config uses TF-IDF:
 
 ```yaml
 rag:
   embedding:
     backend: tfidf
+    enable_fallback: true
 ```
 
-That mode works without ONNX, without embedding model files, and is the safest default.
+To enable semantic embeddings, install ONNX Runtime C++ SDK, add compatible model files, and switch `rag.embedding.backend` to `onnx`.
 
-## What ONNX Adds
-
-ONNX semantic retrieval lets the RAG engine compare meaning, not only matching words.
-To use it, the app needs two files:
+## Required Files
 
 ```text
 models/
-  semantic_model.onnx   # the neural embedding model
-  tokenizer.json        # the tokenizer vocabulary used by that model
+  semantic_model.onnx
+  tokenizer.json
 ```
 
-These files are not bundled by default because model size and licenses vary.
+or an auto-discovered subdirectory:
 
-## Compatibility Requirements
+```text
+models/mini-encoder/
+  model.onnx
+  tokenizer.json
+```
 
-Current `qornix_rag` ONNX support is intentionally narrow. Do not assume that every ONNX embedding model will work.
+## Recommended Setup
 
-The current loader expects:
+From the generated app root:
 
-- a `tokenizer.json` file with `model.vocab`;
-- special tokens such as `[UNK]`, `[CLS]`, `[SEP]`, `[PAD]` or compatible alternatives;
-- an ONNX model that accepts BERT-style integer inputs:
-  - `input_ids`;
-  - `attention_mask`;
-  - optionally `token_type_ids`;
-- a float tensor output shaped either `[1, sequence_length, hidden_size]` or `[1, hidden_size]`.
+```bash
+./download_onnx_model.sh
+```
 
-Models with custom tokenizers, sentence-transformers pooling logic outside the ONNX graph, image inputs, or non-BERT input names may need conversion or code changes.
+The helper downloads a default BERT-style text embedding model and can update `config.yaml`.
 
-## How To Enable ONNX Retrieval
+Default source:
 
-1. Get compatible model files.
+```text
+Hugging Face repo: Xenova/all-MiniLM-L6-v2
+Model file:        onnx/model.onnx
+Tokenizer file:    tokenizer.json
+License:           apache-2.0
+```
 
-   Recommended one-command setup from the generated app root:
+Review the model license before product use.
 
-   ```bash
-   ./download_onnx_model.sh
-   ```
+## Manual Download
 
-   The script downloads the default model, writes:
+```bash
+python3 -m pip install --user huggingface_hub
+huggingface-cli download Xenova/all-MiniLM-L6-v2 \
+  --include "onnx/model.onnx" "tokenizer.json" \
+  --local-dir models/downloaded
+cp models/downloaded/onnx/model.onnx models/semantic_model.onnx
+cp models/downloaded/tokenizer.json models/tokenizer.json
+```
 
-   ```text
-   models/semantic_model.onnx
-   models/tokenizer.json
-   ```
+## ONNX Runtime C++ SDK
 
-   and updates `config.yaml` to use `rag.embedding.backend: onnx`.
+The Python `onnxruntime` package is not enough for the C++ build. Install the C++ SDK and expose it to CMake, for example:
 
-   Script options:
+```bash
+cd /tmp
+ORT_VERSION=1.24.4
+wget https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz
+tar -xzf onnxruntime-linux-x64-${ORT_VERSION}.tgz
+sudo mkdir -p /opt/onnxruntime
+sudo cp -r onnxruntime-linux-x64-${ORT_VERSION}/* /opt/onnxruntime/
+echo /opt/onnxruntime/lib | sudo tee /etc/ld.so.conf.d/onnxruntime.conf
+sudo ldconfig
+```
 
-   ```bash
-   ./download_onnx_model.sh --help
-   ./download_onnx_model.sh --dry-run
-   ./download_onnx_model.sh --force
-   ./download_onnx_model.sh --no-config-update
-   ```
+Then rebuild the generated app:
 
-   The default download source is:
+```bash
+rm -rf build
+cmake -S . -B build \
+  -DONNXRUNTIME_ROOT=/opt/onnxruntime \
+  -DCMAKE_PREFIX_PATH=/opt/onnxruntime
+cmake --build build -j$(nproc)
+```
 
-   ```text
-   Hugging Face repo: Xenova/all-MiniLM-L6-v2
-   Model file:        onnx/model.onnx
-   Tokenizer file:    tokenizer.json
-   License:           apache-2.0
-   ```
+If CMake says `ONNX Runtime not found`, the app will keep working with TF-IDF fallback but ONNX embeddings will not be active.
 
-   Manual options are below.
+## Config Example
 
-   Option A: download an existing ONNX export from Hugging Face Hub.
+```yaml
+rag:
+  embedding:
+    backend: onnx
+    active_model_id: local-semantic-v1
+    models_dir: models
+    auto_discover_models: true
+    validate_model_files: true
+    enable_fallback: true
+    registry:
+      local-semantic-v1:
+        backend: onnx
+        name: all-MiniLM-L6-v2 local ONNX
+        model_path: models/semantic_model.onnx
+        tokenizer_path: models/tokenizer.json
+        tokenizer_type: WordPiece
+        pooling: mean
+        dimension: 384
+        max_seq_len: 256
+        onnx_threads: 2
+        normalize_embeddings: true
+        lowercase_tokens: true
+```
 
-   ```bash
-   python3 -m pip install --user huggingface_hub
-   huggingface-cli download <model-repo-id> \
-     --include "*.onnx" "tokenizer.json" \
-     --local-dir models/downloaded
-   ```
+Check diagnostics:
 
-   Then copy or rename the files:
+```text
+http://127.0.0.1:8008/api/rag/embedding/models
+http://127.0.0.1:8008/api/rag/health
+```
 
-   ```bash
-   cp models/downloaded/*.onnx models/semantic_model.onnx
-   cp models/downloaded/tokenizer.json models/tokenizer.json
-   ```
+More details are in the framework docs:
 
-   Option B: export a Hugging Face text encoder model yourself with Optimum.
-
-   ```bash
-   python3 -m pip install --user "optimum[onnxruntime]" transformers
-   optimum-cli export onnx \
-     --model <model-repo-id> \
-     --task feature-extraction \
-     models/exported
-   cp models/exported/*.onnx models/semantic_model.onnx
-   cp models/exported/tokenizer.json models/tokenizer.json
-   ```
-
-   Use a text encoder / embedding model. Do not use Ollama models, `.gguf` files,
-   chat LLM weights, image models, or arbitrary ONNX files here.
-
-   Official references:
-
-   - Hugging Face Hub: https://huggingface.co/models
-   - Optimum ONNX export: https://huggingface.co/docs/optimum/exporters/onnx/usage_guides/export_a_model
-   - ONNX Runtime install: https://onnxruntime.ai/docs/install/
-
-2. Build the app on a machine where ONNX Runtime development files are available.
-   During CMake configure you should not see the warning:
-
-   ```text
-   ONNX Runtime not found. Build will use TF-IDF fallback.
-   ```
-
-3. Put compatible model files in this directory:
-
-   ```text
-   models/semantic_model.onnx
-   models/tokenizer.json
-   ```
-
-4. Edit `config.yaml`:
-
-   ```yaml
-   rag:
-     embedding:
-       active_model_id: local-semantic-v1
-       registry:
-         local-semantic-v1:
-           backend: onnx
-           model_path: models/semantic_model.onnx
-           tokenizer_path: models/tokenizer.json
-           max_seq_len: 512
-           onnx_threads: 2
-           normalize_embeddings: true
-           enable_fallback: true
-           license: model-specific
-           source: local
-   ```
-
-5. Restart the application.
-
-6. Open the health endpoint:
-
-   ```text
-   http://127.0.0.1:8008/api/rag/health
-   ```
-
-   Check `rag.embedding_backend`. If ONNX cannot be initialized and fallback is enabled, the app continues with TF-IDF.
-
-## Practical Advice
-
-Keep `enable_fallback: true` while testing a new model. After you confirm that ONNX loads correctly, you can decide whether failures should stop startup by setting it to `false`.
-
-If you are not sure which embedding model is compatible, leave `backend: tfidf` for now. A proper model download/conversion workflow is planned as a later production RAG feature.
+```text
+qornix_rag/doc/FULL_RAG_GUIDE.md
+qornix_rag/models/README.md
+```

@@ -38,6 +38,7 @@
 #include <functional>
 #include <algorithm>
 #include <cctype>
+#include <optional>
 
 
 // Global variables
@@ -75,7 +76,7 @@ void print_usage(const char* program) {
     std::cout << "\nОпции:" << std::endl;
     std::cout << "  --port, -p <port>     Порт сервера (по умолчанию: 8081)" << std::endl;
     std::cout << "  --address, -a <addr>  Адрес (по умолчанию: 127.0.0.1)" << std::endl;
-    std::cout << "  --project, -P <path>  Путь к проекту для индексации" << std::endl;
+    std::cout << "  --scan-path, -S <path> Путь к директории для индексации (опционально)" << std::endl;
     std::cout << "  --config, -c <path>   Путь к config.yaml (по умолчанию: ./config.yaml)" << std::endl;
     std::cout << "  --help, -h            Показать эту справку" << std::endl;
 }
@@ -155,13 +156,13 @@ int main(int argc, char* argv[]) {
     // Default settings
     std::string address = "127.0.0.1";
     int port = 8081;
-    std::string project_path = ".";
+    std::optional<std::string> scan_path;
     std::string config_path = "config.yaml";
     RagConfig rag_runtime_config;
     bool auto_index_on_startup = true;
     bool cli_port_set = false;
     bool cli_address_set = false;
-    bool cli_project_set = false;
+    bool cli_scan_path_set = false;
     bool cli_config_set = false;
 
     // Parse command-line arguments
@@ -184,10 +185,10 @@ int main(int argc, char* argv[]) {
                 cli_address_set = true;
             }
         }
-        else if (arg == "--project" || arg == "-P") {
+        else if (arg == "--scan-path" || arg == "-S") {
             if (i + 1 < argc) {
-                project_path = argv[++i];
-                cli_project_set = true;
+                scan_path = argv[++i];
+                cli_scan_path_set = true;
             }
         }
         else if (arg == "--config" || arg == "-c") {
@@ -214,10 +215,10 @@ int main(int argc, char* argv[]) {
     } else {
         rag_runtime_config.port = port;
     }
-    if (!cli_project_set) {
-        project_path = rag_runtime_config.project_path;
+    if (!cli_scan_path_set) {
+        scan_path = rag_runtime_config.scan_path;
     } else {
-        rag_runtime_config.project_path = project_path;
+        rag_runtime_config.scan_path = scan_path;
     }
     auto_index_on_startup = rag_runtime_config.auto_index_on_startup;
     RagEngineConfig engine_config = rag_runtime_config.engine;
@@ -236,8 +237,10 @@ int main(int argc, char* argv[]) {
     if (address == "0.0.0.0" || address == "::") {
         std::cout << "⚠️ Сервер слушает все сетевые интерфейсы. Для локального режима используйте 127.0.0.1." << std::endl;
     }
-    std::cout << "📂 Project path: " << project_path << std::endl;
-    std::cout << "🔎 Auto-index on startup: " << (auto_index_on_startup ? "enabled" : "disabled") << std::endl;
+    std::cout << "📂 Scan path: " << (scan_path ? *scan_path : std::string("<not configured>")) << std::endl;
+    std::cout << "🔎 Auto-index on startup: "
+              << ((auto_index_on_startup && scan_path) ? "enabled" : "disabled")
+              << std::endl;
     if (resolved_config_path.empty() && cli_config_set) {
         std::cout << "⚠️ Конфиг не найден по пути: " << config_path << std::endl;
     }
@@ -255,10 +258,10 @@ int main(int argc, char* argv[]) {
         std::cout << "📐 Embedding dimension: " << embedding_info.dimension << std::endl;
         std::cout << "🧾 Embedding status: " << embedding_info.status << std::endl;
 
-        if (auto_index_on_startup) {
+        if (auto_index_on_startup && scan_path) {
             // Automatic indexing on startup is kept for the local standalone workflow.
-            std::cout << "📚 Индексация проекта..." << std::endl;
-            g_rag_engine->index_project(project_path);
+            std::cout << "📚 Индексация директории..." << std::endl;
+            g_rag_engine->index_project(*scan_path);
 
             if (!g_running.load()) {
                 std::cout << "\n🛑 Получен сигнал остановки" << std::endl;
@@ -271,7 +274,7 @@ int main(int argc, char* argv[]) {
             std::cout << "   Строк кода: " << stats.total_lines << std::endl;
             std::cout << "   Размер: " << (stats.total_size_bytes / 1024) << " KB" << std::endl;
         } else {
-            std::cout << "⏭️ Автоиндексация отключена; используйте web UI или POST /api/index." << std::endl;
+            std::cout << "⏭️ Автоиндексация отключена; задайте indexing.scan_path/--scan-path или используйте upload/API/QA." << std::endl;
         }
         std::cout << std::endl;
 
@@ -385,7 +388,8 @@ int main(int argc, char* argv[]) {
                             rag_runtime_config.routes.expose_root_ui,
                             rag_runtime_config.routes.ui_path,
                             rag_runtime_config.routes.api_prefix,
-                            rag_runtime_config.security
+                            rag_runtime_config.security,
+                            rag_runtime_config.upload
                         }
         );
 

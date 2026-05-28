@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 https://github.com/hairetdin
+ *
+ * This file is part of Qornix project.
+ * Licensed under GNU GPL v3.0 (see LICENSE file) or commercial license.
+ */
+
 #pragma once
 
 #include "data_source.h"
@@ -75,6 +82,19 @@ public:
         std::string category;
     };
 
+    struct QAHistoryEntry {
+        std::string pair_id;
+        std::int64_t version = 0;
+        std::string action;
+        std::string question;
+        std::string answer;
+        std::string category;
+        std::string aliases;
+        std::string metadata;
+        std::string changed_at;
+        std::string source_id;
+    };
+
     explicit SQLiteSource(Config config);
     ~SQLiteSource() override;
 
@@ -109,6 +129,8 @@ public:
     QAListResult listQAPairs(const QAListOptions& options) const;
     std::vector<QASuggestion> suggestQAPairs(const std::string& query, size_t limit = 10) const;
     std::vector<std::string> listQACategories(const std::string& query = "", size_t limit = 50) const;
+    std::vector<std::string> listQATags(const std::string& query = "", size_t limit = 50) const;
+    std::vector<QAHistoryEntry> getQAPairHistory(const std::string& id, size_t limit = 25) const;
 
     // Migration
     bool migrate();
@@ -150,6 +172,7 @@ private:
     Config config_;
 #if QORNIX_HAS_SQLITE
     sqlite3* db_ = nullptr;
+    bool qa_fts_available_ = false;
 #endif
     mutable std::mutex mutex_;
 
@@ -168,6 +191,25 @@ private:
     bool bindInt64(sqlite3_stmt* stmt, int index, std::int64_t value) const;
     bool bindFloatVector(sqlite3_stmt* stmt, int index, const std::vector<float>& values) const;
     std::vector<float> columnFloatVector(sqlite3_stmt* stmt, int index) const;
+    bool initializeQAAuxiliaryTables();
+    bool rebuildQAAuxiliaryTables();
+    bool syncQAAuxiliaryRows(const std::string& id,
+                             const std::string& question,
+                             const std::string& answer,
+                             const std::string& category,
+                             const std::string& aliases,
+                             const std::string& metadata);
+    bool removeQAAuxiliaryRows(const std::string& id);
+    bool insertQAHistory(const std::string& id,
+                         std::int64_t version,
+                         const std::string& action,
+                         const std::string& question,
+                         const std::string& answer,
+                         const std::string& category,
+                         const std::string& aliases,
+                         const std::string& metadata);
+    std::string buildQaFtsQuery(const std::string& query) const;
+    QAHistoryEntry rowToQAHistoryEntry(sqlite3_stmt* stmt) const;
     size_t countTableRows(const std::string& table, const std::string& source_id) const;
     IngestionJobRecord rowToIngestionJob(sqlite3_stmt* stmt) const;
     QASource::QAPair rowToQAPair(sqlite3_stmt* stmt) const;

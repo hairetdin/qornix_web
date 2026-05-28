@@ -227,7 +227,7 @@ if [[ "${RUN_SMOKE}" == "true" ]]; then
     echo "Running portable smoke test..."
     "${BUNDLE_DIR}/run.sh" --help >/dev/null
     if command -v curl >/dev/null 2>&1; then
-        "${BUNDLE_DIR}/run.sh" --port 8092 --project "${BUNDLE_DIR}/knowledge_base" >/tmp/qornix_rag_portable_smoke.log 2>&1 &
+        "${BUNDLE_DIR}/run.sh" --port 8092 --scan-path "${BUNDLE_DIR}/knowledge_base" >/tmp/qornix_rag_portable_smoke.log 2>&1 &
         smoke_pid=$!
         cleanup_smoke() {
             kill "${smoke_pid}" >/dev/null 2>&1 || true
@@ -256,7 +256,7 @@ if [[ "${RUN_SMOKE}" == "true" ]]; then
         cleanup_smoke
         trap - EXIT
     else
-        timeout 8s "${BUNDLE_DIR}/run.sh" --port 8092 --project "${BUNDLE_DIR}/knowledge_base" >/tmp/qornix_rag_portable_smoke.log 2>&1 || status=$?
+        timeout 8s "${BUNDLE_DIR}/run.sh" --port 8092 --scan-path "${BUNDLE_DIR}/knowledge_base" >/tmp/qornix_rag_portable_smoke.log 2>&1 || status=$?
         status="${status:-0}"
         if [[ "${status}" != "0" && "${status}" != "124" ]]; then
             cat /tmp/qornix_rag_portable_smoke.log >&2 || true

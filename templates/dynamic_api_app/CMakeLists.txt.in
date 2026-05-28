@@ -12,14 +12,19 @@ set(QORNIX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(QORNIX_ENABLE_ORM ON CACHE BOOL "" FORCE)
 set(QORNIX_ENABLE_ASYNC_DB ON CACHE BOOL "" FORCE)
 set(QORNIX_BUILD_DYNAMIC_API ON CACHE BOOL "" FORCE)
+@WITH_RAG_PROJECT_OPTION@
+set(QORNIX_BUILD_RAG @WITH_RAG_CMAKE_BOOL@ CACHE BOOL "Build qornix_rag reusable module" FORCE)
+set(QORNIX_BUILD_RAG_STANDALONE OFF CACHE BOOL "Build standalone qornix_rag executable" FORCE)
+set(QORNIX_BUILD_RAG_ROUTE_EXTENSION OFF CACHE BOOL "Build qornix_rag dynamic route extension" FORCE)
 
 add_subdirectory("${QORNIX_WEB_ROOT}" "${CMAKE_BINARY_DIR}/_deps/qornix_web")
 
 add_executable(@PROJECT_NAME@ main.cpp)
-target_link_libraries(@PROJECT_NAME@ PRIVATE qornix::web_core qornix::dynamic_api)
+target_link_libraries(@PROJECT_NAME@ PRIVATE qornix::web_core qornix::dynamic_api @WITH_RAG_LINK_LIB@)
 target_include_directories(@PROJECT_NAME@ PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(@PROJECT_NAME@ PRIVATE
     @PROJECT_NAME_UPPER@_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    @WITH_RAG_COMPILE_DEF@
 )
 
 set(@PROJECT_NAME_UPPER@_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy/@PROJECT_NAME@" CACHE PATH "Deploy directory for @PROJECT_NAME@")
@@ -35,6 +40,7 @@ add_custom_target(@PROJECT_NAME@_deploy ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/static" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/static"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/schema" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/schema"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/doc" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/doc"
+@WITH_RAG_POST_BUILD@
     DEPENDS @PROJECT_NAME@
     COMMENT "Assembling portable deploy bundle: ${@PROJECT_NAME_UPPER@_DEPLOY_DIR}"
 )
@@ -45,3 +51,4 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/templates" DESTINATION .)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/static" DESTINATION .)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/schema" DESTINATION .)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/doc" DESTINATION .)
+@WITH_RAG_INSTALL@

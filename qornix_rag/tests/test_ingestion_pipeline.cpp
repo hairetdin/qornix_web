@@ -268,8 +268,15 @@ static fs::path make_fixture() {
         << "<style>.hidden{display:none}</style></head><body>"
         << "<h1>Welcome</h1><p>Use <strong>RAG</strong> routes.</p>"
         << "<script>ignored()</script></body></html>";
+    std::ofstream large_html(dir / "large.html");
+    large_html << "<!doctype html><html><head><TITLE>Large HTML Fixture</TITLE>"
+               << "<style>" << std::string(65536, 'x') << "</style></head><body>";
+    for (int i = 0; i < 2000; ++i) {
+        large_html << "<div><span>Visible RAG block " << i << "</span></div>";
+    }
+    large_html << "<script>" << std::string(65536, 'y') << "</script></body></html>";
     std::ofstream(dir / "notes.bin", std::ios::binary) << std::string("abc\0def", 7);
-    std::ofstream(dir / "table.csv") << "name,description,score\nalpha,\"first line\nsecond line\",10\nbeta,\"quoted \"\"value\"\"\",20\n";
+    std::ofstream(dir / "table.csv") << "name,description,score\nalpha,\"first line\nsecond line\",10\nbeta,\"quoted \"\"value\"\"\",20\ngamma,formula,=1+2\n";
     write_simple_pgm(dir / "ocr_sample.pgm");
     write_simple_pdf(dir / "guide.pdf");
     if (zip_available()) {
@@ -290,7 +297,7 @@ int main() {
 
     IngestionPipeline::Config config;
     config.root_path = fixture.string();
-    config.max_file_size_kb = 64;
+    config.max_file_size_kb = 256;
     IngestionPipeline pipeline(config);
 
     auto md = pipeline.detectFileType((fixture / "README.md").string());
@@ -350,7 +357,7 @@ int main() {
 
     auto result = pipeline.ingestRoot();
     assert(result.files_seen >= 3);
-    const auto expected_without_optional_ocr = 4
+    const auto expected_without_optional_ocr = 5
            + (pdftotext_available() ? 1 : 0)
            + (docx_parser_available() ? 1 : 0)
            + (xlsx_parser_available() ? 1 : 0)
@@ -363,6 +370,7 @@ int main() {
     bool found_readme = false;
     bool found_cpp = false;
     bool found_html = false;
+    bool found_large_html = false;
     bool found_pdf = false;
     bool found_docx = false;
     bool found_csv = false;
@@ -389,13 +397,25 @@ int main() {
             assert(doc.content.find("Welcome") != std::string::npos);
             assert(doc.content.find("RAG") != std::string::npos);
         }
+        if (doc.relative_path == "large.html") {
+            found_large_html = true;
+            assert(doc.document_type == "html");
+            assert(doc.metadata.at("ingestion_parser") == "html");
+            assert(doc.metadata.at("title") == "Large HTML Fixture");
+            assert(doc.content.find("Visible RAG block 1999") != std::string::npos);
+            assert(doc.content.find(std::string(128, 'x')) == std::string::npos);
+            assert(doc.content.find(std::string(128, 'y')) == std::string::npos);
+        }
         if (doc.relative_path == "guide.pdf") {
             found_pdf = true;
             assert(doc.document_type == "pdf");
             assert(doc.mime_type == "application/pdf");
             assert(doc.metadata.at("ingestion_parser") == "pdf_pdftotext");
             assert(doc.metadata.at("pdf_text_extractor") == "pdftotext");
-            assert(doc.metadata.at("structure_contract") == "pdf_pages_v1");
+            assert(doc.metadata.at("structure_contract") == "pdf_pages_v2");
+            assert(doc.metadata.at("metadata_contract") == "advanced_ingestion_metadata_v1");
+            assert(doc.metadata.at("pdf_text_extraction_status") == "ok");
+            assert(doc.metadata.count("pdf_info_available") > 0);
             assert(doc.metadata.at("pdf_page_count") == "1");
             assert(doc.content.find("PDF Parser Smoke") != std::string::npos);
             assert(doc.content.find("Standalone RAG ingestion") != std::string::npos);
@@ -406,6 +426,14 @@ int main() {
             assert(doc.mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
             assert(doc.metadata.at("ingestion_parser") == "docx_libzip");
             assert(doc.metadata.at("docx_archive_backend") == "libzip");
+            assert(doc.metadata.at("metadata_contract") == "advanced_ingestion_metadata_v1");
+#if QORNIX_HAS_OPENXML
+            assert(doc.metadata.at("docx_rich_metadata_available") == "true");
+            assert(std::stoul(doc.metadata.at("docx_paragraph_count")) >= 2);
+            assert(doc.metadata.at("structure_contract") == "docx_blocks_v1");
+#else
+            assert(doc.metadata.at("docx_rich_metadata_available") == "false");
+#endif
             assert(doc.content.find("DOCX Parser Smoke") != std::string::npos);
             assert(doc.content.find("Standalone RAG document ingestion") != std::string::npos);
         }
@@ -415,9 +443,13 @@ int main() {
             assert(doc.mime_type == "text/csv");
             assert(doc.metadata.at("ingestion_parser") == "csv");
             assert(doc.metadata.at("csv_delimiter") == ",");
-            assert(doc.metadata.at("csv_row_count") == "3");
+            assert(doc.metadata.at("csv_row_count") == "4");
             assert(doc.metadata.at("csv_column_count") == "3");
-            assert(doc.metadata.at("structure_contract") == "spreadsheet_rows_v1");
+            assert(doc.metadata.at("structure_contract") == "spreadsheet_rows_v2");
+            assert(doc.metadata.at("metadata_contract") == "advanced_ingestion_metadata_v1");
+            assert(doc.metadata.at("csv_has_header") == "true");
+            assert(doc.metadata.at("csv_formula_cell_count") == "1");
+            assert(doc.metadata.at("csv_column_types") == "A:text,B:text,C:mixed");
             assert(doc.content.find("first line second line") != std::string::npos);
             assert(doc.content.find("quoted \"value\"") != std::string::npos);
         }
@@ -428,11 +460,15 @@ int main() {
             assert(doc.metadata.at("ingestion_parser") == "xlsx_libzip_pugixml");
             assert(doc.metadata.at("xlsx_archive_backend") == "libzip");
             assert(doc.metadata.at("xlsx_xml_parser") == "pugixml");
+            assert(doc.metadata.at("metadata_contract") == "advanced_ingestion_metadata_v1");
             assert(doc.metadata.at("xlsx_sheet_count") == "1");
             assert(doc.metadata.at("xlsx_row_count") == "3");
             assert(doc.metadata.at("xlsx_cell_count") == "6");
             assert(doc.metadata.at("xlsx_sheet_names") == "Products");
-            assert(doc.metadata.at("structure_contract") == "spreadsheet_rows_v1");
+            assert(doc.metadata.at("xlsx_formula_count") == "0");
+            assert(doc.metadata.at("xlsx_merged_cell_count") == "0");
+            assert(doc.metadata.at("xlsx_table_count") == "0");
+            assert(doc.metadata.at("structure_contract") == "spreadsheet_rows_v2");
             assert(doc.content.find("Widget") != std::string::npos);
             assert(doc.content.find("Gadget") != std::string::npos);
         }
@@ -443,8 +479,12 @@ int main() {
             assert(doc.metadata.at("ingestion_parser") == "pptx_libzip_pugixml");
             assert(doc.metadata.at("pptx_archive_backend") == "libzip");
             assert(doc.metadata.at("pptx_xml_parser") == "pugixml");
+            assert(doc.metadata.at("metadata_contract") == "advanced_ingestion_metadata_v1");
             assert(doc.metadata.at("pptx_slide_count") == "2");
             assert(doc.metadata.at("pptx_text_run_count") == "3");
+            assert(doc.metadata.at("pptx_notes_slide_count") == "0");
+            assert(doc.metadata.at("pptx_comments_count") == "0");
+            assert(doc.metadata.at("pptx_media_count") == "0");
             assert(doc.content.find("PPTX Parser Smoke") != std::string::npos);
             assert(doc.content.find("Standalone RAG presentation ingestion") != std::string::npos);
             assert(doc.content.find("Second slide content") != std::string::npos);
@@ -455,8 +495,12 @@ int main() {
             assert(doc.mime_type == "image/x-portable-graymap");
             assert(doc.metadata.at("ingestion_parser") == "image_tesseract_ocr");
             assert(doc.metadata.at("image_ocr_engine") == "tesseract");
-            assert(doc.metadata.at("structure_contract") == "ocr_regions_v1");
-            assert(doc.metadata.at("ocr_region_0") == "full_image");
+            assert(doc.metadata.at("metadata_contract") == "advanced_ingestion_metadata_v1");
+            assert(doc.metadata.at("structure_contract") == "ocr_regions_v2");
+            assert(doc.metadata.count("ocr_region_0") > 0);
+            assert(doc.metadata.at("image_dimensions") == "228x132");
+            assert(doc.metadata.at("image_width") == "228");
+            assert(doc.metadata.at("image_height") == "132");
             assert(!doc.content.empty());
         }
         assert(doc.hash.size() > 0);
@@ -465,6 +509,7 @@ int main() {
     assert(found_readme);
     assert(found_cpp);
     assert(found_html);
+    assert(found_large_html);
     assert(found_pdf == pdftotext_available());
     assert(found_docx == docx_parser_available());
     assert(found_csv);

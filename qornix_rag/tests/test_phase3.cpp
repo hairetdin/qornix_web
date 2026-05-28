@@ -411,6 +411,21 @@ void test_cache_factory() {
     auto result = memory_cache->get("factory_key");
     ASSERT_TRUE(result.has_value(), "Factory-created cache should work");
     ASSERT_EQ("Factory test", result->answer, "Answer should match");
+
+    // Redis backend should gracefully fall back to memory when Redis is unavailable.
+    CacheConfig redis_config;
+    redis_config.enabled = true;
+    redis_config.backend = "redis";
+    redis_config.redis_host = "127.0.0.1";
+    redis_config.redis_port = 1; // normally closed; avoids requiring a live Redis service for unit tests
+    redis_config.max_size = 10;
+    redis_config.ttl = std::chrono::hours(1);
+
+    auto fallback_cache = create_cache(redis_config);
+    ASSERT_TRUE(fallback_cache != nullptr, "Redis unavailable should fall back to memory cache");
+    ASSERT_TRUE(fallback_cache->is_available(), "Fallback cache should be available");
+    ASSERT_TRUE(std::dynamic_pointer_cast<MemoryCache>(fallback_cache) != nullptr,
+                "Fallback backend should be MemoryCache");
 }
 
 // ============================================================================

@@ -1,10 +1,21 @@
 # Qornix RAG
 
-Qornix RAG is a local single-user wiki/RAG application for indexing a local project, maintaining QA knowledge, searching local context, and asking an LLM questions with retrieved sources.
+`qornix_rag` is a local-first RAG/wiki/search module for C++ projects and document collections. It can run as a standalone single-user application or as an embedded module inside a generated `qornix_web` application.
 
-Standalone mode is local-first: by default it binds to `127.0.0.1:8081`, uses `qornix_rag/config.yaml`, stores local runtime data under `qornix_rag/data/`, and serves the web UI from `qornix_rag/templates/rag_interface.html`.
+The current implementation includes document ingestion, parser metadata, structure-aware chunking, TF-IDF or ONNX embeddings, local/external vector stores, Xapian lexical indexing, hybrid retrieval, citations, QA/wiki persistence, upload UI/API, LLM provider diagnostics, analytics and feedback.
 
-## Quick Start
+Короткий русскоязычный FAQ по базовым вопросам проекта находится в [`../doc/WHAT_IS_QORNIX_RAG_RU.md`](../doc/WHAT_IS_QORNIX_RAG_RU.md), английская версия — в [`../doc/WHAT_IS_QORNIX_EN.md`](../doc/WHAT_IS_QORNIX_EN.md). Обзор только RAG-модуля находится в [`doc/OVERVIEW_RU.md`](doc/OVERVIEW_RU.md) и [`doc/OVERVIEW_EN.md`](doc/OVERVIEW_EN.md). Эти документы специально написаны так, чтобы RAG мог уверенно отвечать на вопросы вроде "что такое qornix_rag?", "what is qornix_rag?", "для чего нужен qornix_web?" и "what is RAG?".
+
+For the complete product guide, dependencies, models, databases and run profiles, start here:
+
+- [Full RAG guide](doc/FULL_RAG_GUIDE.md)
+- [Configuration reference](doc/CONFIG.md)
+- [API reference](doc/API.md)
+- [Standalone guide](doc/STANDALONE.md)
+- [qornix_web integration](doc/INTEGRATION_QORNIX_WEB.md)
+- [Embedding models guide](models/README.md)
+
+## Quick Start: Standalone
 
 From the repository root:
 
@@ -12,7 +23,7 @@ From the repository root:
 ./qornix_rag/run.sh
 ```
 
-Then open:
+Open:
 
 ```text
 http://localhost:8081
@@ -22,23 +33,127 @@ Useful variants:
 
 ```bash
 ./qornix_rag/run.sh --port 8082
-./qornix_rag/run.sh --project /path/to/project
-./qornix_rag/run.sh --address 127.0.0.1 --port 8081 --project /path/to/project
+./qornix_rag/run.sh --scan-path /path/to/project
+./qornix_rag/run.sh --address 127.0.0.1 --port 8081 --scan-path /path/to/project
 QORNIX_RAG_CONFIG=/path/to/config.yaml ./qornix_rag/run.sh
 ```
 
-Use `--address 0.0.0.0` only when you intentionally want network access.
+Without `indexing.scan_path` or `--scan-path`, standalone mode starts without scanning a directory. Uploads, API ingestion with an explicit `scan_path`, QA storage, and search/ask over already indexed data remain available.
 
-## Web UI
+Use `--address 0.0.0.0` only behind a trusted network/proxy/auth boundary. Standalone mode is designed as a local single-user application.
 
-The standalone UI has four main areas:
+## Quick Start: Generated RAG Application
 
-- `Ask`: asks the configured LLM using retrieved local context.
-- `Search`: searches indexed project files and QA entries.
-- `QA`: add, list, edit, delete, import/export, tag, filter, and page local QA/wiki entries.
-- `Sources / Health`: inspect index status, LLM status, sources, and diagnostics.
+Create a separate product-style app:
 
-If the LLM provider or model is unavailable, Ask falls back gracefully and the UI shows diagnostics, including the configured model and available provider models when the provider reports them.
+```bash
+./create_new_project.sh ../my_rag_app --template rag_app
+cd ../my_rag_app
+cmake -S . -B build
+cmake --build build -j$(nproc)
+./build/my_rag_app
+```
+
+Open:
+
+```text
+http://127.0.0.1:8008/
+http://127.0.0.1:8008/rag
+http://127.0.0.1:8008/api/rag/health
+```
+
+Generated apps keep runtime data in their own directory:
+
+```text
+config.yaml
+models/
+data/rag_kb.db
+data/uploads/
+knowledge_base/
+templates/rag_interface.html
+```
+
+The generated app does not use `qornix_rag/run.sh`; it links the reusable RAG module through `qornix::rag_extension`.
+
+## Main Features
+
+| Area | Current support |
+|---|---|
+| File ingestion | Code, text, Markdown, HTML, JSON/YAML/XML, CSV, PDF, DOCX, XLSX, PPTX, image OCR |
+| Upload | Secure multi-file upload UI/API, extension/MIME/size allowlists, upload delete flow |
+| Metadata | PDF pages, spreadsheet sheets/rows, PPTX slides/notes, DOCX headings/tables, OCR diagnostics, code symbols |
+| Chunking | Metadata-aware, token-budget-aware and source-aware chunks |
+| Retrieval | Hybrid HNSW/vector + language-aware Xapian, query expansion, multi-query retrieval, reranking, metadata filters |
+| Embeddings | TF-IDF fallback by default; optional ONNX Runtime semantic embeddings |
+| Vector stores | `local_hnsw` default; optional `faiss`, `qdrant`, `pgvector` |
+| LLM providers | Ollama default; OpenAI-compatible/vLLM/LM Studio style endpoints |
+| LLM response cache | In-process memory LRU cache by default or external Redis backend for shared production cache |
+| QA/wiki | SQLite-backed QA, tags, categories, duplicate checks, history, safe Markdown rendering |
+| Diagnostics | Health endpoint, Xapian language/stemming status, model registry, provider/model status, metrics, analytics, feedback |
+
+## Supported Documents
+
+| Format | Dependency |
+|---|---|
+| Source code, Markdown, text, JSON/YAML/XML, HTML, CSV | Built in |
+| PDF | `poppler-utils` / `pdftotext` |
+| DOCX | `libzip` |
+| XLSX/PPTX | `libzip` + `pugixml` |
+| Images/OCR | `tesseract-ocr` |
+
+Missing optional parser dependencies do not prevent startup; they are reported through ingestion diagnostics.
+
+
+## Operations And Metrics
+
+Health, diagnostics and Prometheus metrics are available in both standalone and generated-app modes:
+
+| Runtime | Health | Diagnostics | Metrics |
+|---|---|---|---|
+| Standalone | `/api/health` | `/api/admin/diagnostics` | `/api/metrics` |
+| Generated `rag_app` | `/api/rag/health` | `/api/rag/admin/diagnostics` | `/api/rag/metrics` |
+
+The Prometheus endpoint returns text exposition format and is implemented by the built-in in-process metrics collector. It covers LLM request counters, failures, durations, tokens, cache hits/misses/size, rate-limit rejections, batch counters and latest indexing file/line gauges.
+
+```bash
+curl -fsS http://127.0.0.1:8082/api/metrics
+```
+
+Protect diagnostics and metrics before exposing a generated app to a network.
+
+## Lightweight vs Full Mode
+
+Default lightweight mode works after a normal build:
+
+```yaml
+embedding:
+  backend: tfidf
+  enable_fallback: true
+
+vector_store:
+  backend: local_hnsw
+```
+
+This is enough for local search, upload, QA/wiki and Ask with an LLM. Repeated LLM answers are cached in an in-process memory LRU cache when `cache.enabled: true`.
+
+Full semantic mode adds ONNX Runtime and compatible embedding files:
+
+```yaml
+embedding:
+  backend: onnx
+  active_model_id: local-semantic-v1
+  models_dir: qornix_rag/models
+  auto_discover_models: true
+  enable_fallback: true
+```
+
+Use the helper when possible:
+
+```bash
+./qornix_rag/download_onnx_model.sh
+```
+
+See [Full RAG guide](doc/FULL_RAG_GUIDE.md) and [Embedding models guide](models/README.md) before enabling ONNX. Chat LLMs and embedding models are different artifacts: Ollama serves the chat model, while `qornix_rag/models/*.onnx` is used only for retrieval embeddings.
 
 ## Local LLM
 
@@ -46,151 +161,87 @@ The default config is prepared for Ollama:
 
 ```yaml
 llm:
-  api_url: "http://localhost:11434"
-  model: "llama3"
+  api_url: http://localhost:11434
+  model: llama3.2:3b
 ```
 
 Example setup:
 
 ```bash
-ollama pull llama3
+curl -fsSL https://ollama.com/install.sh | sh
 ollama serve
+ollama pull llama3.2:3b
 ./qornix_rag/run.sh
 ```
 
-If the configured model is missing, either pull it:
+If the configured model is missing, the UI reports `model_not_found` and shows provider models when the provider exposes them. Use exactly the model id shown by `ollama list`, for example `llama3:latest`.
 
-```bash
-ollama pull llama3
-```
-
-or change `llm.model` in `qornix_rag/config.yaml` to a model listed by the UI health diagnostics.
-
-## Retrieval Models
-
-A fresh `git clone` does not include large ONNX embedding model files. GitHub is not a good place to store those binaries, and model licenses vary.
-
-The default standalone config therefore uses TF-IDF retrieval:
-
-```yaml
-embedding:
-  backend: tfidf
-  enable_fallback: true
-```
-
-This is enough to run `./qornix_rag/run.sh`, index files, search, manage QA entries, and ask an LLM with retrieved context. It is lexical retrieval, not neural semantic retrieval.
-
-To enable ONNX semantic retrieval, add compatible files:
-
-```text
-qornix_rag/models/semantic_model.onnx
-qornix_rag/models/tokenizer.json
-```
-
-Recommended one-command setup:
-
-```bash
-./qornix_rag/download_onnx_model.sh
-```
-
-The script downloads a default BERT-style ONNX text embedding model from Hugging Face, saves it under `qornix_rag/models/`, writes an `embedding.registry` entry, and makes it active. Runtime model operations are exposed through `GET /api/embedding/models` and `POST /api/embedding/switch`; switching can reindex immediately with `{"model_id":"...","reindex":true,"force_reembed":true}`.
-
-Manual setup is also possible. See [Embedding models guide](models/README.md) for model sources, compatibility limits, and advanced options.
-
-## API Smoke
+## Upload And Search Smoke Test
 
 ```bash
 curl http://localhost:8081/api/health
-curl http://localhost:8081/api/sources
+
 curl -X POST http://localhost:8081/api/search \
   -H "Content-Type: application/json" \
   -d '{"query":"How does routing work?","top_k":5}'
+
 curl -X POST http://localhost:8081/api/ask \
   -H "Content-Type: application/json" \
   -d '{"question":"How does routing work?","top_k":5}'
 ```
 
-Reindex the current configured project:
+Upload through the UI **Upload** tab, or use the API:
+
+```bash
+curl -X POST http://localhost:8081/api/documents/upload \
+  -F "files=@README.md"
+```
+
+Reindex:
 
 ```bash
 curl -X POST http://localhost:8081/api/index \
   -H "Content-Type: application/json" \
-  -d '{}'
+  -d '{"scan_path":"/path/to/project"}'
 ```
 
 ## Portable Bundle
 
-Build a portable Linux x86_64 standalone bundle:
-
 ```bash
 ./qornix_rag/build_portable.sh --smoke --archive
-```
-
-Output:
-
-```text
-dist/qornix_rag-portable-linux-x86_64/
-dist/qornix_rag-portable-linux-x86_64.tar.gz
-```
-
-Run the bundle:
-
-```bash
 cd dist/qornix_rag-portable-linux-x86_64
 ./run.sh
 ```
 
-The portable config uses bundle-relative paths such as `models/...`, `data/rag_kb.db`, and `knowledge_base`. Startup auto-indexing is disabled by default so the bundle does not index itself.
-
-Full portable build/run documentation: [Portable bundle guide](doc/PORTABLE.md).
-
-## Documentation
-
-- [Standalone guide](doc/STANDALONE.md)
-- [Configuration reference](doc/CONFIG.md)
-- [API reference](doc/API.md)
-- [Portable bundle guide](doc/PORTABLE.md)
-- [qornix_web integration](doc/INTEGRATION_QORNIX_WEB.md)
-- [Migration from old code search UI](doc/MIGRATION_FROM_CODE_SEARCH_UI.md)
-
-Project planning documents are under `qornix_rag/doc/project_doc/`.
+Full portable documentation: [Portable bundle guide](doc/PORTABLE.md).
 
 ## Build Targets
-
-Current CMake targets:
 
 - `qornix_rag_core`: reusable RAG services and data sources.
 - `qornix_rag_http`: HTTP handlers and route registration.
 - `qornix_rag_extension`: qornix_web extension adapter.
 - `qornix_rag`: standalone executable.
 - `qornix_rag_route_extension`: optional dynamic route extension shared object.
+- `qornix_rag_vector_migrate`: vector snapshot migration helper.
 
-Manual standalone build:
+Manual build:
 
 ```bash
 cmake -S . -B build -DQORNIX_BUILD_RAG=ON
-cmake --build build --target qornix_rag
+cmake --build build --target qornix_rag -j$(nproc)
 ```
 
-Dynamic route extension build:
+## Documentation Map
 
-```bash
-cmake -S . -B build -DQORNIX_BUILD_RAG=ON -DQORNIX_BUILD_RAG_ROUTE_EXTENSION=ON
-cmake --build build --target qornix_rag_route_extension
-```
+- [Full RAG guide](doc/FULL_RAG_GUIDE.md) — capabilities, dependencies, models, databases and run profiles.
+- [Standalone guide](doc/STANDALONE.md) — local `run.sh` usage.
+- [Configuration reference](doc/CONFIG.md) — YAML keys and operational profiles.
+- [API reference](doc/API.md) — endpoint contract.
+- [Data sources](doc/DATA_SOURCES.md) — QA/wiki/source integration.
+- [Knowledge base](doc/KNOWLEDGE_BASE.md) — QA/wiki and Markdown KB usage.
+- [Portable bundle guide](doc/PORTABLE.md) — portable Linux bundle.
+- [qornix_web integration](doc/INTEGRATION_QORNIX_WEB.md) — embedded module integration.
+- [Generated rag_app template](../doc/rag_app_template.md) — separate product app template.
+- [Embedding models guide](models/README.md) — ONNX model compatibility and setup.
 
-## Not Yet Supported
-
-These are intentionally deferred beyond the standalone stabilization stage:
-
-- arbitrary binary document ingestion beyond the explicitly supported parser adapters;
-- richer image/OCR metadata beyond the first `tesseract` text baseline;
-- richer PPTX structure/metadata extraction beyond the first presentation text baseline;
-- richer XLSX/CSV table structure and chunk metadata beyond the first spreadsheet text baseline;
-- richer DOCX structure/metadata extraction beyond the first `libzip` text baseline;
-- page-aware PDF chunking and PDF metadata extraction beyond the first `pdftotext` text baseline;
-- production vector store;
-- multi-user workspaces;
-- authentication/RBAC for standalone mode;
-- cloud deployment hardening;
-- advanced reranking and evaluation pipelines.
+Project planning documents are under `qornix_rag/doc/project_doc/`.

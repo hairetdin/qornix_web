@@ -74,7 +74,7 @@ struct CacheConfig {
     size_t max_size = 1000;          // maximum number of cached entries
     std::chrono::seconds ttl = std::chrono::hours(1); // default TTL
 
-    // Redis backend settings (optional)
+    // Redis backend settings (optional external backend)
     std::string redis_host = "127.0.0.1";
     int redis_port = 6379;
     int redis_db = 0;
@@ -110,6 +110,9 @@ public:
 
     // Check if cache is available
     virtual bool is_available() const = 0;
+
+    // Human-readable backend name for diagnostics
+    virtual std::string backend_name() const = 0;
 };
 
 // ============================================================================
@@ -166,6 +169,7 @@ public:
     void clear() override;
     CacheStats get_stats() const override;
     bool is_available() const override { return true; }
+    std::string backend_name() const override { return "memory"; }
 };
 
 // ============================================================================
@@ -174,8 +178,8 @@ public:
 
 class RedisCache : public ICache {
 private:
-    // We use a simple TCP connection approach (no hiredis dependency)
-    // If hiredis is available, we'll use it; otherwise, fallback to memory
+    // Lightweight Redis RESP client over TCP. No hiredis dependency is required.
+    // If Redis is unavailable at startup/runtime, create_cache() falls back to memory.
     struct RedisConnection;
     std::unique_ptr<RedisConnection> connection_;
     CacheConfig config_;
@@ -201,6 +205,7 @@ public:
     void clear() override;
     CacheStats get_stats() const override;
     bool is_available() const override { return connected_.load(); }
+    std::string backend_name() const override { return "redis"; }
 };
 
 // ============================================================================

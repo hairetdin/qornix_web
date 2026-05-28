@@ -88,6 +88,14 @@ int main() {
         }
     }
     assert(saw_symbol_name);
+    bool saw_symbol_scope = false;
+    for (const auto& chunk : code_chunks) {
+        if (chunk.metadata.find("chunk_symbol_scope") != chunk.metadata.end() &&
+            chunk.metadata.at("chunk_symbol_scope") == "class:Worker") {
+            saw_symbol_scope = true;
+        }
+    }
+    assert(saw_symbol_scope);
 
     Document pdf;
     pdf.path = "/tmp/manual.pdf";
@@ -142,6 +150,48 @@ int main() {
     assert(ocr_chunks.front().metadata.at("chunk_strategy") == "image_ocr_region");
     assert(ocr_chunks.front().metadata.at("chunk_ocr_region") == "full_image");
     assert(ocr_chunks.front().metadata.at("chunk_ocr_caption") == "Scanned label");
+
+
+    Document docx;
+    docx.path = "/tmp/report.docx";
+    docx.relative_path = "report.docx";
+    docx.type = "docx";
+    docx.language = "DOCX";
+    docx.metadata["structure_contract"] = "docx_blocks_v1";
+    docx.content = "Heading: Overview\n" + repeated_words("overview", 12) +
+                   "\nHeading: Details\n" + repeated_words("details", 12);
+
+    auto docx_chunks = chunker.chunkDocument(docx);
+    assert(docx_chunks.size() >= 2);
+    bool saw_docx_heading = false;
+    for (const auto& chunk : docx_chunks) {
+        assert(chunk.metadata.at("chunk_strategy") == "docx_heading");
+        if (chunk.metadata.find("chunk_heading") != chunk.metadata.end() &&
+            chunk.metadata.at("chunk_heading") == "Details") {
+            saw_docx_heading = true;
+        }
+    }
+    assert(saw_docx_heading);
+
+    Document pptx;
+    pptx.path = "/tmp/deck.pptx";
+    pptx.relative_path = "deck.pptx";
+    pptx.type = "pptx";
+    pptx.language = "PPTX";
+    pptx.metadata["pptx_slide_count"] = "2";
+    pptx.content = "Slide 1: intro agenda\nSlide 1 notes: speaker note\nSlide 2: roadmap implementation\n";
+
+    auto pptx_chunks = chunker.chunkDocument(pptx);
+    assert(pptx_chunks.size() >= 2);
+    bool saw_slide_2 = false;
+    for (const auto& chunk : pptx_chunks) {
+        assert(chunk.metadata.at("chunk_strategy") == "pptx_slide");
+        if (chunk.metadata.find("chunk_slide") != chunk.metadata.end() &&
+            chunk.metadata.at("chunk_slide") == "2") {
+            saw_slide_2 = true;
+        }
+    }
+    assert(saw_slide_2);
 
     Document tokenizer_limited = plain;
     tokenizer_limited.metadata["tokenizer_max_tokens"] = "8";

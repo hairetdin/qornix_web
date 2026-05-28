@@ -26,6 +26,9 @@ void RagExtension::initialize(DIContainer& container) {
     std::cout << "  Config source: " << runtime_config_.config_source << std::endl;
     std::cout << "  Route UI: " << runtime_config_.routes.ui_path << std::endl;
     std::cout << "  Route API prefix: " << runtime_config_.routes.api_prefix << std::endl;
+    std::cout << "  Scan path: "
+              << (runtime_config_.scan_path ? *runtime_config_.scan_path : std::string("<not configured>"))
+              << std::endl;
     std::cout << "  LLM: "
               << (runtime_config_.llm.enabled ? runtime_config_.llm.model : std::string("disabled"))
               << " @ " << runtime_config_.llm.api_url << std::endl;
@@ -103,8 +106,12 @@ void RagExtension::initialize(DIContainer& container) {
         rag_engine_->addDataSource(source);
     }
 
-    // Index all sources
-    reindex();
+    if (runtime_config_.auto_index_on_startup && runtime_config_.scan_path) {
+        std::cout << "📚 Indexing scan path: " << *runtime_config_.scan_path << std::endl;
+        rag_engine_->index_project(*runtime_config_.scan_path);
+    } else {
+        std::cout << "⏭️ Directory scan disabled; RAG starts in upload/API/QA mode" << std::endl;
+    }
 
     initialized_ = true;
     std::cout << "✅ RAG module initialized" << std::endl;
@@ -136,7 +143,8 @@ void RagExtension::registerRoutes(HttpServer& server, DIContainer& container) {
             runtime_config_.routes.expose_root_ui,
             runtime_config_.routes.ui_path,
             runtime_config_.routes.api_prefix,
-            runtime_config_.security
+            runtime_config_.security,
+            runtime_config_.upload
         }
     );
 

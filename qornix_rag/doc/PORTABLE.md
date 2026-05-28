@@ -49,7 +49,7 @@ Use another port:
 Index a project:
 
 ```bash
-./run.sh --project /path/to/project
+./run.sh --scan-path /path/to/project
 ```
 
 ## Bundle Layout

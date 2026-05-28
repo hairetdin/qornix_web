@@ -40,3 +40,34 @@ ctest --test-dir build/qornix-release --output-on-failure
 ```
 
 For PostgreSQL/MySQL integration tests, enable the corresponding async backend flag and provide the DSN/environment variables documented in `qornix_orm/doc/testing.md`.
+
+## RAG dependency profile
+
+`QORNIX_BUILD_RAG=ON` adds the `qornix_rag` module. The module is intentionally tiered: the lightweight profile works without neural embeddings, while the full semantic profile adds ONNX Runtime and external model files.
+
+| Dependency | Required? | Used for |
+| --- | --- | --- |
+| `hnswlib` | required by current RAG build | local HNSW vector index |
+| `libxapian-dev` | required by current RAG build | lexical/Xapian search index |
+| `Boost.Filesystem`, `Boost.URL`, `Boost.JSON` | required | file traversal, URL/API helpers, JSON parsing |
+| `libcurl4-openssl-dev` | optional but recommended | LLM provider HTTP client |
+| `libsqlite3-dev` | optional but recommended | QA/wiki persistence, analytics, model metadata |
+| `libzip-dev` | optional | DOCX/OpenXML ingestion |
+| `libpugixml-dev` | optional | XLSX/PPTX OpenXML parsing |
+| `poppler-utils` | optional runtime | PDF text extraction through `pdftotext` |
+| `tesseract-ocr` | optional runtime | image OCR ingestion |
+| ONNX Runtime C++ SDK | optional | semantic embedding backend |
+| Faiss | optional | alternative local vector backend |
+| `libpq-dev` | optional | PostgreSQL/pgvector backend client |
+| Qdrant service | optional runtime | external vector backend |
+| PostgreSQL + pgvector | optional runtime | SQL-backed vector backend |
+| Ollama/LM Studio/vLLM/OpenAI-compatible API | optional runtime | LLM answer generation |
+| Redis Open Source | optional runtime | external/shared LLM response cache when `cache.backend=redis` |
+| Prometheus server | optional external runtime | scrape `/api/metrics` or `/api/rag/metrics`; no `prometheus-cpp` build dependency is required |
+
+Recommended RAG documentation:
+
+- `qornix_rag/doc/FULL_RAG_GUIDE.md`
+- `qornix_rag/doc/CONFIG.md`
+- `qornix_rag/doc/API.md`
+- `doc/rag_app_template.md`

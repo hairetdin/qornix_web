@@ -251,6 +251,34 @@ TEST(analytics_knowledge_gaps) {
     ASSERT_GT(gaps.size(), 0, "Knowledge gaps detected");
 }
 
+
+TEST(analytics_feedback_capture) {
+    AnalyticsService service;
+
+    AnalyticsService::FeedbackEntry feedback;
+    feedback.id = "fb_test";
+    feedback.request_id = "req_1";
+    feedback.query = "How does routing work?";
+    feedback.rating = "not_helpful";
+    feedback.category = "bad_citation";
+    feedback.comment = "The citation did not point to the route document.";
+    feedback.citations = {"S1"};
+    feedback.timestamp = std::chrono::system_clock::now();
+    service.logFeedback(feedback);
+
+    auto log = service.getFeedbackLog(10);
+    ASSERT_EQ(1, log.size(), "One feedback entry logged");
+    ASSERT_STR_EQ("bad_citation", log[0].category, "Feedback category captured");
+
+    auto report = service.getRecentReport();
+    ASSERT_EQ(1, report.feedback_total, "Feedback total captured in report");
+    ASSERT_EQ(1, report.feedback_not_helpful, "Negative feedback counted");
+    ASSERT_EQ(1, report.feedback_by_category["bad_citation"], "Feedback category counted");
+
+    auto json = service.exportToJson(report);
+    ASSERT_TRUE(json.find("feedback") != std::string::npos, "Feedback exported to JSON");
+}
+
 // ============================================
 // Export Tests
 // ============================================
@@ -354,6 +382,7 @@ int main() {
     RUN_TEST(analytics_top_queries);
     RUN_TEST(analytics_missing_detection);
     RUN_TEST(analytics_knowledge_gaps);
+    RUN_TEST(analytics_feedback_capture);
     RUN_TEST(analytics_export_json);
     RUN_TEST(analytics_prune_log);
     RUN_TEST(analytics_thread_safety);

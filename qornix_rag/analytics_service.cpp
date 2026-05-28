@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 https://github.com/hairetdin
+ *
+ * This file is part of Qornix project.
+ * Licensed under GNU GPL v3.0 (see LICENSE file) or commercial license.
+ */
+
 #include "analytics_service.h"
 
 #include <algorithm>
@@ -33,6 +40,25 @@ void AnalyticsService::logSearch(const SearchQuery& query) {
     }
 }
 
+void AnalyticsService::logFeedback(const FeedbackEntry& feedback) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    feedback_log_.push_back(feedback);
+    if (feedback_log_.size() > config_.max_log_entries) {
+        size_t remove_count = feedback_log_.size() - config_.max_log_entries / 2;
+        feedback_log_.erase(feedback_log_.begin(), feedback_log_.begin() + remove_count);
+    }
+}
+
+std::vector<AnalyticsService::FeedbackEntry> AnalyticsService::getFeedbackLog(size_t limit) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<FeedbackEntry> result;
+    size_t start = feedback_log_.size() > limit ? feedback_log_.size() - limit : 0;
+    for (size_t i = start; i < feedback_log_.size(); ++i) {
+        result.push_back(feedback_log_[i]);
+    }
+    return result;
+}
+
 AnalyticsService::AnalyticsReport AnalyticsService::getReport(
     std::chrono::system_clock::time_point from,
     std::chrono::system_clock::time_point to) {
@@ -57,7 +83,24 @@ AnalyticsService::AnalyticsReport AnalyticsService::getReport(
 
     report.total_queries = filtered.size();
 
+    auto collect_feedback = [&]() {
+        for (const auto& feedback : feedback_log_) {
+            if (feedback.timestamp >= from && feedback.timestamp <= to) {
+                report.feedback_total++;
+                if (feedback.rating == "helpful" || feedback.rating == "positive" || feedback.rating == "up") {
+                    report.feedback_helpful++;
+                } else if (feedback.rating == "not_helpful" || feedback.rating == "negative" || feedback.rating == "down") {
+                    report.feedback_not_helpful++;
+                }
+                if (!feedback.category.empty()) {
+                    report.feedback_by_category[feedback.category]++;
+                }
+            }
+        }
+    };
+
     if (filtered.empty()) {
+        collect_feedback();
         return report;
     }
 
@@ -119,6 +162,8 @@ AnalyticsService::AnalyticsReport AnalyticsService::getReport(
     // Knowledge gaps
     report.knowledge_gaps = calculateKnowledgeGaps();
 
+    collect_feedback();
+
     return report;
 }
 
@@ -134,7 +179,13 @@ std::vector<AnalyticsService::KnowledgeGap> AnalyticsService::getKnowledgeGaps(s
     }
 
     auto report = getRecentReport();
-    return report.knowledge_gaps;
+    std::vector<KnowledgeGap> filtered;
+    for (const auto& gap : report.knowledge_gaps) {
+        if (gap.search_count >= min_search_count) {
+            filtered.push_back(gap);
+        }
+    }
+    return filtered;
 }
 
 std::vector<AnalyticsService::SearchQuery> AnalyticsService::getSearchLog(size_t limit) const {
@@ -172,6 +223,12 @@ void AnalyticsService::pruneLog(size_t keep_days) {
             return query.timestamp < cutoff;
         });
     log_.erase(it, log_.end());
+
+    auto feedback_it = std::remove_if(feedback_log_.begin(), feedback_log_.end(),
+        [cutoff](const FeedbackEntry& feedback) {
+            return feedback.timestamp < cutoff;
+        });
+    feedback_log_.erase(feedback_it, feedback_log_.end());
 
     pruneQueryCounts();
 }
@@ -224,7 +281,21 @@ std::string AnalyticsService::exportToJson(const AnalyticsReport& report) const 
         }
         json << "\n";
     }
-    json << "  ]\n";
+    json << "  ],\n";
+
+    json << "  \"feedback\": {"
+         << "\"total\": " << report.feedback_total << ", "
+         << "\"helpful\": " << report.feedback_helpful << ", "
+         << "\"not_helpful\": " << report.feedback_not_helpful << ", "
+         << "\"by_category\": {";
+    size_t category_index = 0;
+    for (const auto& [category, count] : report.feedback_by_category) {
+        if (category_index++ > 0) {
+            json << ", ";
+        }
+        json << "\"" << escapeJson(category) << "\": " << count;
+    }
+    json << "}}\n";
 
     json << "}";
     return json.str();

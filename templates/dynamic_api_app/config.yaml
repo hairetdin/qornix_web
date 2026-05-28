@@ -45,3 +45,4 @@ dynamic_api:
 #   Build with -DQORNIX_ENABLE_ASYNC_MYSQL=ON and replace the database
 #   block above with driver: mysql plus host/port/database/user/password.
 #   MySQL uses ? placeholders and does not use RETURNING.
+@WITH_RAG_CONFIG@

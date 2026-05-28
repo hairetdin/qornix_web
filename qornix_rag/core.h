@@ -31,8 +31,10 @@
 #include <queue>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <atomic>
 #include <optional>
+#include <utility>
 
 // Include xapian first
 #include <xapian.h>
@@ -53,11 +55,24 @@ struct HybridSearchConfig {
     float min_score_threshold = 0.1f; // Minimum score for inclusion in result
     bool use_hybrid = true; // Hybrid search usage flag
     bool use_query_expansion = true;
+    bool xapian_enabled = true;
+    std::string xapian_language = "auto"; // auto | none | Xapian language name or alias, e.g. english/en
+    bool xapian_stemming = true;
+    std::string xapian_stemming_strategy = "some"; // none | some | all
+    bool xapian_cjk_ngrams = false;
+    bool xapian_word_breaks = true;
+    bool xapian_spelling = false;
+    bool xapian_metadata_prefixes = true;
     bool use_reranking = true;
     size_t rerank_input_multiplier = 3;
     float rerank_path_boost = 0.15f;
     float rerank_metadata_boost = 0.10f;
     float rerank_exact_content_boost = 0.05f;
+    bool use_multi_query_retrieval = true;
+    size_t multi_query_max_variants = 4;
+    bool use_embedding_reranker = true;
+    float rerank_embedding_boost = 0.20f;
+    float rerank_coverage_boost = 0.08f;
 };
 
 struct EmbeddingConfig {
@@ -73,6 +88,11 @@ struct EmbeddingConfig {
     size_t dimension = 0; // 0 means discover from backend/output
     size_t max_seq_len = 256;
     size_t onnx_threads = 1;
+    std::string models_dir = "models";
+    bool auto_discover_models = true;
+    bool validate_model_files = true;
+    bool persistent_cache_enabled = true;
+    size_t chunk_token_margin = 2;
     bool normalize_embeddings = true;
     bool enable_fallback = true;
     bool lowercase_tokens = true;
@@ -93,6 +113,11 @@ struct EmbeddingModelDefinition {
     bool normalize_embeddings = true;
     bool lowercase_tokens = true;
     bool enable_fallback = true;
+    bool discovered = false;
+    bool files_present = false;
+    size_t tokenizer_vocab_size = 0;
+    std::string tokenizer_status;
+    std::string model_status;
     std::string license;
     std::string source;
 };
@@ -108,8 +133,13 @@ struct EmbeddingModelInfo {
     std::string pooling;
     size_t dimension = 0;
     size_t max_seq_len = 0;
+    size_t tokenizer_vocab_size = 0;
+    size_t effective_chunk_token_limit = 0;
     bool ready = false;
+    bool persistent_cache_enabled = false;
     std::string status;
+    std::string tokenizer_status;
+    std::string model_signature;
     std::string active_model_id;
     size_t registry_size = 0;
     std::vector<std::string> registry_model_ids;
@@ -242,6 +272,24 @@ protected:
     std::function<void(size_t current, size_t total)> progress_callback_;
 };
 
+
+struct XapianSearchDiagnostics {
+    bool enabled = true;
+    bool ready = false;
+    std::string status = "not_built";
+    std::string detail;
+    std::string language = "auto";
+    std::string effective_index_language = "none";
+    std::string effective_query_language = "none";
+    bool stemming = true;
+    std::string stemming_strategy = "some";
+    bool cjk_ngrams = false;
+    bool word_breaks = true;
+    bool spelling = false;
+    bool metadata_prefixes = true;
+    size_t documents_indexed = 0;
+};
+
 struct SearchResult {
     Document document;
     double score;
@@ -258,6 +306,324 @@ struct SearchResult {
     SearchResult() : score(0.0), vector_score(0.0), text_score(0.0), fused_score(0.0) {
     }
 };
+
+struct MetadataFilter {
+    // key examples: type, language, source_path, page, sheet, slide,
+    // chunk_symbol_name, metadata_contract, image_ocr_confidence_avg.
+    std::string key;
+    std::string value;
+    // equals | contains | prefix | exists | not_empty | gte | lte
+    std::string op = "equals";
+
+    MetadataFilter() = default;
+    MetadataFilter(std::string filter_key, std::string filter_value, std::string filter_op = "equals")
+        : key(std::move(filter_key)), value(std::move(filter_value)), op(std::move(filter_op)) {}
+};
+
+struct SearchOptions {
+    size_t top_k = 10;
+    std::vector<MetadataFilter> filters;
+    bool include_metadata = true;
+};
+
+namespace qornix_rag_xapian_detail {
+
+inline std::string toLowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+inline std::string normalizeLanguageName(std::string language) {
+    language = toLowerAscii(std::move(language));
+    if (language.empty() || language == "default") return "auto";
+    if (language == "none" || language == "off" || language == "disabled" || language == "false") return "none";
+    if (language == "auto" || language == "detect") return "auto";
+    if (language == "ar") return "arabic";
+    if (language == "hy") return "armenian";
+    if (language == "eu") return "basque";
+    if (language == "ca") return "catalan";
+    if (language == "da") return "danish";
+    if (language == "nl") return "dutch";
+    if (language == "en" || language == "eng") return "english";
+    if (language == "eo") return "esperanto";
+    if (language == "et") return "estonian";
+    if (language == "fi") return "finnish";
+    if (language == "fr") return "french";
+    if (language == "de") return "german";
+    if (language == "el") return "greek";
+    if (language == "hi") return "hindi";
+    if (language == "hu") return "hungarian";
+    if (language == "id") return "indonesian";
+    if (language == "ga") return "irish";
+    if (language == "it") return "italian";
+    if (language == "lt") return "lithuanian";
+    if (language == "ne") return "nepali";
+    if (language == "no" || language == "nb" || language == "nn") return "norwegian";
+    if (language == "pl") return "polish";
+    if (language == "pt") return "portuguese";
+    if (language == "ro") return "romanian";
+    if (language == "ru" || language == "rus") return "russian";
+    if (language == "sr") return "serbian";
+    if (language == "es") return "spanish";
+    if (language == "sv") return "swedish";
+    if (language == "ta") return "tamil";
+    if (language == "tr") return "turkish";
+    if (language == "yi") return "yiddish";
+    return language;
+}
+
+inline bool containsCyrillicUtf8(const std::string& text) {
+    for (size_t i = 0; i + 1 < text.size(); ++i) {
+        const auto b0 = static_cast<unsigned char>(text[i]);
+        const auto b1 = static_cast<unsigned char>(text[i + 1]);
+        if ((b0 == 0xD0 && b1 >= 0x80) || (b0 == 0xD1 && b1 <= 0xBF)) return true;
+    }
+    return false;
+}
+
+inline bool isSupportedStemLanguage(const std::string& language) {
+    const auto normalized = normalizeLanguageName(language);
+    if (normalized.empty() || normalized == "auto" || normalized == "none") return false;
+
+    static std::mutex cache_mutex;
+    static std::unordered_map<std::string, bool> cache;
+
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        const auto it = cache.find(normalized);
+        if (it != cache.end()) {
+            return it->second;
+        }
+    }
+
+    bool supported = false;
+    try {
+        (void)Xapian::Stem(normalized);
+        supported = true;
+    } catch (const Xapian::Error&) {
+        supported = false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        cache[normalized] = supported;
+    }
+    return supported;
+}
+
+inline std::string detectLanguage(const std::string& configured,
+                                  const std::string& content,
+                                  const std::string& fallback_language = {}) {
+    const auto normalized = normalizeLanguageName(configured);
+    if (normalized != "auto") return normalized;
+
+    // Document::language is used by qornix_rag for both natural languages and
+    // technical/file languages (for example: python, javascript, html, xml,
+    // pdf, image, c/c++ header).  Xapian::Stem only accepts natural-language
+    // stemmer identifiers, so auto mode must not pass technical languages
+    // through to Xapian.  Use the fallback only when the installed Xapian
+    // library confirms it is a supported stemmer language.
+    const auto fallback = normalizeLanguageName(fallback_language);
+    if (isSupportedStemLanguage(fallback)) {
+        return fallback;
+    }
+
+    if (containsCyrillicUtf8(content)) return "russian";
+    return "english";
+}
+
+inline Xapian::TermGenerator::stem_strategy termStemStrategy(const HybridSearchConfig& config) {
+    if (!config.xapian_stemming) return Xapian::TermGenerator::STEM_NONE;
+    const auto strategy = toLowerAscii(config.xapian_stemming_strategy);
+    if (strategy == "all") return Xapian::TermGenerator::STEM_ALL;
+    if (strategy == "none" || strategy == "off" || strategy == "false") return Xapian::TermGenerator::STEM_NONE;
+    return Xapian::TermGenerator::STEM_SOME;
+}
+
+inline Xapian::QueryParser::stem_strategy queryStemStrategy(const HybridSearchConfig& config) {
+    if (!config.xapian_stemming) return Xapian::QueryParser::STEM_NONE;
+    const auto strategy = toLowerAscii(config.xapian_stemming_strategy);
+    if (strategy == "all") return Xapian::QueryParser::STEM_ALL;
+    if (strategy == "none" || strategy == "off" || strategy == "false") return Xapian::QueryParser::STEM_NONE;
+    return Xapian::QueryParser::STEM_SOME;
+}
+
+inline void configureTermGenerator(Xapian::TermGenerator& termgen,
+                                   const HybridSearchConfig& config,
+                                   const std::string& language) {
+    if (!config.xapian_stemming) return;
+    const auto normalized = normalizeLanguageName(language);
+    if (normalized.empty() || normalized == "none" || normalized == "auto") return;
+    Xapian::Stem stemmer(normalized);
+    termgen.set_stemmer(stemmer);
+    termgen.set_stemming_strategy(termStemStrategy(config));
+}
+
+inline void configureQueryParser(Xapian::QueryParser& parser,
+                                 const HybridSearchConfig& config,
+                                 const std::string& language) {
+    if (!config.xapian_stemming) return;
+    const auto normalized = normalizeLanguageName(language);
+    if (normalized.empty() || normalized == "none" || normalized == "auto") return;
+    Xapian::Stem stemmer(normalized);
+    parser.set_stemmer(stemmer);
+    parser.set_stemming_strategy(queryStemStrategy(config));
+}
+
+inline bool utf8NextCodepoint(const std::string& text, size_t& i, uint32_t& cp, std::string& bytes) {
+    if (i >= text.size()) return false;
+    const unsigned char c = static_cast<unsigned char>(text[i]);
+    size_t len = 1;
+    cp = c;
+    if ((c & 0x80) == 0) {
+        len = 1;
+    } else if ((c & 0xE0) == 0xC0 && i + 1 < text.size()) {
+        len = 2;
+        cp = ((c & 0x1F) << 6) | (static_cast<unsigned char>(text[i + 1]) & 0x3F);
+    } else if ((c & 0xF0) == 0xE0 && i + 2 < text.size()) {
+        len = 3;
+        cp = ((c & 0x0F) << 12) |
+             ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 6) |
+             (static_cast<unsigned char>(text[i + 2]) & 0x3F);
+    } else if ((c & 0xF8) == 0xF0 && i + 3 < text.size()) {
+        len = 4;
+        cp = ((c & 0x07) << 18) |
+             ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 12) |
+             ((static_cast<unsigned char>(text[i + 2]) & 0x3F) << 6) |
+             (static_cast<unsigned char>(text[i + 3]) & 0x3F);
+    } else {
+        len = 1;
+        cp = c;
+    }
+    bytes = text.substr(i, len);
+    i += len;
+    return true;
+}
+
+inline bool isCjkCodepoint(uint32_t cp) {
+    return (cp >= 0x3400 && cp <= 0x4DBF) ||
+           (cp >= 0x4E00 && cp <= 0x9FFF) ||
+           (cp >= 0xF900 && cp <= 0xFAFF) ||
+           (cp >= 0x3040 && cp <= 0x30FF) ||
+           (cp >= 0xAC00 && cp <= 0xD7AF);
+}
+
+inline std::vector<std::string> extractCjkNgrams(const std::string& text, size_t n = 2) {
+    std::vector<std::string> grams;
+    std::vector<std::string> run;
+    auto flush = [&]() {
+        if (run.empty()) return;
+        if (run.size() < n) {
+            grams.insert(grams.end(), run.begin(), run.end());
+        } else {
+            for (size_t i = 0; i + n <= run.size(); ++i) {
+                std::string gram;
+                for (size_t j = 0; j < n; ++j) gram += run[i + j];
+                grams.push_back(std::move(gram));
+            }
+        }
+        run.clear();
+    };
+    for (size_t i = 0; i < text.size();) {
+        uint32_t cp = 0;
+        std::string bytes;
+        if (!utf8NextCodepoint(text, i, cp, bytes)) break;
+        if (isCjkCodepoint(cp)) {
+            run.push_back(bytes);
+        } else {
+            flush();
+        }
+    }
+    flush();
+    std::sort(grams.begin(), grams.end());
+    grams.erase(std::unique(grams.begin(), grams.end()), grams.end());
+    return grams;
+}
+
+inline std::string safeTermValue(const std::string& value) {
+    std::string out;
+    out.reserve(std::min<size_t>(value.size(), 180));
+    for (unsigned char c : value) {
+        if (std::isalnum(c) || c == '_' || c == '-' || c == '.' || c == '/' || c == ':' || c == '#') {
+            out.push_back(static_cast<char>(std::tolower(c)));
+        } else if (!out.empty() && out.back() != '_') {
+            out.push_back('_');
+        }
+        if (out.size() >= 180) break;
+    }
+    while (!out.empty() && out.back() == '_') out.pop_back();
+    return out.empty() ? "empty" : out;
+}
+
+inline void addExactTerm(Xapian::Document& xdoc,
+                         const std::string& prefix,
+                         const std::string& value,
+                         Xapian::termcount wdf = 1) {
+    xdoc.add_term(prefix + safeTermValue(value), wdf);
+}
+
+inline Xapian::Query orWithTerm(Xapian::Query base, const std::string& term) {
+    Xapian::Query next(term);
+    if (base.empty()) return next;
+    return Xapian::Query(Xapian::Query::op::OP_OR, base, next);
+}
+
+inline void addCjkTerms(Xapian::Document& xdoc, const std::string& text, const std::string& prefix) {
+    for (const auto& gram : extractCjkNgrams(text)) {
+        if (!gram.empty()) xdoc.add_term(prefix + gram, 1);
+    }
+}
+
+inline std::vector<std::string> splitWordBreakTokens(const std::string& value) {
+    std::vector<std::string> tokens;
+    std::string current;
+    auto flush = [&]() {
+        if (current.size() >= 2) tokens.push_back(toLowerAscii(current));
+        current.clear();
+    };
+    for (size_t i = 0; i < value.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(value[i]);
+        if (std::isalnum(c)) {
+            if (!current.empty() && std::islower(static_cast<unsigned char>(current.back())) && std::isupper(c)) {
+                flush();
+            }
+            current.push_back(static_cast<char>(c));
+        } else if (c == '_' || c == '-' || c == '.' || c == '/' || c == ':' || c == '#') {
+            flush();
+        } else {
+            flush();
+        }
+    }
+    flush();
+    std::sort(tokens.begin(), tokens.end());
+    tokens.erase(std::unique(tokens.begin(), tokens.end()), tokens.end());
+    return tokens;
+}
+
+inline void addWordBreakTerms(Xapian::Document& xdoc, const std::string& text, const std::string& prefix) {
+    for (const auto& token : splitWordBreakTokens(text)) {
+        xdoc.add_term(prefix + safeTermValue(token), 1);
+    }
+}
+
+inline void configurePrefixes(Xapian::QueryParser& parser) {
+    parser.add_prefix("path", "QPATH");
+    parser.add_prefix("file", "QPATH");
+    parser.add_prefix("source", "QSOURCE");
+    parser.add_prefix("type", "QTYPE");
+    parser.add_prefix("lang", "QLANG");
+    parser.add_prefix("language", "QLANG");
+    parser.add_prefix("meta", "QMETA");
+    parser.add_prefix("metadata", "QMETA");
+    parser.add_prefix("symbol", "QSYMBOL");
+    parser.add_prefix("page", "QPAGE");
+    parser.add_prefix("sheet", "QSHEET");
+    parser.add_prefix("slide", "QSLIDE");
+}
+
+} // namespace qornix_rag_xapian_detail
 
 struct ProjectStats {
     size_t total_files;
@@ -502,6 +868,9 @@ private:
     std::vector<std::shared_ptr<DataSource>> data_sources_;
     mutable std::mutex sources_mutex_;
     std::unordered_map<std::string, int64_t> tokenizer_vocab_;
+    std::string tokenizer_model_type_ = "basic_wordpiece";
+    std::string tokenizer_status_message_ = "not loaded";
+    size_t tokenizer_vocab_size_ = 0;
     int64_t unk_token_id_ = 100;
     int64_t cls_token_id_ = 101;
     int64_t sep_token_id_ = 102;
@@ -511,6 +880,7 @@ private:
     std::string onnx_status_message_ = "not initialized";
     EmbeddingModelInfo embedding_model_;
     std::string last_vector_store_status_ = "not initialized";
+    XapianSearchDiagnostics xapian_diagnostics_;
 
 #ifdef QORNIX_HAS_ONNX
     std::unique_ptr<Ort::Env> ort_env_;
@@ -858,6 +1228,26 @@ public:
         return search_config_.use_reranking;
     }
 
+    bool is_multi_query_retrieval_enabled() const {
+        return search_config_.use_multi_query_retrieval;
+    }
+
+    bool is_embedding_reranker_enabled() const {
+        return search_config_.use_embedding_reranker;
+    }
+
+    bool is_xapian_enabled() const {
+        return search_config_.xapian_enabled;
+    }
+
+    XapianSearchDiagnostics get_xapian_diagnostics() const {
+        return xapian_diagnostics_;
+    }
+
+    size_t multi_query_max_variants() const {
+        return search_config_.multi_query_max_variants;
+    }
+
     std::string expand_query(const std::string& query) const {
         if (!search_config_.use_query_expansion) {
             return query;
@@ -927,7 +1317,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         auto index_start = std::chrono::steady_clock::now();
         indexed_project_root_ = project_root;
-        auto reusable_embeddings = force_reembed_next_index_
+        auto reusable_embeddings = (force_reembed_next_index_ || !embedding_config_.persistent_cache_enabled)
             ? std::unordered_map<std::string, std::vector<float>>{}
             : collect_reusable_embeddings();
         reset_incremental_stats(reusable_embeddings.size());
@@ -981,14 +1371,26 @@ public:
             doc.hash = ingested.hash;
             doc.last_modified = ingested.last_modified;
             doc.metadata = ingested.metadata;
+            doc.metadata["embedding_model_id"] = get_embedding_model_id();
+            doc.metadata["embedding_backend"] = get_embedding_backend();
+            doc.metadata["embedding_model_signature"] = embedding_model_.model_signature;
+            doc.metadata["embedding_token_limit"] = std::to_string(embedding_content_token_limit());
+            doc.metadata["tokenizer_max_tokens"] = std::to_string(embedding_content_token_limit());
+            doc.metadata["tokenizer_type"] = embedding_config_.tokenizer_type;
 
-            DocumentChunker chunker;
+            DocumentChunker::Config chunker_config;
+            chunker_config.tokenizer_max_tokens = embedding_content_token_limit();
+            DocumentChunker chunker(chunker_config);
             auto chunks = chunker.chunkDocument(doc);
             if (chunks.empty()) {
                 chunks.push_back(doc);
             }
 
             for (auto& chunk : chunks) {
+                chunk.metadata["embedding_estimated_tokens"] = std::to_string(estimate_embedding_token_count(chunk.content));
+                chunk.metadata["embedding_model_id"] = get_embedding_model_id();
+                chunk.metadata["embedding_backend"] = get_embedding_backend();
+                chunk.metadata["embedding_model_signature"] = embedding_model_.model_signature;
                 assign_incremental_embedding(chunk, reusable_embeddings);
 
                 if (stop_flag_ && !stop_flag_->load()) {
@@ -1062,7 +1464,7 @@ private:
     }
 
     std::string reusable_embedding_key(const Document& document) const {
-        return get_embedding_model_id() + "|" + document.relative_path + "|" + document.hash;
+        return embedding_model_.model_signature + "|" + get_embedding_model_id() + "|" + document.relative_path + "|" + document.hash;
     }
 
     std::unordered_map<std::string, std::vector<float>> collect_reusable_embeddings() const {
@@ -1251,6 +1653,183 @@ private:
         return value;
     }
 
+    static std::string source_path_for_document(const Document& doc) {
+        const auto chunk_of = doc.metadata.find("chunk_of");
+        return chunk_of == doc.metadata.end() || chunk_of->second.empty()
+            ? doc.relative_path
+            : chunk_of->second;
+    }
+
+    static bool parse_double_value(const std::string& value, double& output) {
+        if (value.empty()) {
+            return false;
+        }
+        char* end = nullptr;
+        output = std::strtod(value.c_str(), &end);
+        return end != value.c_str();
+    }
+
+    static std::string metadata_value_for_filter(const Document& doc, const std::string& raw_key) {
+        const std::string key = lower_copy(raw_key);
+        if (key == "type" || key == "document_type") {
+            return doc.type;
+        }
+        if (key == "language") {
+            return doc.language;
+        }
+        if (key == "path") {
+            return doc.relative_path;
+        }
+        if (key == "source_path" || key == "source") {
+            return source_path_for_document(doc);
+        }
+        if (key == "page") {
+            auto it = doc.metadata.find("chunk_page");
+            if (it != doc.metadata.end()) return it->second;
+            it = doc.metadata.find("chunk_page_start");
+            if (it != doc.metadata.end()) return it->second;
+            it = doc.metadata.find("pdf_page_start");
+            if (it != doc.metadata.end()) return it->second;
+        }
+        if (key == "sheet") {
+            auto it = doc.metadata.find("chunk_sheet");
+            if (it != doc.metadata.end()) return it->second;
+        }
+        if (key == "slide") {
+            auto it = doc.metadata.find("chunk_slide");
+            if (it != doc.metadata.end()) return it->second;
+        }
+        if (key == "row") {
+            auto it = doc.metadata.find("chunk_row_start");
+            if (it != doc.metadata.end()) return it->second;
+        }
+        if (key == "symbol" || key == "symbol_name") {
+            auto it = doc.metadata.find("chunk_symbol_name");
+            if (it != doc.metadata.end()) return it->second;
+            it = doc.metadata.find("chunk_symbol");
+            if (it != doc.metadata.end()) return it->second;
+        }
+        if (key == "ocr_confidence") {
+            auto it = doc.metadata.find("chunk_ocr_confidence");
+            if (it != doc.metadata.end()) return it->second;
+            it = doc.metadata.find("image_ocr_confidence_avg");
+            if (it != doc.metadata.end()) return it->second;
+        }
+        auto it = doc.metadata.find(raw_key);
+        if (it != doc.metadata.end()) {
+            return it->second;
+        }
+        for (const auto& [meta_key, meta_value] : doc.metadata) {
+            if (lower_copy(meta_key) == key) {
+                return meta_value;
+            }
+        }
+        return {};
+    }
+
+    static bool page_filter_matches(const Document& doc, const std::string& expected) {
+        double page = 0.0;
+        if (!parse_double_value(expected, page)) {
+            return false;
+        }
+        double start = 0.0;
+        double end = 0.0;
+        const std::string start_value = metadata_value_for_filter(doc, "chunk_page_start");
+        const std::string end_value = metadata_value_for_filter(doc, "chunk_page_end");
+        if (!parse_double_value(start_value, start)) {
+            return false;
+        }
+        if (!parse_double_value(end_value, end)) {
+            end = start;
+        }
+        return page >= start && page <= end;
+    }
+
+    static bool row_filter_matches(const Document& doc, const std::string& expected) {
+        double row = 0.0;
+        if (!parse_double_value(expected, row)) {
+            return false;
+        }
+        double start = 0.0;
+        double end = 0.0;
+        if (!parse_double_value(metadata_value_for_filter(doc, "chunk_row_start"), start)) {
+            return false;
+        }
+        if (!parse_double_value(metadata_value_for_filter(doc, "chunk_row_end"), end)) {
+            end = start;
+        }
+        return row >= start && row <= end;
+    }
+
+    static bool metadata_filter_matches(const Document& doc, const MetadataFilter& filter) {
+        if (filter.key.empty()) {
+            return true;
+        }
+        const std::string key = lower_copy(filter.key);
+        const std::string op = filter.op.empty() ? "equals" : lower_copy(filter.op);
+        if ((key == "page" || key == "chunk_page") && op == "equals") {
+            return page_filter_matches(doc, filter.value);
+        }
+        if ((key == "row" || key == "chunk_row") && op == "equals") {
+            return row_filter_matches(doc, filter.value);
+        }
+
+        const std::string actual = metadata_value_for_filter(doc, filter.key);
+        if (op == "exists") {
+            return !actual.empty();
+        }
+        if (op == "not_empty") {
+            return !trim(actual).empty();
+        }
+        if (actual.empty() && !filter.value.empty()) {
+            return false;
+        }
+
+        const std::string actual_lower = lower_copy(actual);
+        const std::string expected_lower = lower_copy(filter.value);
+        if (op == "contains") {
+            return actual_lower.find(expected_lower) != std::string::npos;
+        }
+        if (op == "prefix") {
+            return actual_lower.rfind(expected_lower, 0) == 0;
+        }
+        if (op == "gte" || op == ">=") {
+            double lhs = 0.0;
+            double rhs = 0.0;
+            return parse_double_value(actual, lhs) && parse_double_value(filter.value, rhs) && lhs >= rhs;
+        }
+        if (op == "lte" || op == "<=") {
+            double lhs = 0.0;
+            double rhs = 0.0;
+            return parse_double_value(actual, lhs) && parse_double_value(filter.value, rhs) && lhs <= rhs;
+        }
+        return actual_lower == expected_lower;
+    }
+
+    static bool document_matches_filters(const Document& doc, const std::vector<MetadataFilter>& filters) {
+        for (const auto& filter : filters) {
+            if (!metadata_filter_matches(doc, filter)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static std::string metadata_term_token(std::string value) {
+        value = lower_copy(value);
+        for (char& ch : value) {
+            if (!std::isalnum(static_cast<unsigned char>(ch))) {
+                ch = '_';
+            }
+        }
+        while (!value.empty() && value.front() == '_') value.erase(value.begin());
+        while (!value.empty() && value.back() == '_') value.pop_back();
+        if (value.size() > 180) {
+            value.resize(180);
+        }
+        return value;
+    }
+
     static std::vector<std::string> split_identifier_terms(const std::string& value) {
         std::vector<std::string> terms;
         std::string current;
@@ -1384,6 +1963,26 @@ private:
         }
     }
 
+    static std::string build_embedding_model_signature(const EmbeddingConfig &config,
+                                                       const std::string &effective_backend,
+                                                       size_t effective_dimension) {
+        std::ostringstream ss;
+        ss << effective_backend << "|"
+           << config.model_id << "|"
+           << config.model_path << "|"
+           << config.tokenizer_path << "|"
+           << config.tokenizer_type << "|"
+           << config.pooling << "|"
+           << config.model_version << "|"
+           << config.max_seq_len << "|"
+           << config.onnx_threads << "|"
+           << effective_dimension << "|"
+           << (config.normalize_embeddings ? "norm" : "raw") << "|"
+           << (config.lowercase_tokens ? "lower" : "case") << "|"
+           << config.chunk_token_margin;
+        return HashCalculator::compute_md5(ss.str());
+    }
+
     static std::string build_embedding_model_id(const EmbeddingConfig &config,
                                                 const std::string &effective_backend,
                                                 size_t effective_dimension) {
@@ -1405,7 +2004,11 @@ private:
             return base + ":" + HashCalculator::compute_md5(
                 config.model_path + "|" + config.tokenizer_path + "|" +
                 config.tokenizer_type + "|" + config.pooling + "|" +
-                config.model_version + "|" + std::to_string(config.max_seq_len)
+                config.model_version + "|" + std::to_string(config.max_seq_len) + "|" +
+                std::to_string(effective_dimension) + "|" +
+                (config.normalize_embeddings ? "norm" : "raw") + "|" +
+                (config.lowercase_tokens ? "lower" : "case") + "|" +
+                std::to_string(config.chunk_token_margin)
             );
         }
 
@@ -1436,8 +2039,13 @@ private:
         embedding_model_.pooling = embedding_config_.pooling;
         embedding_model_.dimension = embedding_dim_;
         embedding_model_.max_seq_len = embedding_config_.max_seq_len;
+        embedding_model_.tokenizer_vocab_size = tokenizer_vocab_size_;
+        embedding_model_.effective_chunk_token_limit = embedding_content_token_limit();
         embedding_model_.ready = ready;
+        embedding_model_.persistent_cache_enabled = embedding_config_.persistent_cache_enabled;
         embedding_model_.status = status;
+        embedding_model_.tokenizer_status = tokenizer_status_message_;
+        embedding_model_.model_signature = build_embedding_model_signature(embedding_config_, embedding_model_.backend, embedding_dim_);
         embedding_model_.active_model_id = embedding_config_.active_model_id;
         embedding_model_.registry_size = embedding_registry_.models.size();
         embedding_model_.registry_model_ids.clear();
@@ -1448,12 +2056,124 @@ private:
         embedding_model_.registry_warnings = embedding_registry_.warnings;
     }
 
-    bool parse_tokenizer_vocab(const std::string &tokenizer_path) {
+    static std::string lower_ascii(std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return value;
+    }
+
+    static std::string json_string_or_empty(const boost::json::object& object, const char* key) {
+        auto it = object.find(key);
+        if (it == object.end() || !it->value().is_string()) {
+            return "";
+        }
+        return std::string(it->value().as_string().c_str());
+    }
+
+    void reset_tokenizer_state() {
         tokenizer_vocab_.clear();
+        tokenizer_model_type_ = "basic_wordpiece";
+        tokenizer_status_message_ = "not loaded";
+        tokenizer_vocab_size_ = 0;
+        unk_token_id_ = 100;
+        cls_token_id_ = 101;
+        sep_token_id_ = 102;
+        pad_token_id_ = 0;
+    }
+
+    void add_tokenizer_entry(const std::string& token, int64_t id) {
+        if (token.empty() || id < 0) {
+            return;
+        }
+        tokenizer_vocab_[token] = id;
+    }
+
+    void add_vocab_from_json_value(const boost::json::value& value) {
+        if (value.is_object()) {
+            const auto& vocab = value.as_object();
+            tokenizer_vocab_.reserve(tokenizer_vocab_.size() + vocab.size());
+            for (const auto& entry : vocab) {
+                if (entry.value().is_int64()) {
+                    add_tokenizer_entry(std::string(entry.key()), entry.value().as_int64());
+                }
+            }
+            return;
+        }
+        if (value.is_array()) {
+            const auto& vocab = value.as_array();
+            tokenizer_vocab_.reserve(tokenizer_vocab_.size() + vocab.size());
+            for (size_t i = 0; i < vocab.size(); ++i) {
+                if (vocab[i].is_string()) {
+                    add_tokenizer_entry(std::string(vocab[i].as_string().c_str()), static_cast<int64_t>(i));
+                    continue;
+                }
+                if (!vocab[i].is_array()) {
+                    continue;
+                }
+                const auto& item = vocab[i].as_array();
+                if (item.empty() || !item[0].is_string()) {
+                    continue;
+                }
+                // Hugging Face Unigram uses [[token, score], ...]. BPE/WordPiece fixtures can
+                // also appear as array vocabularies; in both cases the index is the token id.
+                add_tokenizer_entry(std::string(item[0].as_string().c_str()), static_cast<int64_t>(i));
+            }
+        }
+    }
+
+    void add_added_tokens(const boost::json::object& root) {
+        auto it = root.find("added_tokens");
+        if (it == root.end() || !it->value().is_array()) {
+            return;
+        }
+        for (const auto& value : it->value().as_array()) {
+            if (!value.is_object()) {
+                continue;
+            }
+            const auto& token = value.as_object();
+            const auto content = json_string_or_empty(token, "content");
+            auto id_it = token.find("id");
+            if (!content.empty() && id_it != token.end() && id_it->value().is_int64()) {
+                add_tokenizer_entry(content, id_it->value().as_int64());
+            }
+        }
+    }
+
+    void apply_tokenizer_special_ids(const boost::json::object& model) {
+        auto update_by_name = [&](const std::string& token, int64_t& target) {
+            if (token.empty()) {
+                return;
+            }
+            auto it = tokenizer_vocab_.find(token);
+            if (it != tokenizer_vocab_.end()) {
+                target = it->second;
+            }
+        };
+
+        update_by_name(json_string_or_empty(model, "unk_token"), unk_token_id_);
+        update_by_name(json_string_or_empty(model, "cls_token"), cls_token_id_);
+        update_by_name(json_string_or_empty(model, "sep_token"), sep_token_id_);
+        update_by_name(json_string_or_empty(model, "pad_token"), pad_token_id_);
+
+        update_by_name("[UNK]", unk_token_id_);
+        update_by_name("[CLS]", cls_token_id_);
+        update_by_name("[SEP]", sep_token_id_);
+        update_by_name("[PAD]", pad_token_id_);
+        update_by_name("<unk>", unk_token_id_);
+        update_by_name("<s>", cls_token_id_);
+        update_by_name("</s>", sep_token_id_);
+        update_by_name("<pad>", pad_token_id_);
+        update_by_name("<|endoftext|>", sep_token_id_);
+    }
+
+    bool parse_tokenizer_vocab(const std::string &tokenizer_path) {
+        reset_tokenizer_state();
 
         std::ifstream file(tokenizer_path);
         if (!file.is_open()) {
             onnx_status_message_ = "tokenizer.json not found: " + tokenizer_path;
+            tokenizer_status_message_ = onnx_status_message_;
             return false;
         }
 
@@ -1464,83 +2184,69 @@ private:
             auto parsed = boost::json::parse(buffer.str());
             if (!parsed.is_object()) {
                 onnx_status_message_ = "tokenizer.json root is not object";
+                tokenizer_status_message_ = onnx_status_message_;
                 return false;
             }
 
-            auto &root = parsed.as_object();
-            if (!root.contains("model")) {
-                onnx_status_message_ = "tokenizer.json does not contain model";
+            const auto &root = parsed.as_object();
+            auto model_it = root.find("model");
+            if (model_it == root.end() || !model_it->value().is_object()) {
+                onnx_status_message_ = "tokenizer.json does not contain object model";
+                tokenizer_status_message_ = onnx_status_message_;
                 return false;
             }
 
-            auto &model = root["model"].as_object();
-            if (model.contains("type") && model["type"].is_string()) {
-                embedding_config_.tokenizer_type = std::string(model["type"].as_string().c_str());
-            }
-            if (!model.contains("vocab")) {
-                onnx_status_message_ = "tokenizer.json does not contain model.vocab";
-                return false;
-            }
-
-            auto &vocab_value = model["vocab"];
-            if (vocab_value.is_object()) {
-                auto &vocab = vocab_value.as_object();
-                tokenizer_vocab_.reserve(vocab.size());
-                for (const auto &entry: vocab) {
-                    if (!entry.value().is_int64()) {
-                        continue;
-                    }
-                    tokenizer_vocab_[std::string(entry.key())] = entry.value().as_int64();
-                }
-            } else if (vocab_value.is_array()) {
-                auto &vocab = vocab_value.as_array();
-                tokenizer_vocab_.reserve(vocab.size());
-                for (size_t i = 0; i < vocab.size(); ++i) {
-                    if (!vocab[i].is_array()) {
-                        continue;
-                    }
-                    auto &item = vocab[i].as_array();
-                    if (item.empty() || !item[0].is_string()) {
-                        continue;
-                    }
-                    tokenizer_vocab_[std::string(item[0].as_string().c_str())] = static_cast<int64_t>(i);
-                }
+            const auto &model = model_it->value().as_object();
+            const std::string model_type = json_string_or_empty(model, "type");
+            if (!model_type.empty()) {
+                embedding_config_.tokenizer_type = model_type;
+                tokenizer_model_type_ = model_type;
             } else {
-                onnx_status_message_ = "tokenizer.json model.vocab has unsupported type";
+                tokenizer_model_type_ = embedding_config_.tokenizer_type.empty()
+                    ? "basic_wordpiece"
+                    : embedding_config_.tokenizer_type;
+            }
+
+            auto vocab_it = model.find("vocab");
+            if (vocab_it != model.end()) {
+                add_vocab_from_json_value(vocab_it->value());
+            }
+            // Some minimized tokenizer.json fixtures and hand-written registries put vocab at root.
+            auto root_vocab = root.find("vocab");
+            if (root_vocab != root.end()) {
+                add_vocab_from_json_value(root_vocab->value());
+            }
+            add_added_tokens(root);
+
+            if (tokenizer_vocab_.empty()) {
+                onnx_status_message_ = "tokenizer.json has no supported vocab entries for model type " + tokenizer_model_type_;
+                tokenizer_status_message_ = onnx_status_message_;
                 return false;
             }
 
-            auto it_unk = tokenizer_vocab_.find("[UNK]");
-            if (it_unk != tokenizer_vocab_.end()) unk_token_id_ = it_unk->second;
-            auto it_cls = tokenizer_vocab_.find("[CLS]");
-            if (it_cls != tokenizer_vocab_.end()) cls_token_id_ = it_cls->second;
-            auto it_sep = tokenizer_vocab_.find("[SEP]");
-            if (it_sep != tokenizer_vocab_.end()) sep_token_id_ = it_sep->second;
-            auto it_pad = tokenizer_vocab_.find("[PAD]");
-            if (it_pad != tokenizer_vocab_.end()) pad_token_id_ = it_pad->second;
+            apply_tokenizer_special_ids(model);
 
-            auto it_unk_alt = tokenizer_vocab_.find("<unk>");
-            if (it_unk_alt != tokenizer_vocab_.end()) unk_token_id_ = it_unk_alt->second;
-            auto it_cls_alt = tokenizer_vocab_.find("<s>");
-            if (it_cls_alt != tokenizer_vocab_.end()) cls_token_id_ = it_cls_alt->second;
-            auto it_sep_alt = tokenizer_vocab_.find("</s>");
-            if (it_sep_alt != tokenizer_vocab_.end()) sep_token_id_ = it_sep_alt->second;
-            auto it_pad_alt = tokenizer_vocab_.find("<pad>");
-            if (it_pad_alt != tokenizer_vocab_.end()) pad_token_id_ = it_pad_alt->second;
-
-            if (root.contains("truncation") && root["truncation"].is_object()) {
-                auto &truncation = root["truncation"].as_object();
-                if (truncation.contains("max_length") && truncation["max_length"].is_int64()) {
-                    const auto max_length = truncation["max_length"].as_int64();
-                    if (max_length > 0 && embedding_config_.max_seq_len == 0) {
-                        embedding_config_.max_seq_len = static_cast<size_t>(max_length);
+            if (root.contains("truncation") && root.at("truncation").is_object()) {
+                auto &truncation = root.at("truncation").as_object();
+                if (truncation.contains("max_length") && truncation.at("max_length").is_int64()) {
+                    const auto max_length = truncation.at("max_length").as_int64();
+                    if (max_length > 0) {
+                        embedding_config_.max_seq_len = std::min<size_t>(
+                            embedding_config_.max_seq_len == 0 ? static_cast<size_t>(max_length) : embedding_config_.max_seq_len,
+                            static_cast<size_t>(max_length)
+                        );
                     }
                 }
             }
 
-            return !tokenizer_vocab_.empty();
+            tokenizer_vocab_size_ = tokenizer_vocab_.size();
+            tokenizer_status_message_ = "tokenizer loaded: type=" + tokenizer_model_type_ +
+                ", vocab=" + std::to_string(tokenizer_vocab_size_) +
+                ", max_seq_len=" + std::to_string(embedding_config_.max_seq_len);
+            return true;
         } catch (const std::exception &e) {
             onnx_status_message_ = std::string("tokenizer parse failed: ") + e.what();
+            tokenizer_status_message_ = onnx_status_message_;
             return false;
         }
     }
@@ -1550,21 +2256,44 @@ private:
         std::string current;
         current.reserve(32);
 
+        auto flush = [&]() {
+            if (!current.empty()) {
+                tokens.push_back(current);
+                current.clear();
+            }
+        };
+
         for (char raw_ch: text) {
             unsigned char ch = static_cast<unsigned char>(raw_ch);
             if (std::isalnum(ch) || ch == '_') {
                 current.push_back(embedding_config_.lowercase_tokens
                     ? static_cast<char>(std::tolower(ch))
                     : static_cast<char>(ch));
-            } else if (!current.empty()) {
-                tokens.push_back(current);
-                current.clear();
+            } else {
+                flush();
+                if (!std::isspace(ch)) {
+                    tokens.emplace_back(1, static_cast<char>(ch));
+                }
             }
         }
-        if (!current.empty()) {
-            tokens.push_back(current);
-        }
+        flush();
         return tokens;
+    }
+
+    std::optional<int64_t> lookup_token_id(const std::string& token, bool at_word_start) const {
+        if (token.empty()) {
+            return std::nullopt;
+        }
+        const std::vector<std::string> candidates = at_word_start
+            ? std::vector<std::string>{token, "▁" + token, "Ġ" + token, lower_ascii(token), "▁" + lower_ascii(token), "Ġ" + lower_ascii(token)}
+            : std::vector<std::string>{token, "##" + token, lower_ascii(token), "##" + lower_ascii(token)};
+        for (const auto& candidate : candidates) {
+            auto it = tokenizer_vocab_.find(candidate);
+            if (it != tokenizer_vocab_.end()) {
+                return it->second;
+            }
+        }
+        return std::nullopt;
     }
 
     std::vector<std::string> wordpiece_tokens_for(const std::string& token) const {
@@ -1602,6 +2331,50 @@ private:
         return pieces;
     }
 
+    bool active_tokenizer_is_wordpiece() const {
+        const std::string type = lower_ascii(embedding_config_.tokenizer_type.empty()
+            ? tokenizer_model_type_
+            : embedding_config_.tokenizer_type);
+        return type == "wordpiece" || type == "bertwordpiece" || type == "basic_wordpiece";
+    }
+
+    std::vector<int64_t> content_token_ids_for_onnx(const std::string& text, size_t limit_without_specials) const {
+        std::vector<int64_t> ids;
+        ids.reserve(limit_without_specials == 0 ? 32 : limit_without_specials);
+        const bool use_wordpiece = active_tokenizer_is_wordpiece();
+        for (const auto &token: basic_tokenize_for_onnx(text)) {
+            if (use_wordpiece) {
+                for (const auto& piece : wordpiece_tokens_for(token)) {
+                    if (ids.size() >= limit_without_specials) {
+                        return ids;
+                    }
+                    auto lookup = lookup_token_id(piece, ids.empty());
+                    ids.push_back(lookup.value_or(unk_token_id_));
+                }
+            } else {
+                if (ids.size() >= limit_without_specials) {
+                    return ids;
+                }
+                auto lookup = lookup_token_id(token, true);
+                ids.push_back(lookup.value_or(unk_token_id_));
+            }
+        }
+        return ids;
+    }
+
+    size_t embedding_content_token_limit() const {
+        const size_t seq_len = embedding_config_.max_seq_len == 0 ? 256 : embedding_config_.max_seq_len;
+        const size_t margin = std::min(embedding_config_.chunk_token_margin, seq_len > 1 ? seq_len - 1 : 0);
+        return std::max<size_t>(1, seq_len > margin ? seq_len - margin : 1);
+    }
+
+    size_t estimate_embedding_token_count(const std::string& text) const {
+        if (embedding_config_.backend == "onnx" && !tokenizer_vocab_.empty()) {
+            return content_token_ids_for_onnx(text, embedding_content_token_limit()).size() + embedding_config_.chunk_token_margin;
+        }
+        return vectorizer_.tokenize(text).size();
+    }
+
     std::pair<std::vector<int64_t>, std::vector<int64_t>> encode_for_onnx(const std::string &text) const {
         std::vector<int64_t> input_ids;
         std::vector<int64_t> attention_mask;
@@ -1611,21 +2384,13 @@ private:
         input_ids.push_back(cls_token_id_);
         attention_mask.push_back(1);
 
-        const bool use_wordpiece = embedding_config_.tokenizer_type == "WordPiece" ||
-                                   embedding_config_.tokenizer_type == "BertWordPiece";
-        for (const auto &token: basic_tokenize_for_onnx(text)) {
-            const auto pieces = use_wordpiece ? wordpiece_tokens_for(token) : std::vector<std::string>{token};
-            for (const auto& piece : pieces) {
-                if (input_ids.size() + 1 >= embedding_config_.max_seq_len) {
-                    break;
-                }
-                auto it = tokenizer_vocab_.find(piece);
-                input_ids.push_back(it != tokenizer_vocab_.end() ? it->second : unk_token_id_);
-                attention_mask.push_back(1);
-            }
+        const size_t content_limit = embedding_config_.max_seq_len > 1 ? embedding_config_.max_seq_len - 1 : 0;
+        for (const auto id : content_token_ids_for_onnx(text, content_limit)) {
             if (input_ids.size() + 1 >= embedding_config_.max_seq_len) {
                 break;
             }
+            input_ids.push_back(id);
+            attention_mask.push_back(1);
         }
 
         if (input_ids.size() < embedding_config_.max_seq_len) {
@@ -1675,11 +2440,13 @@ private:
 
     void initialize_embedding_backend() {
         onnx_ready_ = false;
+        reset_tokenizer_state();
         if (embedding_config_.max_seq_len == 0) {
             embedding_config_.max_seq_len = 256;
         }
         embedding_dim_ = EMBEDDING_DIM;
         onnx_status_message_ = "tfidf backend active";
+        tokenizer_status_message_ = "tfidf backend does not use an external tokenizer";
 
         if (embedding_config_.backend != "onnx") {
             refresh_embedding_model_info(true, onnx_status_message_);
@@ -1931,43 +2698,135 @@ public:
         }
 
 
-        try {
-            // Release previous handle before opening new DB to avoid self-lock.
+        xapian_diagnostics_ = XapianSearchDiagnostics{};
+        xapian_diagnostics_.enabled = search_config_.xapian_enabled;
+        xapian_diagnostics_.language = search_config_.xapian_language;
+        xapian_diagnostics_.stemming = search_config_.xapian_stemming;
+        xapian_diagnostics_.stemming_strategy = search_config_.xapian_stemming_strategy;
+        xapian_diagnostics_.cjk_ngrams = search_config_.xapian_cjk_ngrams;
+        xapian_diagnostics_.word_breaks = search_config_.xapian_word_breaks;
+        xapian_diagnostics_.spelling = search_config_.xapian_spelling;
+        xapian_diagnostics_.metadata_prefixes = search_config_.xapian_metadata_prefixes;
+
+        if (!search_config_.xapian_enabled) {
             xapian_db_.reset();
-            xapian_db_ = std::make_unique<Xapian::WritableDatabase>("xapian_index", Xapian::DB_CREATE_OR_OVERWRITE);
+            xapian_diagnostics_.status = "disabled";
+            xapian_diagnostics_.detail = "Xapian lexical index disabled by search.xapian_enabled=false";
+            std::cout << "ℹ️  Xapian индекс отключён настройкой search.xapian_enabled=false" << std::endl;
+        } else {
+            try {
+                // Release previous handle before opening new DB to avoid self-lock.
+                xapian_db_.reset();
+                xapian_db_ = std::make_unique<Xapian::WritableDatabase>("xapian_index", Xapian::DB_CREATE_OR_OVERWRITE);
 
-            Xapian::TermGenerator termgen;
-            Xapian::Stem stemmer("english");
-            termgen.set_stemmer(stemmer);
+                std::string first_effective_language;
+                for (size_t i = 0; i < documents_.size(); ++i) {
+                    const auto &doc = documents_[i];
+                    const auto effective_language = qornix_rag_xapian_detail::detectLanguage(
+                        search_config_.xapian_language,
+                        doc.content,
+                        doc.language);
+                    if (first_effective_language.empty()) {
+                        first_effective_language = effective_language;
+                    }
 
-            for (size_t i = 0; i < documents_.size(); ++i) {
-                const auto &doc = documents_[i];
+                    Xapian::Document xdoc;
+                    xdoc.set_data(std::to_string(i));
 
-                Xapian::Document xdoc;
-                xdoc.set_data(std::to_string(i));
+                    Xapian::TermGenerator termgen;
+                    try {
+                        qornix_rag_xapian_detail::configureTermGenerator(termgen, search_config_, effective_language);
+                    } catch (const Xapian::Error& e) {
+                        std::cerr << "⚠️  Xapian stemmer unavailable for language '" << effective_language
+                                  << "': " << e.get_description() << ". Indexing without stemming." << std::endl;
+                    }
+                    termgen.set_document(xdoc);
 
-                termgen.set_document(xdoc);
+                    termgen.index_text(doc.relative_path, 2, "QPATH");
+                    termgen.index_text(source_path_for_document(doc), 2, "QSOURCE");
+                    termgen.index_text(doc.type, 2, "QTYPE");
+                    termgen.index_text(effective_language, 1, "QLANG");
+                    termgen.index_text(doc.content);
 
-                termgen.index_text(doc.relative_path, 2.0, "QPATH");
-                xdoc.add_term("QPATH" + doc.relative_path, 2.0);
+                    qornix_rag_xapian_detail::addExactTerm(xdoc, "QPATH", doc.relative_path, 2);
+                    qornix_rag_xapian_detail::addExactTerm(xdoc, "QSOURCE", source_path_for_document(doc), 2);
+                    qornix_rag_xapian_detail::addExactTerm(xdoc, "QTYPE", doc.type, 2);
+                    qornix_rag_xapian_detail::addExactTerm(xdoc, "QLANG", effective_language, 1);
+                    if (search_config_.xapian_word_breaks) {
+                        qornix_rag_xapian_detail::addWordBreakTerms(xdoc, doc.relative_path, "QB");
+                        qornix_rag_xapian_detail::addWordBreakTerms(xdoc, source_path_for_document(doc), "QB");
+                    }
 
-                termgen.index_text(doc.content);
+                    if (search_config_.xapian_metadata_prefixes) {
+                        for (const auto& [meta_key, meta_value] : doc.metadata) {
+                            if (meta_key.empty() || meta_value.empty()) {
+                                continue;
+                            }
+                            termgen.index_text(meta_key + " " + meta_value, 1, "QMETA");
+                            qornix_rag_xapian_detail::addExactTerm(xdoc, "QMETA", meta_key, 1);
+                            qornix_rag_xapian_detail::addExactTerm(xdoc, "QMETA", meta_key + ":" + meta_value, 1);
+                            if (search_config_.xapian_word_breaks) {
+                                qornix_rag_xapian_detail::addWordBreakTerms(xdoc, meta_key, "QB");
+                                qornix_rag_xapian_detail::addWordBreakTerms(xdoc, meta_value, "QB");
+                            }
 
-                std::istringstream path_stream(doc.relative_path);
-                std::string path_token;
-                while (path_stream >> path_token) {
-                    xdoc.add_posting("QPATH" + path_token, i, 2.0);
+                            // Keep the legacy exact metadata terms too, so older metadata-aware
+                            // queries and tests remain compatible.
+                            const auto key_token = metadata_term_token(meta_key);
+                            const auto value_token = metadata_term_token(meta_value);
+                            if (!key_token.empty()) {
+                                xdoc.add_term("XMETAK_" + key_token);
+                            }
+                            if (!key_token.empty() && !value_token.empty()) {
+                                xdoc.add_term("XMETAV_" + key_token + "_" + value_token);
+                            }
+                        }
+
+                        const auto symbol = doc.metadata.find("chunk_symbol_name");
+                        if (symbol != doc.metadata.end()) {
+                            termgen.index_text(symbol->second, 4, "QSYMBOL");
+                            qornix_rag_xapian_detail::addExactTerm(xdoc, "QSYMBOL", symbol->second, 3);
+                        }
+                        const auto page = doc.metadata.find("chunk_page");
+                        if (page != doc.metadata.end()) {
+                            qornix_rag_xapian_detail::addExactTerm(xdoc, "QPAGE", page->second, 2);
+                        }
+                        const auto sheet = doc.metadata.find("chunk_sheet");
+                        if (sheet != doc.metadata.end()) {
+                            termgen.index_text(sheet->second, 3, "QSHEET");
+                            qornix_rag_xapian_detail::addExactTerm(xdoc, "QSHEET", sheet->second, 2);
+                        }
+                        const auto slide = doc.metadata.find("chunk_slide");
+                        if (slide != doc.metadata.end()) {
+                            qornix_rag_xapian_detail::addExactTerm(xdoc, "QSLIDE", slide->second, 2);
+                        }
+                    }
+
+                    if (search_config_.xapian_cjk_ngrams) {
+                        qornix_rag_xapian_detail::addCjkTerms(xdoc, doc.content, "QCJK");
+                    }
+
+                    xapian_db_->add_document(xdoc);
                 }
 
-                xapian_db_->add_document(xdoc);
+                xapian_db_->commit();
+                xapian_diagnostics_.ready = true;
+                xapian_diagnostics_.status = "ready";
+                xapian_diagnostics_.detail = "Xapian lexical index built with language-aware settings";
+                xapian_diagnostics_.effective_index_language = first_effective_language.empty() ? "none" : first_effective_language;
+                xapian_diagnostics_.documents_indexed = documents_.size();
+                std::cout << "✅ Xapian индекс построен (" << documents_.size() << " документов)"
+                          << " [language=" << xapian_diagnostics_.language
+                          << ", stemming=" << (xapian_diagnostics_.stemming ? "on" : "off")
+                          << ", strategy=" << xapian_diagnostics_.stemming_strategy << "]" << std::endl;
+                xapian_ready = true;
+            } catch (const Xapian::Error &e) {
+                xapian_db_.reset();
+                xapian_diagnostics_.ready = false;
+                xapian_diagnostics_.status = "error";
+                xapian_diagnostics_.detail = e.get_description();
+                std::cerr << "❌ Error building Xapian index: " << e.get_description() << std::endl;
             }
-
-            xapian_db_->commit();
-            std::cout << "✅ Xapian индекс построен (" << documents_.size() << " документов)" << std::endl;
-            xapian_ready = true;
-        } catch (const Xapian::Error &e) {
-            xapian_db_.reset();
-            std::cerr << "❌ Error building Xapian index: " << e.get_description() << std::endl;
         }
 
         is_hybrid_indexed_ = vector_ready;
@@ -1993,14 +2852,25 @@ public:
         const std::vector<float> &query_embedding,
         size_t top_k = 10
     ) {
+        SearchOptions options;
+        options.top_k = top_k;
+        return hybrid_search(query, query_embedding, options);
+    }
+
+    std::vector<SearchResult> hybrid_search(
+        const std::string &query,
+        const std::vector<float> &query_embedding,
+        const SearchOptions &options
+    ) {
         if (!is_hybrid_indexed_) {
             std::cout << "⚠️  Hybrid index not ready, falling back to BM25" << std::endl;
-            return search(query, top_k);
+            return bm25_search(query, options);
         }
 
         const std::string expanded_query = expand_query(query);
-        const size_t requested_top_k = std::max<size_t>(1, top_k);
-        const size_t first_stage_top_k = requested_top_k * std::max<size_t>(1, search_config_.rerank_input_multiplier);
+        const size_t requested_top_k = std::max<size_t>(1, options.top_k);
+        const size_t filter_multiplier = options.filters.empty() ? 1 : 4;
+        const size_t first_stage_top_k = requested_top_k * std::max<size_t>(1, search_config_.rerank_input_multiplier) * filter_multiplier;
 
         std::unordered_map<size_t, double> hnsw_scores;
         std::unordered_map<size_t, double> xapian_scores;
@@ -2021,30 +2891,71 @@ public:
         }
 
         try {
-            if (xapian_db_) {
+            if (search_config_.xapian_enabled && xapian_db_) {
                 Xapian::Enquire enquire(*xapian_db_);
 
-                std::vector<std::string> query_terms = vectorizer_.tokenize(expanded_query);
                 Xapian::QueryParser parser;
                 parser.set_database(*xapian_db_);
                 parser.set_default_op(Xapian::Query::op::OP_OR);
+                qornix_rag_xapian_detail::configurePrefixes(parser);
+
+                const auto query_language = qornix_rag_xapian_detail::detectLanguage(
+                    search_config_.xapian_language,
+                    expanded_query);
+                xapian_diagnostics_.effective_query_language = query_language;
+                try {
+                    qornix_rag_xapian_detail::configureQueryParser(parser, search_config_, query_language);
+                } catch (const Xapian::Error& e) {
+                    std::cerr << "⚠️  Xapian query stemmer unavailable for language '" << query_language
+                              << "': " << e.get_description() << ". Searching without stemming." << std::endl;
+                }
+
+                unsigned flags = Xapian::QueryParser::FLAG_DEFAULT;
+                if (search_config_.xapian_spelling) {
+                    flags |= Xapian::QueryParser::FLAG_SPELLING_CORRECTION;
+                }
 
                 Xapian::Query query_obj;
-                for (const auto& term : query_terms) {
-                    query_obj = Xapian::Query(Xapian::Query::op::OP_OR, query_obj, Xapian::Query(term));
+                try {
+                    query_obj = parser.parse_query(expanded_query, flags);
+                } catch (const Xapian::Error&) {
+                    // Code/config queries often contain punctuation that the query parser treats
+                    // as syntax. Keep retrieval robust by falling back to exact token OR search.
+                    std::vector<std::string> query_terms = vectorizer_.tokenize(expanded_query);
+                    for (const auto& term : query_terms) {
+                        query_obj = qornix_rag_xapian_detail::orWithTerm(query_obj, term);
+                        query_obj = qornix_rag_xapian_detail::orWithTerm(query_obj, "QPATH" + qornix_rag_xapian_detail::safeTermValue(term));
+                        query_obj = qornix_rag_xapian_detail::orWithTerm(query_obj, "QMETA" + qornix_rag_xapian_detail::safeTermValue(term));
+                    }
                 }
 
-                enquire.set_query(query_obj);
-                auto matches = enquire.get_mset(0, first_stage_top_k * 2);
-
-                for (auto it = matches.begin(); it != matches.end(); ++it) {
-                    std::string data = it.get_document().get_data();
-                    size_t doc_id = get_document_id_from_data(data);
-                    double score = static_cast<double>(it.get_percent()) / 100.0;
-                    xapian_scores[doc_id] = score;
+                if (search_config_.xapian_word_breaks) {
+                    for (const auto& token : qornix_rag_xapian_detail::splitWordBreakTokens(expanded_query)) {
+                        query_obj = qornix_rag_xapian_detail::orWithTerm(query_obj, "QB" + qornix_rag_xapian_detail::safeTermValue(token));
+                    }
                 }
 
-                std::cout << "📊 Xapian нашел: " << matches.size() << " результатов" << std::endl;
+                if (search_config_.xapian_cjk_ngrams) {
+                    for (const auto& gram : qornix_rag_xapian_detail::extractCjkNgrams(expanded_query)) {
+                        query_obj = qornix_rag_xapian_detail::orWithTerm(query_obj, "QCJK" + gram);
+                    }
+                }
+
+                if (!query_obj.empty()) {
+                    enquire.set_query(query_obj);
+                    auto matches = enquire.get_mset(0, first_stage_top_k * 2);
+
+                    for (auto it = matches.begin(); it != matches.end(); ++it) {
+                        std::string data = it.get_document().get_data();
+                        size_t doc_id = get_document_id_from_data(data);
+                        double score = static_cast<double>(it.get_percent()) / 100.0;
+                        xapian_scores[doc_id] = score;
+                    }
+
+                    std::cout << "📊 Xapian нашел: " << matches.size() << " результатов" << std::endl;
+                } else {
+                    std::cout << "📊 Xapian пропущен: пустой запрос после парсинга" << std::endl;
+                }
             }
         } catch (const Xapian::Error& e) {
             std::cerr << "⚠️  Xapian search error: " << e.get_description() << std::endl;
@@ -2092,6 +3003,9 @@ public:
             if (score < search_config_.min_score_threshold) continue;
 
             if (doc_idx < documents_.size()) {
+                if (!document_matches_filters(documents_[doc_idx], options.filters)) {
+                    continue;
+                }
                 SearchResult result;
                 result.document = documents_[doc_idx];
                 result.score = score;
@@ -2119,14 +3033,9 @@ public:
         return final_results;
     }
 
-    std::vector<SearchResult> search(const std::string &query, size_t top_k = 10) {
+    std::vector<SearchResult> bm25_search(const std::string &query, const SearchOptions& options) {
         if (!is_indexed_) {
             throw std::runtime_error("Project not indexed. Call index_project() first.");
-        }
-
-        if (search_config_.use_hybrid && is_hybrid_indexed_) {
-            auto query_embedding = generate_embedding(query);
-            return hybrid_search(query, query_embedding, top_k);
         }
 
         const std::string expanded_query = expand_query(query);
@@ -2134,6 +3043,10 @@ public:
         std::vector<SearchResult> results;
 
         for (const auto &doc: documents_) {
+            if (!document_matches_filters(doc, options.filters)) {
+                continue;
+            }
+
             double score = vectorizer_.compute_bm25_score(doc.content, query_terms);
 
             std::string filename = std::filesystem::path(doc.relative_path).filename().string();
@@ -2146,6 +3059,11 @@ public:
             if (doc.relative_path.find("include") != std::string::npos ||
                 doc.relative_path.find("src") != std::string::npos) {
                 score *= 1.2;
+            }
+
+            // Keep metadata-only queries discoverable even when the content score is low.
+            if (score <= 0.1 && !options.filters.empty()) {
+                score = 0.12;
             }
 
             if (score > 0.1) {
@@ -2168,11 +3086,30 @@ public:
 
         rerank_results(results, query, query_terms);
 
-        if (results.size() > top_k) {
-            results.resize(top_k);
+        if (results.size() > options.top_k) {
+            results.resize(options.top_k);
         }
 
         return results;
+    }
+
+    std::vector<SearchResult> search(const std::string &query, const SearchOptions& options) {
+        if (!is_indexed_) {
+            throw std::runtime_error("Project not indexed. Call index_project() first.");
+        }
+
+        if (search_config_.use_hybrid && is_hybrid_indexed_) {
+            auto query_embedding = generate_embedding(query);
+            return hybrid_search(query, query_embedding, options);
+        }
+
+        return bm25_search(query, options);
+    }
+
+    std::vector<SearchResult> search(const std::string &query, size_t top_k = 10) {
+        SearchOptions options;
+        options.top_k = top_k;
+        return search(query, options);
     }
 
     std::string build_context(const std::string &query, size_t max_length = 8000) {
@@ -2199,6 +3136,18 @@ public:
             if (chunk_index != result.document.metadata.end()) {
                 header += "Фрагмент: " + chunk_index->second + "\n";
             }
+            auto add_locator = [&](const std::string& label, const std::string& key) {
+                const auto it = result.document.metadata.find(key);
+                if (it != result.document.metadata.end() && !it->second.empty()) {
+                    header += label + ": " + it->second + "\n";
+                }
+            };
+            add_locator("Страница", "chunk_page");
+            add_locator("Слайд", "chunk_slide");
+            add_locator("Лист", "chunk_sheet");
+            add_locator("Заголовок", "chunk_heading");
+            add_locator("Символ", "chunk_symbol_name");
+            add_locator("OCR-регион", "chunk_ocr_region");
             header += "Тип: " + result.document.type + ", Язык: " + result.document.language + "\n";
             std::ostringstream score_stream;
             score_stream << std::fixed << std::setprecision(2) << result.score;
@@ -2354,7 +3303,7 @@ public:
     void indexSources() {
         std::lock_guard<std::mutex> lock(mutex_);
         auto index_start = std::chrono::steady_clock::now();
-        auto reusable_embeddings = force_reembed_next_index_
+        auto reusable_embeddings = (force_reembed_next_index_ || !embedding_config_.persistent_cache_enabled)
             ? std::unordered_map<std::string, std::vector<float>>{}
             : collect_reusable_embeddings();
         reset_incremental_stats(reusable_embeddings.size());

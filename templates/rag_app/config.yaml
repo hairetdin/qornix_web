@@ -66,6 +66,11 @@ rag:
     request_timeout_ms: 30000
     temperature: 0.2
     max_tokens: 2048
+    prompt_template: |
+      Контекст:
+      {context}
+
+      Вопрос: {question}
 
   embedding:
     # Default is dependency-light lexical retrieval. It works without model files.
@@ -122,6 +127,19 @@ rag:
     top_k: 5
     min_score_threshold: 0.0
     use_query_expansion: true
+    # Xapian lexical search hardening. Xapian is the exact/lexical
+    # side of hybrid retrieval; vector search handles semantic similarity.
+    xapian_enabled: true
+    # auto is a lightweight Cyrillic-vs-default heuristic. For deterministic
+    # single-language projects, set an explicit Xapian language such as
+    # en/english, de/german, fr/french, es/spanish, ru/russian, or none.
+    xapian_language: auto
+    xapian_stemming: true
+    xapian_stemming_strategy: some
+    xapian_cjk_ngrams: false
+    xapian_word_breaks: true
+    xapian_spelling: false
+    xapian_metadata_prefixes: true
     use_reranking: true
     rerank_input_multiplier: 3
     rerank_path_boost: 0.15
@@ -152,7 +170,23 @@ rag:
     protect_admin_routes: true
     protect_write_routes: true
 
+  upload:
+    enabled: true
+    uploads_dir: data/uploads
+    max_file_size_kb: 16384
+    max_files_per_request: 20
+    auto_ingest: true
+    async_ingest: false
+    overwrite_existing: false
+    # Comma-separated allowlists are used because the integrated config loader
+    # flattens scalar YAML values. Keep this list aligned with ingestion support.
+    allowed_extensions: ".txt,.md,.rst,.adoc,.json,.yaml,.yml,.xml,.html,.htm,.csv,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
+    allowed_mime_types: "text/plain,text/markdown,text/csv,text/html,application/json,application/xml,application/pdf,application/x-yaml,application/yaml,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/tiff,image/bmp,image/webp"
+
   indexing:
+    # Optional directory scan root. Leave unset to start in upload/API/QA mode.
+    # scan_path: knowledge_base
+    auto_index_on_startup: true
     max_file_size_kb: 4096
 
   sqlite:
@@ -169,9 +203,16 @@ rag:
 
   cache:
     enabled: true
-    backend: memory
-    max_size: 1000
+    backend: memory # memory | redis
+    max_size: 1000  # Memory LRU capacity; Redis capacity is controlled by Redis
     ttl_seconds: 3600
+    key_prefix: qornix_rag:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      db: 0
+      password: ""
+      ttl_seconds: 3600
 
   rate_limit:
     enabled: false

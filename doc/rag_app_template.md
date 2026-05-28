@@ -93,6 +93,39 @@ ollama pull llama3.2:3b
 
 If you already have a different local model, change `rag.llm.model` in the generated app's `config.yaml`.
 
+## LLM Response Cache
+
+Generated apps enable an in-process memory cache by default:
+
+```yaml
+rag:
+  cache:
+    enabled: true
+    backend: memory
+    max_size: 1000
+    ttl_seconds: 3600
+```
+
+This cache stores repeated LLM answer payloads for the same question/context/model/settings combination. It does not store parsed documents, embeddings, vector indexes, Xapian indexes or SQLite QA records.
+
+Memory cache is simple and fast, but it is cleared on restart and is not shared between multiple app instances.
+
+A Redis configuration block is available as the documented external/shared-cache shape:
+
+```yaml
+rag:
+  cache:
+    backend: redis
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      db: 0
+      password: ""
+      ttl_seconds: 3600
+```
+
+Redis cache is implemented through the built-in RESP TCP client. Use `backend: memory` for a single local app and `backend: redis` when several app instances should share completed LLM response cache entries. If Redis is unavailable at startup, the app falls back to memory cache.
+
 ## Retrieval Models
 
 You do not need an ONNX model for the first run. The default generated app uses TF-IDF retrieval:
@@ -223,12 +256,12 @@ The application resolves model paths relative to its root directory. Model files
 
 ## Knowledge Base
 
-Put Markdown files in `knowledge_base/`, then index from the UI or API:
+Generated RAG apps do not scan `knowledge_base/` automatically unless `rag.indexing.scan_path` is configured. Put Markdown files in `knowledge_base/`, then index that directory from the UI or API:
 
 ```bash
 curl -X POST http://127.0.0.1:8008/api/rag/index \
   -H 'Content-Type: application/json' \
-  -d '{}'
+  -d '{"scan_path":"knowledge_base"}'
 ```
 
 Ask a question:
@@ -248,3 +281,135 @@ cd build/deploy/my_rag_app
 ```
 
 The deploy bundle contains the executable, `config.yaml`, RAG UI templates, static assets, docs, `knowledge_base/`, `models/`, `data/`, and `logs/`.
+
+## Current RAG Feature Set In Generated Apps
+
+The `rag_app` template now includes the same product-facing RAG UI as standalone mode, with app-local paths and `/api/rag/*` route prefixes.
+
+Important included features:
+
+- upload tab with secure multi-file document upload;
+- upload validation by extension, MIME type, file size and max file count;
+- app-local upload storage under `data/uploads`;
+- ingestion/reindex after upload so documents become searchable;
+- delete flow for uploaded files;
+- local HNSW vector index and Xapian lexical index;
+- SQLite QA/wiki storage under `data/rag_kb.db`;
+- QA duplicate preview, history, tags and safe Markdown rendering;
+- metadata-aware search/ask filters and citation locators;
+- LLM provider diagnostics that separate provider availability from missing configured model;
+- embedding model registry diagnostics under `/api/rag/embedding/models`;
+- optional auth/RBAC integration for write/admin RAG routes.
+
+For the complete feature/dependency/model guide, read:
+
+```text
+qornix_rag/doc/FULL_RAG_GUIDE.md
+```
+
+## Generated App Profiles
+
+### Lightweight profile
+
+This is the generated default and is suitable for first run:
+
+```yaml
+rag:
+  embedding:
+    backend: tfidf
+    enable_fallback: true
+  vector_store:
+    backend: local_hnsw
+  upload:
+    enabled: true
+    uploads_dir: data/uploads
+```
+
+It does not require ONNX Runtime or downloaded embedding files.
+
+### Full semantic profile
+
+After installing ONNX Runtime and placing compatible model files under `models/`, switch to:
+
+```yaml
+rag:
+  embedding:
+    backend: onnx
+    active_model_id: local-semantic-v1
+    models_dir: models
+    auto_discover_models: true
+    enable_fallback: true
+    registry:
+      local-semantic-v1:
+        backend: onnx
+        model_path: models/semantic_model.onnx
+        tokenizer_path: models/tokenizer.json
+        tokenizer_type: WordPiece
+        pooling: mean
+        dimension: 384
+        max_seq_len: 256
+        normalize_embeddings: true
+```
+
+Then rebuild if ONNX Runtime was installed after the app was first configured:
+
+```bash
+rm -rf build
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/onnxruntime
+cmake --build build -j$(nproc)
+```
+
+### LLM model selection
+
+The template default is intentionally small:
+
+```yaml
+rag:
+  llm:
+    api_url: http://localhost:11434
+    model: llama3.2:3b
+```
+
+Use `ollama list` and copy the exact model id into `rag.llm.model`. If Ollama is reachable but the configured model is missing, the UI will show available models instead of incorrectly reporting that the provider is down.
+
+
+## Xapian language-aware retrieval
+
+Generated RAG apps inherit the same Xapian controls as standalone mode:
+
+```yaml
+rag:
+  search:
+    xapian_enabled: true
+    xapian_language: auto
+    xapian_stemming: true
+    xapian_stemming_strategy: some
+    xapian_cjk_ngrams: false
+    xapian_word_breaks: true
+    xapian_spelling: false
+    xapian_metadata_prefixes: true
+```
+
+Use an explicit language for single-language documentation projects, for example `en`/`english`, `de`/`german`, `fr`/`french`, `es`/`spanish`, `ru`/`russian`, or any other stemmer supported by the installed Xapian package. `auto` uses a small Cyrillic-vs-default heuristic; it is not universal language detection. Use `none` with `xapian_stemming: false` for code-only projects where exact identifiers are more important than word forms. Diagnostics are available from `/api/rag/health` and `/api/rag/admin/diagnostics`. See Xapian's authoritative language list: https://xapian.org/docs/apidoc/html/classXapian_1_1Stem.html
+
+
+## Redis response cache
+
+Generated RAG apps support the same LLM response cache backends as standalone `qornix_rag`. Use `rag.cache.backend: memory` for a single local instance. Use `rag.cache.backend: redis` when several app instances should share cached LLM answers. Redis stores only completed LLM response cache entries; uploaded files, SQLite QA/wiki data, embeddings, HNSW/Faiss/Qdrant/pgvector and Xapian are separate storage layers.
+
+Example:
+
+```yaml
+rag:
+  cache:
+    enabled: true
+    backend: redis
+    ttl_seconds: 3600
+    key_prefix: qornix_rag:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      db: 0
+      password: ""
+      ttl_seconds: 3600
+```

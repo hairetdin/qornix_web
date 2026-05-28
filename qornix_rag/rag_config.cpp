@@ -10,8 +10,13 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <set>
+
+#include <xapian.h>
 
 namespace {
 
@@ -59,6 +64,32 @@ bool isSupportedEmbeddingBackend(const std::string& backend) {
 
 bool isSupportedPooling(const std::string& pooling) {
     return pooling == "mean" || pooling == "cls";
+}
+
+bool isSupportedXapianLanguage(const std::string& language) {
+    const auto value = lower(language);
+    if (value.empty() || value == "default" || value == "auto" || value == "detect" ||
+        value == "none" || value == "off" || value == "disabled" || value == "false") {
+        return true;
+    }
+
+    // Delegate real stemmer-name validation to the installed Xapian package
+    // instead of maintaining a partial qornix-side list. Xapian::Stem accepts
+    // documented language names and aliases such as "english"/"en" and throws
+    // Xapian::InvalidArgumentError when a stemmer is unavailable in this build.
+    try {
+        Xapian::Stem stemmer(value);
+        (void)stemmer;
+        return true;
+    } catch (const Xapian::InvalidArgumentError&) {
+        return false;
+    }
+}
+
+bool isSupportedXapianStemmingStrategy(const std::string& strategy) {
+    const auto value = lower(strategy);
+    return value == "none" || value == "off" || value == "false" ||
+           value == "some" || value == "all";
 }
 
 void addWarning(RagConfig& config, const std::string& warning) {
@@ -204,20 +235,202 @@ size_t getRegistrySize(const Map& values,
     }, fallback);
 }
 
-void validateEmbeddingModel(RagConfig& config, const EmbeddingModelDefinition& model) {
+std::string sanitizeModelId(std::string value) {
+    if (value.empty()) {
+        value = "local-model";
+    }
+    std::string out;
+    out.reserve(value.size());
+    for (unsigned char ch : value) {
+        if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.') {
+            out.push_back(static_cast<char>(std::tolower(ch)));
+        } else if (!out.empty() && out.back() != '-') {
+            out.push_back('-');
+        }
+    }
+    while (!out.empty() && out.back() == '-') {
+        out.pop_back();
+    }
+    return out.empty() ? "local-model" : out;
+}
+
+struct TokenizerProbeResult {
+    bool ok = false;
+    std::string type;
+    size_t vocab_size = 0;
+    size_t max_seq_len = 0;
+    std::string status;
+};
+
+size_t jsonVocabSize(const boost::json::value& value) {
+    if (value.is_object()) {
+        return value.as_object().size();
+    }
+    if (value.is_array()) {
+        return value.as_array().size();
+    }
+    return 0;
+}
+
+TokenizerProbeResult probeTokenizerJson(const std::string& tokenizer_path) {
+    TokenizerProbeResult result;
+    if (tokenizer_path.empty()) {
+        result.status = "tokenizer_path is empty";
+        return result;
+    }
+    std::ifstream in(tokenizer_path);
+    if (!in.is_open()) {
+        result.status = "tokenizer.json is missing: " + tokenizer_path;
+        return result;
+    }
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    try {
+        auto parsed = boost::json::parse(buffer.str());
+        if (!parsed.is_object()) {
+            result.status = "tokenizer root is not an object";
+            return result;
+        }
+        const auto& root = parsed.as_object();
+        auto model_it = root.find("model");
+        if (model_it == root.end() || !model_it->value().is_object()) {
+            result.status = "tokenizer model object is missing";
+            return result;
+        }
+        const auto& model = model_it->value().as_object();
+        auto type_it = model.find("type");
+        if (type_it != model.end() && type_it->value().is_string()) {
+            result.type = std::string(type_it->value().as_string().c_str());
+        }
+        auto vocab_it = model.find("vocab");
+        if (vocab_it != model.end()) {
+            result.vocab_size = jsonVocabSize(vocab_it->value());
+        }
+        auto root_vocab = root.find("vocab");
+        if (result.vocab_size == 0 && root_vocab != root.end()) {
+            result.vocab_size = jsonVocabSize(root_vocab->value());
+        }
+        auto added = root.find("added_tokens");
+        if (added != root.end() && added->value().is_array()) {
+            result.vocab_size += added->value().as_array().size();
+        }
+        auto trunc = root.find("truncation");
+        if (trunc != root.end() && trunc->value().is_object()) {
+            const auto& truncation = trunc->value().as_object();
+            auto max_it = truncation.find("max_length");
+            if (max_it != truncation.end() && max_it->value().is_int64() && max_it->value().as_int64() > 0) {
+                result.max_seq_len = static_cast<size_t>(max_it->value().as_int64());
+            }
+        }
+        result.ok = result.vocab_size > 0;
+        result.status = result.ok
+            ? "tokenizer compatible: type=" + (result.type.empty() ? "unknown" : result.type) +
+              ", vocab=" + std::to_string(result.vocab_size)
+            : "tokenizer has no supported vocab entries";
+    } catch (const std::exception& e) {
+        result.status = std::string("tokenizer parse failed: ") + e.what();
+    }
+    return result;
+}
+
+void validateEmbeddingModel(RagConfig& config, EmbeddingModelDefinition& model) {
     if (!isSupportedEmbeddingBackend(model.backend)) {
         addWarning(config, "embedding.registry." + model.id + ".backend unsupported: " + model.backend);
+    }
+    if (!isSupportedPooling(model.pooling)) {
+        addWarning(config, "embedding.registry." + model.id + ".pooling unsupported: " + model.pooling);
     }
     if (model.backend == "onnx") {
         if (model.model_path.empty()) {
             addWarning(config, "embedding.registry." + model.id + ".model_path is required for onnx backend");
+        } else if (config.engine.embedding.validate_model_files && !std::filesystem::exists(model.model_path)) {
+            addWarning(config, "embedding.registry." + model.id + ".model_path not found: " + model.model_path);
+            model.model_status = "missing model file";
+        } else {
+            model.model_status = "model file present";
         }
         if (model.tokenizer_path.empty()) {
             addWarning(config, "embedding.registry." + model.id + ".tokenizer_path is required for onnx backend");
+        } else if (config.engine.embedding.validate_model_files) {
+            auto probe = probeTokenizerJson(model.tokenizer_path);
+            model.tokenizer_status = probe.status;
+            model.tokenizer_vocab_size = probe.vocab_size;
+            if (!probe.type.empty() && (model.tokenizer_type.empty() || model.tokenizer_type == "basic_wordpiece")) {
+                model.tokenizer_type = probe.type;
+            }
+            if (probe.max_seq_len > 0 && model.max_seq_len > probe.max_seq_len) {
+                model.max_seq_len = probe.max_seq_len;
+            }
+            if (!probe.ok) {
+                addWarning(config, "embedding.registry." + model.id + ".tokenizer incompatible: " + probe.status);
+            }
         }
+        model.files_present = !model.model_path.empty() && !model.tokenizer_path.empty()
+            && std::filesystem::exists(model.model_path)
+            && std::filesystem::exists(model.tokenizer_path);
+    } else {
+        model.files_present = true;
+        model.model_status = "tfidf backend does not require model files";
+        model.tokenizer_status = "tfidf backend does not require tokenizer.json";
     }
-    if (!isSupportedPooling(model.pooling)) {
-        addWarning(config, "embedding.registry." + model.id + ".pooling unsupported: " + model.pooling);
+}
+
+void discoverLocalEmbeddingModels(RagConfig& config, EmbeddingModelRegistry& registry) {
+    if (!config.engine.embedding.auto_discover_models) {
+        return;
+    }
+    const std::filesystem::path models_dir(config.engine.embedding.models_dir);
+    if (config.engine.embedding.models_dir.empty() || !std::filesystem::exists(models_dir)) {
+        return;
+    }
+
+    size_t discovered = 0;
+    std::error_code ec;
+    for (auto it = std::filesystem::recursive_directory_iterator(models_dir, std::filesystem::directory_options::skip_permission_denied, ec);
+         it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+        if (ec || !it->is_regular_file(ec)) {
+            continue;
+        }
+        const auto path = it->path();
+        if (path.extension() != ".onnx") {
+            continue;
+        }
+        const auto dir = path.parent_path();
+        std::filesystem::path tokenizer = dir / "tokenizer.json";
+        if (!std::filesystem::exists(tokenizer)) {
+            continue;
+        }
+        std::string id = "local-" + sanitizeModelId(dir.filename().string().empty() ? path.stem().string() : dir.filename().string());
+        if (registry.models.find(id) != registry.models.end()) {
+            id += "-" + sanitizeModelId(path.stem().string());
+        }
+        if (registry.models.find(id) != registry.models.end()) {
+            addWarning(config, "embedding auto discovery skipped duplicate model id: " + id);
+            continue;
+        }
+
+        EmbeddingModelDefinition model;
+        model.id = id;
+        model.backend = "onnx";
+        model.name = dir.filename().string().empty() ? path.stem().string() : dir.filename().string();
+        model.version = "local";
+        model.model_path = path.string();
+        model.tokenizer_path = tokenizer.string();
+        model.pooling = config.engine.embedding.pooling;
+        model.dimension = config.engine.embedding.dimension;
+        model.max_seq_len = config.engine.embedding.max_seq_len;
+        model.onnx_threads = config.engine.embedding.onnx_threads;
+        model.normalize_embeddings = config.engine.embedding.normalize_embeddings;
+        model.lowercase_tokens = config.engine.embedding.lowercase_tokens;
+        model.enable_fallback = config.engine.embedding.enable_fallback;
+        model.discovered = true;
+        model.source = "auto_discovered:" + models_dir.string();
+        validateEmbeddingModel(config, model);
+        registry.models.emplace(model.id, std::move(model));
+        ++discovered;
+    }
+    if (discovered > 0) {
+        addWarning(config, "embedding auto discovery registered " + std::to_string(discovered) + " local model(s) from " + models_dir.string());
     }
 }
 
@@ -229,11 +442,32 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.engine.search.top_k = getSize(values, {"search.top_k", "rag.search.top_k"}, config.engine.search.top_k);
     config.engine.search.min_score_threshold = getFloat(values, {"search.min_score_threshold", "rag.search.min_score_threshold"}, config.engine.search.min_score_threshold);
     config.engine.search.use_query_expansion = getBool(values, {"search.use_query_expansion", "rag.search.use_query_expansion"}, config.engine.search.use_query_expansion);
+    config.engine.search.xapian_enabled = getBool(values, {"search.xapian_enabled", "rag.search.xapian_enabled", "search.xapian.enabled", "rag.search.xapian.enabled"}, config.engine.search.xapian_enabled);
+    config.engine.search.xapian_language = lower(getString(values, {"search.xapian_language", "rag.search.xapian_language", "search.xapian.language", "rag.search.xapian.language"}, config.engine.search.xapian_language));
+    config.engine.search.xapian_stemming = getBool(values, {"search.xapian_stemming", "rag.search.xapian_stemming", "search.xapian.stemming", "rag.search.xapian.stemming"}, config.engine.search.xapian_stemming);
+    config.engine.search.xapian_stemming_strategy = lower(getString(values, {"search.xapian_stemming_strategy", "rag.search.xapian_stemming_strategy", "search.xapian.stemming_strategy", "rag.search.xapian.stemming_strategy"}, config.engine.search.xapian_stemming_strategy));
+    config.engine.search.xapian_cjk_ngrams = getBool(values, {"search.xapian_cjk_ngrams", "rag.search.xapian_cjk_ngrams", "search.xapian.cjk_ngrams", "rag.search.xapian.cjk_ngrams"}, config.engine.search.xapian_cjk_ngrams);
+    config.engine.search.xapian_word_breaks = getBool(values, {"search.xapian_word_breaks", "rag.search.xapian_word_breaks", "search.xapian.word_breaks", "rag.search.xapian.word_breaks"}, config.engine.search.xapian_word_breaks);
+    config.engine.search.xapian_spelling = getBool(values, {"search.xapian_spelling", "rag.search.xapian_spelling", "search.xapian.spelling", "rag.search.xapian.spelling"}, config.engine.search.xapian_spelling);
+    config.engine.search.xapian_metadata_prefixes = getBool(values, {"search.xapian_metadata_prefixes", "rag.search.xapian_metadata_prefixes", "search.xapian.metadata_prefixes", "rag.search.xapian.metadata_prefixes"}, config.engine.search.xapian_metadata_prefixes);
+    if (!isSupportedXapianLanguage(config.engine.search.xapian_language)) {
+        addWarning(config, "unsupported Xapian language '" + config.engine.search.xapian_language + "'; using auto");
+        config.engine.search.xapian_language = "auto";
+    }
+    if (!isSupportedXapianStemmingStrategy(config.engine.search.xapian_stemming_strategy)) {
+        addWarning(config, "unsupported Xapian stemming strategy '" + config.engine.search.xapian_stemming_strategy + "'; using some");
+        config.engine.search.xapian_stemming_strategy = "some";
+    }
     config.engine.search.use_reranking = getBool(values, {"search.use_reranking", "rag.search.use_reranking"}, config.engine.search.use_reranking);
     config.engine.search.rerank_input_multiplier = getSize(values, {"search.rerank_input_multiplier", "rag.search.rerank_input_multiplier"}, config.engine.search.rerank_input_multiplier);
     config.engine.search.rerank_path_boost = getFloat(values, {"search.rerank_path_boost", "rag.search.rerank_path_boost"}, config.engine.search.rerank_path_boost);
     config.engine.search.rerank_metadata_boost = getFloat(values, {"search.rerank_metadata_boost", "rag.search.rerank_metadata_boost"}, config.engine.search.rerank_metadata_boost);
     config.engine.search.rerank_exact_content_boost = getFloat(values, {"search.rerank_exact_content_boost", "rag.search.rerank_exact_content_boost"}, config.engine.search.rerank_exact_content_boost);
+    config.engine.search.use_multi_query_retrieval = getBool(values, {"search.use_multi_query_retrieval", "rag.search.use_multi_query_retrieval"}, config.engine.search.use_multi_query_retrieval);
+    config.engine.search.multi_query_max_variants = getSize(values, {"search.multi_query_max_variants", "rag.search.multi_query_max_variants"}, config.engine.search.multi_query_max_variants);
+    config.engine.search.use_embedding_reranker = getBool(values, {"search.use_embedding_reranker", "rag.search.use_embedding_reranker"}, config.engine.search.use_embedding_reranker);
+    config.engine.search.rerank_embedding_boost = getFloat(values, {"search.rerank_embedding_boost", "rag.search.rerank_embedding_boost"}, config.engine.search.rerank_embedding_boost);
+    config.engine.search.rerank_coverage_boost = getFloat(values, {"search.rerank_coverage_boost", "rag.search.rerank_coverage_boost"}, config.engine.search.rerank_coverage_boost);
     config.engine.max_file_size_kb = getSize(values, {"indexing.max_file_size_kb", "rag.indexing.max_file_size_kb"}, config.engine.max_file_size_kb);
 
     config.engine.embedding.backend = getString(values, {"embedding.backend", "rag.embedding.backend"}, config.engine.embedding.backend);
@@ -248,6 +482,11 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.engine.embedding.dimension = getSize(values, {"embedding.dimension", "rag.embedding.dimension"}, config.engine.embedding.dimension);
     config.engine.embedding.max_seq_len = getSize(values, {"embedding.max_seq_len", "rag.embedding.max_seq_len"}, config.engine.embedding.max_seq_len);
     config.engine.embedding.onnx_threads = getSize(values, {"embedding.onnx_threads", "rag.embedding.onnx_threads"}, config.engine.embedding.onnx_threads);
+    config.engine.embedding.models_dir = getString(values, {"embedding.models_dir", "rag.embedding.models_dir"}, config.engine.embedding.models_dir);
+    config.engine.embedding.auto_discover_models = getBool(values, {"embedding.auto_discover_models", "rag.embedding.auto_discover_models"}, config.engine.embedding.auto_discover_models);
+    config.engine.embedding.validate_model_files = getBool(values, {"embedding.validate_model_files", "rag.embedding.validate_model_files"}, config.engine.embedding.validate_model_files);
+    config.engine.embedding.persistent_cache_enabled = getBool(values, {"embedding.persistent_cache_enabled", "rag.embedding.persistent_cache_enabled"}, config.engine.embedding.persistent_cache_enabled);
+    config.engine.embedding.chunk_token_margin = getSize(values, {"embedding.chunk_token_margin", "rag.embedding.chunk_token_margin"}, config.engine.embedding.chunk_token_margin);
     config.engine.embedding.normalize_embeddings = getBool(values, {"embedding.normalize_embeddings", "rag.embedding.normalize_embeddings"}, config.engine.embedding.normalize_embeddings);
     config.engine.embedding.enable_fallback = getBool(values, {"embedding.enable_fallback", "rag.embedding.enable_fallback"}, config.engine.embedding.enable_fallback);
     config.engine.embedding.lowercase_tokens = getBool(values, {"embedding.lowercase_tokens", "rag.embedding.lowercase_tokens"}, config.engine.embedding.lowercase_tokens);
@@ -274,6 +513,8 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
         validateEmbeddingModel(config, model);
         registry.models.emplace(id, std::move(model));
     }
+
+    discoverLocalEmbeddingModels(config, registry);
 
     if (!config.engine.embedding.active_model_id.empty()) {
         auto active = registry.models.find(config.engine.embedding.active_model_id);
@@ -310,6 +551,22 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.security.role_header = getString(values, {"security.role_header", "rag.security.role_header"}, config.security.role_header);
     config.security.admin_role = getString(values, {"security.admin_role", "rag.security.admin_role"}, config.security.admin_role);
 
+    config.upload.enabled = getBool(values, {"upload.enabled", "rag.upload.enabled"}, config.upload.enabled);
+    config.upload.uploads_dir = getString(values, {"upload.uploads_dir", "rag.upload.uploads_dir"}, config.upload.uploads_dir);
+    config.upload.max_file_size_kb = getSize(values, {"upload.max_file_size_kb", "rag.upload.max_file_size_kb"}, config.upload.max_file_size_kb);
+    config.upload.max_files_per_request = getSize(values, {"upload.max_files_per_request", "rag.upload.max_files_per_request"}, config.upload.max_files_per_request);
+    config.upload.auto_ingest = getBool(values, {"upload.auto_ingest", "rag.upload.auto_ingest"}, config.upload.auto_ingest);
+    config.upload.async_ingest = getBool(values, {"upload.async_ingest", "rag.upload.async_ingest"}, config.upload.async_ingest);
+    config.upload.overwrite_existing = getBool(values, {"upload.overwrite_existing", "rag.upload.overwrite_existing"}, config.upload.overwrite_existing);
+    const auto upload_extensions_csv = getString(values, {"upload.allowed_extensions", "rag.upload.allowed_extensions"}, "");
+    if (!upload_extensions_csv.empty()) {
+        config.upload.allowed_extensions = qornix::rag::splitUploadCsvList(upload_extensions_csv);
+    }
+    const auto upload_mime_csv = getString(values, {"upload.allowed_mime_types", "rag.upload.allowed_mime_types"}, "");
+    if (!upload_mime_csv.empty()) {
+        config.upload.allowed_mime_types = qornix::rag::splitUploadCsvList(upload_mime_csv);
+    }
+
     const bool has_llm = values.find("llm.api_url") != values.end()
         || values.find("llm.model") != values.end()
         || values.find("rag.llm.api_url") != values.end()
@@ -325,12 +582,24 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.llm.top_p = getFloat(values, {"llm.top_p", "rag.llm.top_p"}, config.llm.top_p);
     config.llm.request_timeout_ms = getInt(values, {"llm.request_timeout_ms", "rag.llm.request_timeout_ms"}, config.llm.request_timeout_ms);
     config.llm.system_prompt = getString(values, {"llm.system_prompt", "rag.llm.system_prompt"}, config.llm.system_prompt);
+    config.llm.prompt_template = getString(values, {"llm.prompt_template", "rag.llm.prompt_template"}, config.llm.prompt_template);
     config.llm.stream = getBool(values, {"llm.stream", "rag.llm.stream"}, config.llm.stream);
 
     config.cache.enabled = getBool(values, {"cache.enabled", "rag.cache.enabled"}, config.cache.enabled);
     config.cache.backend = getString(values, {"cache.backend", "rag.cache.backend"}, config.cache.backend);
     config.cache.max_size = getSize(values, {"cache.max_size", "rag.cache.max_size"}, config.cache.max_size);
     config.cache.ttl = std::chrono::seconds(getInt(values, {"cache.ttl_seconds", "rag.cache.ttl_seconds"}, static_cast<int>(config.cache.ttl.count())));
+    config.cache.key_prefix = getString(values, {"cache.key_prefix", "rag.cache.key_prefix"}, config.cache.key_prefix);
+    config.cache.redis_host = getString(values, {"cache.redis.host", "rag.cache.redis.host"}, config.cache.redis_host);
+    config.cache.redis_port = getInt(values, {"cache.redis.port", "rag.cache.redis.port"}, config.cache.redis_port);
+    config.cache.redis_db = getInt(values, {"cache.redis.db", "rag.cache.redis.db"}, config.cache.redis_db);
+    config.cache.redis_password = getString(values, {"cache.redis.password", "rag.cache.redis.password"}, config.cache.redis_password);
+    const bool has_redis_ttl = values.find("cache.redis.ttl_seconds") != values.end()
+        || values.find("rag.cache.redis.ttl_seconds") != values.end();
+    config.cache.redis_ttl = std::chrono::seconds(getInt(
+        values,
+        {"cache.redis.ttl_seconds", "rag.cache.redis.ttl_seconds"},
+        static_cast<int>((has_redis_ttl ? config.cache.redis_ttl : config.cache.ttl).count())));
 
     config.rate_limit.enabled = getBool(values, {"rate_limit.enabled", "rag.rate_limit.enabled"}, config.rate_limit.enabled);
     config.rate_limit.max_requests_per_second = getSize(values, {"rate_limit.max_requests_per_second", "rag.rate_limit.max_requests_per_second"}, config.rate_limit.max_requests_per_second);
@@ -393,7 +662,12 @@ RagConfig makeRagConfigFromStandaloneFlatMap(
 
     config.address = getString(flat, {"server.address", "server.host"}, config.address);
     config.port = getInt(flat, {"server.port"}, config.port);
-    config.project_path = getString(flat, {"server.project_path"}, config.project_path);
+    {
+        const std::string scan_path = getString(flat, {"indexing.scan_path"}, "");
+        if (!scan_path.empty()) {
+            config.scan_path = scan_path;
+        }
+    }
     config.auto_index_on_startup = getBool(flat, {"indexing.auto_index_on_startup"}, config.auto_index_on_startup);
 
     applyCommonRagConfig(flat, config);
@@ -409,6 +683,13 @@ RagConfig makeRagConfigFromIntegratedFlatMap(
     config.routes.expose_root_ui = getBool(flat, {"rag.route.expose_root_ui", "route.expose_root_ui"}, false);
     config.routes.ui_path = normalizePathPrefix(getString(flat, {"rag.route.ui_path", "route.ui_path"}, "/rag"), "/rag");
     config.routes.api_prefix = normalizePathPrefix(getString(flat, {"rag.route.api_prefix", "route.api_prefix"}, "/api/rag"), "/api/rag");
+    {
+        const std::string scan_path = getString(flat, {"rag.indexing.scan_path", "indexing.scan_path"}, "");
+        if (!scan_path.empty()) {
+            config.scan_path = scan_path;
+        }
+    }
+    config.auto_index_on_startup = getBool(flat, {"rag.indexing.auto_index_on_startup", "indexing.auto_index_on_startup"}, config.auto_index_on_startup);
 
     applyCommonRagConfig(flat, config);
     return config;

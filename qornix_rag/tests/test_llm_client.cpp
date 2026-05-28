@@ -26,6 +26,39 @@
 #include <sstream>
 #include <cmath>
 #include <iomanip>
+#include <filesystem>
+#include <stdexcept>
+
+
+std::string read_fixture(const std::string& name) {
+    const std::vector<std::filesystem::path> roots = {
+        std::filesystem::current_path(),
+        std::filesystem::current_path() / "..",
+        std::filesystem::current_path() / "../..",
+        std::filesystem::current_path() / "../../..",
+    };
+
+    for (const auto& root : roots) {
+        const auto path = root / "qornix_rag" / "tests" / "fixtures" / "llm_provider" / name;
+        std::ifstream file(path);
+        if (file.is_open()) {
+            std::ostringstream buffer;
+            buffer << file.rdbuf();
+            return buffer.str();
+        }
+    }
+
+    // Direct source-tree execution fallback.
+    const auto direct = std::filesystem::path("tests") / "fixtures" / "llm_provider" / name;
+    std::ifstream file(direct);
+    if (file.is_open()) {
+        std::ostringstream buffer;
+        buffer << file.rdbuf();
+        return buffer.str();
+    }
+
+    throw std::runtime_error("Fixture not found: " + name);
+}
 
 // Test counter
 static int tests_passed = 0;
@@ -257,7 +290,81 @@ void test_error_handling() {
     }
 }
 
-// Test 7: Multiple LLM endpoints (failover)
+
+// Test 7: Structured provider fixtures
+void test_provider_diagnostics_fixtures() {
+    std::cout << "\nTest 7: Structured Provider Diagnostics Fixtures" << std::endl;
+
+    try {
+        LLMClient llm_client;
+
+        auto ollama_models = llm_client.parse_available_models_response(read_fixture("ollama_tags.json"));
+        test_helpers::assert_true(std::find(ollama_models.begin(), ollama_models.end(), "llama3:latest") != ollama_models.end(),
+                                  "Should parse Ollama /api/tags model names");
+        test_helpers::assert_true(std::find(ollama_models.begin(), ollama_models.end(), "qwen3.6:35b") != ollama_models.end(),
+                                  "Should parse second Ollama model name");
+
+        auto openai_models = llm_client.parse_available_models_response(read_fixture("openai_models.json"));
+        test_helpers::assert_true(std::find(openai_models.begin(), openai_models.end(), "gpt-4o-mini") != openai_models.end(),
+                                  "Should parse OpenAI-compatible /v1/models ids");
+
+        auto vllm_models = llm_client.parse_available_models_response(read_fixture("vllm_models.json"));
+        test_helpers::assert_true(std::find(vllm_models.begin(), vllm_models.end(), "Qwen/Qwen2.5-Coder-7B-Instruct") != vllm_models.end(),
+                                  "Should parse vLLM model ids");
+
+        auto lm_studio_models = llm_client.parse_available_models_response(read_fixture("lm_studio_models.json"));
+        test_helpers::assert_true(std::find(lm_studio_models.begin(), lm_studio_models.end(), "lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF") != lm_studio_models.end(),
+                                  "Should parse LM Studio model ids");
+
+        auto openai_usage = llm_client.parse_token_stats(read_fixture("openai_usage.json"));
+        test_helpers::assert_equal("120", std::to_string(openai_usage.prompt_tokens), "OpenAI prompt tokens");
+        test_helpers::assert_equal("34", std::to_string(openai_usage.completion_tokens), "OpenAI completion tokens");
+        test_helpers::assert_equal("154", std::to_string(openai_usage.total_tokens), "OpenAI total tokens");
+
+        auto ollama_usage = llm_client.parse_token_stats(read_fixture("ollama_chat_final.json"));
+        test_helpers::assert_equal("77", std::to_string(ollama_usage.prompt_tokens), "Ollama prompt eval count");
+        test_helpers::assert_equal("23", std::to_string(ollama_usage.completion_tokens), "Ollama eval count");
+        test_helpers::assert_equal("100", std::to_string(ollama_usage.total_tokens), "Ollama total tokens synthesized");
+
+        test_passed("Structured provider diagnostics fixtures");
+    } catch (const std::exception& e) {
+        test_failed("Structured provider diagnostics fixtures", e.what());
+    }
+}
+
+// Test 8: Unified structured streaming parser
+void test_structured_streaming_parser() {
+    std::cout << "\nTest 8: Unified Structured Streaming Parser" << std::endl;
+
+    try {
+        LLMClient llm_client;
+
+        auto openai_chunks = llm_client.parse_stream_chunks(read_fixture("openai_sse.txt"));
+        test_helpers::assert_equal("2", std::to_string(openai_chunks.size()), "OpenAI SSE chunk count");
+        test_helpers::assert_equal("Hello", openai_chunks[0], "OpenAI first SSE chunk");
+        test_helpers::assert_equal(" world", openai_chunks[1], "OpenAI second SSE chunk");
+        auto openai_usage = llm_client.parse_token_stats(read_fixture("openai_sse.txt"));
+        test_helpers::assert_equal("7", std::to_string(openai_usage.total_tokens), "OpenAI SSE usage chunk");
+
+        auto ollama_chunks = llm_client.parse_stream_chunks(read_fixture("ollama_ndjson.txt"));
+        test_helpers::assert_equal("2", std::to_string(ollama_chunks.size()), "Ollama NDJSON chunk count");
+        test_helpers::assert_equal("Привет", ollama_chunks[0], "Ollama first chunk");
+        test_helpers::assert_equal(" мир", ollama_chunks[1], "Ollama second chunk");
+        auto ollama_usage = llm_client.parse_token_stats(read_fixture("ollama_ndjson.txt"));
+        test_helpers::assert_equal("6", std::to_string(ollama_usage.total_tokens), "Ollama NDJSON token total");
+
+        const auto stream_request = llm_client.build_request_json("stream request", true);
+        test_helpers::assert_contains(stream_request, "\"stream\":true", "Stream request should be valid JSON with stream flag");
+        auto parsed_request = llm_client.parse_response_result(R"({"message":{"content":"ok"}})");
+        test_helpers::assert_equal("ok", parsed_request.status, "Sanity parser check");
+
+        test_passed("Unified structured streaming parser");
+    } catch (const std::exception& e) {
+        test_failed("Unified structured streaming parser", e.what());
+    }
+}
+
+// Test 9: Multiple LLM endpoints (failover)
 void test_failover() {
     std::cout << "\nTest 7: LLM Failover" << std::endl;
     
@@ -305,6 +412,8 @@ int main() {
     test_request_json_building();
     test_response_parsing();
     test_error_handling();
+    test_provider_diagnostics_fixtures();
+    test_structured_streaming_parser();
     test_failover();
     
     std::cout << "\n========================================" << std::endl;

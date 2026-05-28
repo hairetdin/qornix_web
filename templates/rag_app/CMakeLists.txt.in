@@ -72,6 +72,7 @@ add_custom_command(TARGET @PROJECT_NAME@ POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/knowledge_base" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/knowledge_base"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/models" "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/models"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/data"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/data/uploads"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${@PROJECT_NAME_UPPER@_DEPLOY_DIR}/logs"
     COMMENT "Assembling portable deploy bundle at ${@PROJECT_NAME_UPPER@_DEPLOY_DIR}"
 )

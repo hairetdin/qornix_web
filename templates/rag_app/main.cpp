@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 https://github.com/hairetdin
+ *
+ * This file is part of Qornix project.
+ * Licensed under GNU GPL v3.0 (see LICENSE file) or commercial license.
+ */
+
 #include "app_paths.h"
 #include "rag_config.h"
 #include "rag_extension.h"
@@ -63,7 +70,11 @@ RagConfig makeApplicationRagConfig(const std::map<std::string, std::string>& fla
     }
     config.engine.embedding.model_path = resolveAppPath(config.engine.embedding.model_path);
     config.engine.embedding.tokenizer_path = resolveAppPath(config.engine.embedding.tokenizer_path);
+    if (config.scan_path) {
+        config.scan_path = resolveAppPath(*config.scan_path);
+    }
     config.markdown.directory_path = resolveAppPath(config.markdown.directory_path);
+    config.upload.uploads_dir = resolveAppPath(config.upload.uploads_dir);
 
 #if QORNIX_HAS_SQLITE
     config.sqlite.db_path = resolveAppPath(config.sqlite.db_path);
@@ -73,7 +84,11 @@ RagConfig makeApplicationRagConfig(const std::map<std::string, std::string>& fla
     if (config.markdown_enabled) {
         std::filesystem::create_directories(config.markdown.directory_path);
     }
+    if (config.upload.enabled) {
+        std::filesystem::create_directories(config.upload.uploads_dir);
+    }
     std::filesystem::create_directories(qornix_app_paths::appRoot() / "data");
+    std::filesystem::create_directories(qornix_app_paths::appRoot() / "data" / "uploads");
     std::filesystem::create_directories(qornix_app_paths::appRoot() / "logs");
 
     return config;
@@ -257,6 +272,7 @@ void setupApplicationAuth(HttpServer& httpServer,
     middleware->addRoutePolicy("POST", "/api/rag/search", readPermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/ask", readPermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/batch", readPermission, {}, true);
+    middleware->addRoutePolicy("POST", "/api/rag/feedback", readPermission, {}, true);
     middleware->addRoutePolicy("GET", "/api/rag/metrics", adminPermission, {}, true);
     middleware->addRoutePolicy("GET", "/api/rag/admin", adminPermission);
     middleware->addRoutePolicy("GET", "/api/rag/embedding/models", readPermission, {}, true);
@@ -266,13 +282,17 @@ void setupApplicationAuth(HttpServer& httpServer,
     middleware->addRoutePolicy("GET", "/api/rag/ingest/jobs", adminPermission, {}, true);
     middleware->addRoutePolicy("*", "/api/rag/ingest", writePermission);
     middleware->addRoutePolicy("POST", "/api/rag/index", writePermission, {}, true);
+    middleware->addRoutePolicy("POST", "/api/rag/documents/upload", writePermission, {}, true);
+    middleware->addRoutePolicy("POST", "/api/rag/uploads/delete", writePermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/documents/delete", writePermission, {}, true);
     middleware->addRoutePolicy("GET", "/api/rag/qa", readPermission);
     middleware->addRoutePolicy("GET", "/api/rag/qa/tags", readPermission, {}, true);
+    middleware->addRoutePolicy("GET", "/api/rag/qa/history", readPermission, {}, true);
     middleware->addRoutePolicy("GET", "/api/rag/qa/export", readPermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/qa/export", readPermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/qa/import", writePermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/qa/dedup", writePermission, {}, true);
+    middleware->addRoutePolicy("POST", "/api/rag/qa/duplicate-check", writePermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/qa/add", writePermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/qa/update", writePermission, {}, true);
     middleware->addRoutePolicy("POST", "/api/rag/qa/delete", writePermission, {}, true);

@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 https://github.com/hairetdin
+ *
+ * This file is part of Qornix project.
+ * Licensed under GNU GPL v3.0 (see LICENSE file) or commercial license.
+ */
+
 #pragma once
 
 #include <string>
@@ -20,6 +27,20 @@ public:
         int response_time_ms;
         std::string client_ip;
         std::string top_result_path;
+    };
+
+    struct FeedbackEntry {
+        std::string id;
+        std::string request_id;
+        std::string query;
+        std::string question;
+        std::string answer;
+        std::string rating;
+        std::string category;
+        std::string comment;
+        std::vector<std::string> citations;
+        std::string client_ip;
+        std::chrono::system_clock::time_point timestamp;
     };
 
     // Knowledge gap structure
@@ -70,6 +91,12 @@ public:
 
         // Knowledge gaps (frequently searched but missing)
         std::vector<KnowledgeGap> knowledge_gaps;
+
+        // Feedback statistics
+        size_t feedback_total = 0;
+        size_t feedback_helpful = 0;
+        size_t feedback_not_helpful = 0;
+        std::map<std::string, size_t> feedback_by_category;
     };
 
     struct Config {
@@ -87,6 +114,13 @@ public:
      * Log a search query.
      */
     void logSearch(const SearchQuery& query);
+
+    /**
+     * Capture user feedback about search/ask quality.
+     */
+    void logFeedback(const FeedbackEntry& feedback);
+
+    std::vector<FeedbackEntry> getFeedbackLog(size_t limit = 100) const;
 
     /**
      * Get analytics report for a time period.
@@ -140,6 +174,7 @@ public:
 private:
     Config config_;
     std::vector<SearchQuery> log_;
+    std::vector<FeedbackEntry> feedback_log_;
     std::map<std::string, size_t> query_counts_;
     mutable std::mutex mutex_;
 

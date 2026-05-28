@@ -23,6 +23,7 @@
 #include "markdown_source.h"
 #include "deduplication_service.h"
 #include "rag_auth.h"
+#include "rag_upload.h"
 #if QORNIX_HAS_SQLITE
 #include "sqlite_source.h"
 #endif
@@ -60,6 +61,7 @@ protected:
     std::shared_ptr<SQLiteSource> sqlite_source_;
 #endif
     RagRouteAuthOptions auth_options_;
+    qornix::rag::RagUploadConfig upload_options_;
 
 public:
    explicit RagApiHandler(std::shared_ptr<RagService> service);
@@ -85,6 +87,7 @@ public:
     explicit RagApiHandler(std::shared_ptr<RagEngine> engine);
 
     void setAuthOptions(const RagRouteAuthOptions& options);
+    void setUploadOptions(const qornix::rag::RagUploadConfig& options);
 
     /**
      * POST /api/index and /api/search - handle POST requests
@@ -134,6 +137,7 @@ struct RagRouteOptions {
     std::string ui_path = "/";
     std::string api_prefix = "/api";
     RagRouteAuthOptions auth;
+    qornix::rag::RagUploadConfig upload;
 };
 
 /**

@@ -75,7 +75,7 @@ echo ""
 
 # Prepare local standalone directories. They are intentionally kept outside the
 # portable bundle work, which will get its own layout in Milestone A5.
-mkdir -p "${QORNIX_RAG_HOME}/data" "${QORNIX_RAG_HOME}/logs" "${QORNIX_RAG_HOME}/knowledge_base"
+mkdir -p "${QORNIX_RAG_HOME}/data" "${QORNIX_RAG_HOME}/data/uploads" "${QORNIX_RAG_HOME}/logs" "${QORNIX_RAG_HOME}/knowledge_base"
 
 # Build
 echo "🔨 Сборка проекта..."
