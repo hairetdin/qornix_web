@@ -1121,3 +1121,4 @@ scripts/db_benchmark.py \
 
 Use `--driver mysql` with `QORNIX_ENABLE_ASYNC_MYSQL=ON` and MySQL connection environment variables. The report is saved to `doc/benchmark_async_db.md`.
 The benchmark runner defaults to a `1000ms` DB acquire timeout so the extended `*_normal_select_1000` scenario measures queued async DB work instead of immediately turning into pool backpressure; use `--acquire-timeout-ms 200` when you explicitly want a more aggressive saturation profile.
+
