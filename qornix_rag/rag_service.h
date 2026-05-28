@@ -21,6 +21,33 @@
 #include <unordered_map>
 #include <vector>
 
+
+struct RagServiceRetrievalQuery {
+    std::string query;
+    std::string origin;
+    size_t result_count = 0;
+};
+
+struct RagServiceGroundingClaim {
+    std::string claim;
+    std::string status;
+    double support_score = 0.0;
+    std::vector<std::string> citations;
+};
+
+struct RagServiceFeedbackEntry {
+    std::string id;
+    std::string request_id;
+    std::string query;
+    std::string question;
+    std::string answer;
+    std::string rating;
+    std::string category;
+    std::string comment;
+    std::vector<std::string> citations;
+    std::string client_ip;
+};
+
 struct RagServiceSourceInfo {
     std::string id;
     std::string type;
@@ -47,6 +74,9 @@ struct RagServiceSearchItem {
     std::string pair_id;
     std::vector<std::string> tags;
     std::string attribution;
+    std::string source_locator;
+    std::string citation_label;
+    std::map<std::string, std::string> metadata;
 };
 
 struct RagServiceSearchResponse {
@@ -55,6 +85,13 @@ struct RagServiceSearchResponse {
     std::string expanded_query;
     bool query_expansion_applied = false;
     bool reranking_applied = false;
+    bool filters_applied = false;
+    bool multi_query_applied = false;
+    std::string rewritten_query;
+    std::string retrieval_strategy;
+    std::string reranker_type;
+    std::vector<RagServiceRetrievalQuery> retrieval_queries;
+    std::vector<MetadataFilter> filters;
     std::vector<RagServiceSearchItem> results;
     long long response_time_ms = 0;
 };
@@ -71,6 +108,9 @@ struct RagServiceAskContextItem {
     std::string pair_id;
     std::vector<std::string> tags;
     std::string attribution;
+    std::string source_locator;
+    std::string citation_label;
+    std::map<std::string, std::string> metadata;
 };
 
 struct RagServiceConversationTurn {
@@ -84,6 +124,13 @@ struct RagServiceAskResponse {
     std::string expanded_query;
     bool query_expansion_applied = false;
     bool reranking_applied = false;
+    bool filters_applied = false;
+    bool multi_query_applied = false;
+    std::string rewritten_query;
+    std::string retrieval_strategy;
+    std::string reranker_type;
+    std::vector<RagServiceRetrievalQuery> retrieval_queries;
+    std::vector<MetadataFilter> filters;
     std::string answer;
     std::vector<RagServiceAskContextItem> context;
     std::vector<std::string> sources;
@@ -94,6 +141,9 @@ struct RagServiceAskResponse {
     bool citations_post_processed = false;
     double retrieval_confidence = 0.0;
     std::string grounding_status = "no_context";
+    std::string grounding_evaluator = "none";
+    std::string claim_grounding_status = "not_evaluated";
+    std::vector<RagServiceGroundingClaim> grounded_claims;
     size_t conversation_turns_used = 0;
     std::string llm_status = "not_configured";
     std::string llm_parser_error;
@@ -188,8 +238,13 @@ struct RagServiceHealth {
     size_t vector_store_dimension = 0;
     bool hybrid_search = true;
     bool query_expansion = true;
+    bool multi_query_retrieval = true;
+    bool embedding_reranker = true;
     bool reranking = true;
-    bool llm_available = false;
+    XapianSearchDiagnostics xapian;
+    bool llm_available = false; // provider reachable
+    bool llm_ready = false; // provider reachable and configured model usable
+    bool llm_provider_available = false;
     std::string llm_provider = "not_configured";
     std::string llm_model = "not_configured";
     bool configured_model_available = false;
@@ -210,9 +265,18 @@ struct RagServiceEmbeddingModelItem {
     std::string pooling;
     size_t dimension = 0;
     size_t max_seq_len = 0;
+    size_t tokenizer_vocab_size = 0;
+    size_t effective_chunk_token_limit = 0;
     bool active = false;
     bool ready = false;
+    bool discovered = false;
+    bool files_present = false;
+    bool persistent_cache_enabled = false;
     std::string status;
+    std::string tokenizer_status;
+    std::string model_status;
+    std::string model_signature;
+    std::string source;
 };
 
 struct RagServiceEmbeddingModelsResponse {
@@ -248,26 +312,38 @@ public:
     std::shared_ptr<RagEngine> engine() const { return rag_engine_; }
     std::shared_ptr<LLMClient> llm() const { return llm_client_; }
 
-    RagServiceIndexResponse indexProject(const std::optional<std::string>& project_path = std::nullopt);
-    RagServiceIngestResponse ingestProject(const std::optional<std::string>& project_path = std::nullopt);
-    RagServiceIngestResponse startBackgroundIngestProject(const std::optional<std::string>& project_path = std::nullopt);
+    RagServiceIndexResponse indexProject(const std::optional<std::string>& scan_path = std::nullopt);
+    RagServiceIngestResponse ingestProject(const std::optional<std::string>& scan_path = std::nullopt);
+    RagServiceIngestResponse startBackgroundIngestProject(const std::optional<std::string>& scan_path = std::nullopt);
     std::optional<RagServiceIngestionJob> findIngestionJob(const std::string& job_id) const;
     std::vector<RagServiceIngestionJob> listIngestionJobs(size_t limit = 20) const;
     bool deletePersistedDocument(const std::string& relative_path,
                                  const std::string& source_id = "");
     RagServiceSearchResponse search(const std::string& query, size_t top_k = 10);
+    RagServiceSearchResponse search(const std::string& query,
+                                    size_t top_k,
+                                    const std::vector<MetadataFilter>& filters);
     RagServiceAskResponse ask(const std::string& question, size_t top_k = 5, const std::string& client_ip = "");
     RagServiceAskResponse ask(const std::string& question,
                               size_t top_k,
                               const std::string& client_ip,
                               const std::vector<RagServiceConversationTurn>& history);
+    RagServiceAskResponse ask(const std::string& question,
+                              size_t top_k,
+                              const std::string& client_ip,
+                              const std::vector<RagServiceConversationTurn>& history,
+                              const std::vector<MetadataFilter>& filters,
+                              const std::optional<std::string>& system_prompt = std::nullopt,
+                              const std::optional<std::string>& prompt_template = std::nullopt);
     RagServiceHealth health() const;
     std::vector<RagServiceSourceInfo> sources() const;
     RagServiceEmbeddingModelsResponse embeddingModels() const;
     RagServiceEmbeddingSwitchResponse switchEmbeddingModel(const std::string& model_id,
                                                            bool reindex = false,
                                                            bool force_reembed = true,
-                                                           const std::optional<std::string>& project_path = std::nullopt);
+                                                           const std::optional<std::string>& scan_path = std::nullopt);
+
+    bool recordFeedback(const RagServiceFeedbackEntry& feedback);
 
     std::vector<qornix::rag::QASource::QAPair> listQaPairs(size_t page = 1,
                                                            size_t per_page = 20,

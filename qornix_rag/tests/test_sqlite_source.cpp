@@ -680,6 +680,65 @@ TEST(sqlite_source_persist_chunked_document_snapshot) {
 #endif
 }
 
+
+TEST(sqlite_source_qa_auxiliary_quality) {
+#if QORNIX_HAS_SQLITE
+    std::string db_path = "/tmp/test_sqlite_source_qa_auxiliary_quality.db";
+    cleanup_test_db(db_path);
+
+    SQLiteSource::Config config;
+    config.db_path = db_path;
+    config.source_id = "test_qa_quality";
+    config.auto_migrate = true;
+
+    auto source = std::make_shared<SQLiteSource>(config);
+    ASSERT_TRUE(source->initialize(), "SQLiteSource initialized");
+
+    ASSERT_TRUE(source->addQAPair("qa_001",
+                                  "How do I configure Ollama?",
+                                  "Use the ollama provider and model settings.",
+                                  "llm",
+                                  "[]",
+                                  "{\"tags\": \"[\\\"ollama\\\",\\\"local-llm\\\"]\", \"source\": \"runbook\"}"),
+                "QA with tags added");
+
+    auto tags = source->listQATags("olla", 10);
+    ASSERT_TRUE(std::find(tags.begin(), tags.end(), "ollama") != tags.end(), "Normalized QA tags are searchable");
+
+    SQLiteSource::QAListOptions options;
+    options.query = "provider model";
+    options.limit = 10;
+    auto listed = source->listQAPairs(options);
+    ASSERT_EQ(1, listed.total, "QA list search finds answer text through FTS/LIKE fallback");
+    ASSERT_STR_EQ("qa_001", listed.items.front().id, "QA list search returns expected pair");
+
+    ASSERT_TRUE(source->updateQAPair("qa_001",
+                                     "Use the Ollama provider and set the model in config.yaml.",
+                                     "llm",
+                                     "[]",
+                                     "How do I configure local Ollama?",
+                                     "{\"tags\": \"[\\\"ollama\\\",\\\"config\\\"]\"}"),
+                "QA update succeeds");
+    auto updated_tags = source->listQATags("config", 10);
+    ASSERT_TRUE(std::find(updated_tags.begin(), updated_tags.end(), "config") != updated_tags.end(), "Updated tags are indexed");
+
+    auto history = source->getQAPairHistory("qa_001", 10);
+    ASSERT_TRUE(history.size() >= 2, "QA version history records create and update");
+    ASSERT_STR_EQ("update", history.front().action, "Latest history action is update");
+    ASSERT_TRUE(history.front().version >= 2, "History version increments");
+
+    ASSERT_TRUE(source->deleteQAPair("qa_001"), "QA delete succeeds");
+    auto delete_history = source->getQAPairHistory("qa_001", 10);
+    ASSERT_TRUE(!delete_history.empty(), "Delete history is retained");
+    ASSERT_STR_EQ("delete", delete_history.front().action, "Latest history action is delete");
+
+    source->cleanup();
+    cleanup_test_db(db_path);
+#else
+    std::cout << "SKIPPED (SQLite not available)";
+#endif
+}
+
 // ============================================
 // Main
 // ============================================
@@ -696,6 +755,7 @@ int main() {
     RUN_TEST(sqlite_source_search_by_category);
     RUN_TEST(sqlite_source_pagination);
     RUN_TEST(sqlite_source_server_side_qa_list_and_suggest);
+    RUN_TEST(sqlite_source_qa_auxiliary_quality);
     RUN_TEST(sqlite_source_migrate);
     RUN_TEST(sqlite_source_hash_uniqueness);
     RUN_TEST(sqlite_source_persistence);

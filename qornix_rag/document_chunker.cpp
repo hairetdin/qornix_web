@@ -63,6 +63,18 @@ bool is_pdf_document(const Document& document) {
                document.metadata.at("mime_type") == "application/pdf");
 }
 
+bool is_docx_document(const Document& document) {
+    return document.type == "docx" ||
+           (document.metadata.find("mime_type") != document.metadata.end() &&
+               document.metadata.at("mime_type") == "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+}
+
+bool is_pptx_document(const Document& document) {
+    return document.type == "pptx" ||
+           (document.metadata.find("mime_type") != document.metadata.end() &&
+               document.metadata.at("mime_type") == "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+}
+
 bool is_spreadsheet_document(const Document& document) {
     return document.type == "csv" ||
            document.type == "xlsx" ||
@@ -95,10 +107,12 @@ struct SymbolInfo {
     std::string kind;
     std::string name;
     std::string display;
+    bool opens_scope = false;
 };
 
 SymbolInfo detect_symbol(const std::string& line, const std::string& language) {
     const std::vector<std::pair<std::regex, std::pair<std::string, size_t>>> patterns = {
+        {std::regex(R"(^\s*namespace\s+([A-Za-z_]\w*))"), {"namespace", 1}},
         {std::regex(R"(^\s*class\s+([A-Za-z_]\w*))"), {"class", 1}},
         {std::regex(R"(^\s*struct\s+([A-Za-z_]\w*))"), {"struct", 1}},
         {std::regex(R"(^\s*enum\s+(?:class\s+)?([A-Za-z_]\w*))"), {"enum", 1}},
@@ -124,6 +138,8 @@ SymbolInfo detect_symbol(const std::string& line, const std::string& language) {
             if (info.display.size() > 120) {
                 info.display.resize(120);
             }
+            info.opens_scope = info.kind == "namespace" || info.kind == "class" ||
+                               info.kind == "struct" || info.kind == "impl";
             return info;
         }
     }
@@ -161,8 +177,14 @@ std::vector<Document> DocumentChunker::chunkDocument(const Document& document) c
     if (strategy == "code_symbol") {
         return chunkSections(document, splitCodeSections(document), strategy);
     }
+    if (strategy == "docx_heading") {
+        return chunkSections(document, splitDocxSections(document), strategy);
+    }
     if (strategy == "pdf_page") {
         return chunkSections(document, splitPdfPageSections(document), strategy);
+    }
+    if (strategy == "pptx_slide") {
+        return chunkSections(document, splitPptxSections(document), strategy);
     }
     if (strategy == "spreadsheet_table") {
         return chunkSections(document, splitSpreadsheetSections(document), strategy);
@@ -236,6 +258,7 @@ std::vector<DocumentChunker::Section> DocumentChunker::splitCodeSections(const D
     std::string line;
     std::string current;
     std::string current_symbol;
+    std::string current_scope;
     size_t current_start = 0;
     size_t offset = 0;
     bool has_current = false;
@@ -247,6 +270,7 @@ std::vector<DocumentChunker::Section> DocumentChunker::splitCodeSections(const D
             section.text = current;
             section.char_start = current_start;
             section.symbol = current_symbol;
+            section.symbol_scope = current_scope;
             sections.push_back(section);
             current.clear();
             current_start = offset;
@@ -257,6 +281,9 @@ std::vector<DocumentChunker::Section> DocumentChunker::splitCodeSections(const D
 
         if (symbol.found) {
             current_symbol = symbol.display;
+            if (symbol.opens_scope) {
+                current_scope = symbol.kind + ":" + symbol.name;
+            }
         }
 
         current += line;
@@ -269,6 +296,7 @@ std::vector<DocumentChunker::Section> DocumentChunker::splitCodeSections(const D
         section.text = current;
         section.char_start = current_start;
         section.symbol = current_symbol;
+        section.symbol_scope = current_scope;
         const auto symbol = detect_symbol(current_symbol, document.language);
         if (symbol.found) {
             section.symbol_name = symbol.name;
@@ -292,6 +320,61 @@ std::vector<DocumentChunker::Section> DocumentChunker::splitCodeSections(const D
                 }
             }
         }
+    }
+    return sections;
+}
+
+std::vector<DocumentChunker::Section> DocumentChunker::splitDocxSections(const Document& document) const {
+    std::vector<Section> sections;
+    std::istringstream stream(document.content);
+    std::string line;
+    std::string current;
+    std::string current_heading;
+    size_t current_start = 0;
+    size_t offset = 0;
+    bool has_current = false;
+
+    while (std::getline(stream, line)) {
+        const std::string trimmed = trim_copy(line);
+        const bool is_heading = trimmed.rfind("Heading: ", 0) == 0;
+        if (is_heading && has_current && !trim_copy(current).empty()) {
+            Section section;
+            section.text = current;
+            section.char_start = current_start;
+            section.heading = current_heading;
+            section.block_kind = current_heading.empty() ? "paragraph" : "heading_section";
+            sections.push_back(std::move(section));
+            current.clear();
+            current_start = offset;
+        } else if (!has_current) {
+            current_start = offset;
+            has_current = true;
+        }
+
+        if (is_heading) {
+            current_heading = trim_copy(trimmed.substr(std::string("Heading: ").size()));
+        }
+
+        current += line;
+        current += '\n';
+        offset += line.size() + 1;
+    }
+
+    if (!trim_copy(current).empty()) {
+        Section section;
+        section.text = current;
+        section.char_start = current_start;
+        section.heading = current_heading;
+        section.block_kind = current_heading.empty() ? "paragraph" : "heading_section";
+        sections.push_back(std::move(section));
+    }
+
+    if (sections.empty()) {
+        Section section;
+        section.text = document.content;
+        section.char_start = 0;
+        section.block_kind = "document";
+        sections.push_back(std::move(section));
     }
     return sections;
 }
@@ -325,6 +408,63 @@ std::vector<DocumentChunker::Section> DocumentChunker::splitPdfPageSections(cons
         if (section.page_number == 0) {
             section.page_number = 1;
         }
+        sections.push_back(std::move(section));
+    }
+    return sections;
+}
+
+std::vector<DocumentChunker::Section> DocumentChunker::splitPptxSections(const Document& document) const {
+    std::vector<Section> sections;
+    std::istringstream stream(document.content);
+    std::string line;
+    std::string current;
+    size_t current_start = 0;
+    size_t current_slide = 0;
+    size_t offset = 0;
+    bool has_current = false;
+    const std::regex slide_re(R"(^\s*Slide\s+(\d+)\s*:\s*(.*)$)");
+
+    while (std::getline(stream, line)) {
+        std::smatch match;
+        const bool starts_slide = std::regex_match(line, match, slide_re);
+        if (starts_slide && has_current && !trim_copy(current).empty()) {
+            Section section;
+            section.text = current;
+            section.char_start = current_start;
+            section.slide_number = current_slide == 0 ? 1 : current_slide;
+            section.block_kind = "slide";
+            sections.push_back(std::move(section));
+            current.clear();
+            current_start = offset;
+        } else if (!has_current) {
+            current_start = offset;
+            has_current = true;
+        }
+
+        if (starts_slide && match.size() > 1) {
+            current_slide = parse_size_or_zero(match[1].str());
+        }
+
+        current += line;
+        current += '\n';
+        offset += line.size() + 1;
+    }
+
+    if (!trim_copy(current).empty()) {
+        Section section;
+        section.text = current;
+        section.char_start = current_start;
+        section.slide_number = current_slide == 0 ? 1 : current_slide;
+        section.block_kind = "slide";
+        sections.push_back(std::move(section));
+    }
+
+    if (sections.empty()) {
+        Section section;
+        section.text = document.content;
+        section.char_start = 0;
+        section.slide_number = 1;
+        section.block_kind = "presentation";
         sections.push_back(std::move(section));
     }
     return sections;
@@ -428,10 +568,21 @@ std::vector<Document> DocumentChunker::chunkSections(const Document& document,
                 if (!section.symbol_kind.empty()) {
                     chunk.metadata["chunk_symbol_kind"] = section.symbol_kind;
                 }
+                if (!section.symbol_scope.empty()) {
+                    chunk.metadata["chunk_symbol_scope"] = section.symbol_scope;
+                }
+                if (!section.block_kind.empty()) {
+                    chunk.metadata["chunk_block_kind"] = section.block_kind;
+                }
                 if (section.page_number > 0) {
                     chunk.metadata["chunk_page"] = std::to_string(section.page_number);
                     chunk.metadata["chunk_page_start"] = std::to_string(section.page_number);
                     chunk.metadata["chunk_page_end"] = std::to_string(section.page_number);
+                }
+                if (section.slide_number > 0) {
+                    chunk.metadata["chunk_slide"] = std::to_string(section.slide_number);
+                    chunk.metadata["chunk_slide_start"] = std::to_string(section.slide_number);
+                    chunk.metadata["chunk_slide_end"] = std::to_string(section.slide_number);
                 }
                 if (!section.sheet_name.empty()) {
                     chunk.metadata["chunk_sheet"] = section.sheet_name;
@@ -496,8 +647,14 @@ size_t DocumentChunker::effectiveMaxTokens(const Document& document) const {
 }
 
 std::string DocumentChunker::strategyFor(const Document& document) const {
+    if (is_docx_document(document)) {
+        return "docx_heading";
+    }
     if (is_pdf_document(document)) {
         return "pdf_page";
+    }
+    if (is_pptx_document(document)) {
+        return "pptx_slide";
     }
     if (is_spreadsheet_document(document)) {
         return "spreadsheet_table";

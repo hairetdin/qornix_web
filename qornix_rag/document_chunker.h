@@ -40,7 +40,10 @@ private:
         std::string symbol;
         std::string symbol_name;
         std::string symbol_kind;
+        std::string symbol_scope;
+        std::string block_kind;
         size_t page_number = 0;
+        size_t slide_number = 0;
         std::string sheet_name;
         size_t row_start = 0;
         size_t row_end = 0;
@@ -52,7 +55,9 @@ private:
 
     std::vector<Section> splitMarkdownSections(const Document& document) const;
     std::vector<Section> splitCodeSections(const Document& document) const;
+    std::vector<Section> splitDocxSections(const Document& document) const;
     std::vector<Section> splitPdfPageSections(const Document& document) const;
+    std::vector<Section> splitPptxSections(const Document& document) const;
     std::vector<Section> splitSpreadsheetSections(const Document& document) const;
     std::vector<Section> splitOcrSections(const Document& document) const;
     std::vector<Document> chunkSections(const Document& document,

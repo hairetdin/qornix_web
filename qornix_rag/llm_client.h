@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <functional>
+#include <optional>
 
 #if QORNIX_HAS_CURL
 #include <curl/curl.h>
@@ -152,6 +153,10 @@ public:
     // Prompt building
     std::string build_prompt(const std::string& context, const std::string& question) const;
     std::string build_request_json(const std::string& prompt) const;
+    std::string build_request_json(const std::string& prompt, bool stream) const;
+    std::string build_request_json(const std::string& prompt,
+                                   bool stream,
+                                   const std::optional<std::string>& system_prompt_override) const;
 
     // Response parsing
     std::string parse_response(const std::string& json_response) const;
@@ -163,9 +168,13 @@ public:
     LLMGenerationResult ask_with_metadata(const std::string& question,
                                           const std::string& context = "") const;
 
-    // Health check
+    // Health checks
+    // provider_health_check() checks transport/provider reachability only.
+    // health_check() keeps the stronger legacy semantics: provider reachable and
+    // the configured model is available when the provider reports model names.
     bool is_available() const;
-    int health_check() const; // returns response time in ms, or -1 if unavailable
+    int provider_health_check() const; // returns response time in ms, or -1 if provider unavailable
+    int health_check() const; // returns response time in ms, or -1 if configured model unavailable
 
     // Provider/model discovery. For Ollama this uses /api/tags; for
     // OpenAI-compatible servers this uses /v1/models when available.
@@ -196,6 +205,11 @@ public:
     // Response metadata (Phase 2)
     LLMTokenStats parse_token_stats(const std::string& json_response) const;
 
+    // Structured provider diagnostics/parsing helpers (used by health checks,
+    // streaming, and fixtures for Ollama/OpenAI-compatible/vLLM/LM Studio).
+    std::vector<std::string> parse_available_models_response(const std::string& json_response) const;
+    std::vector<std::string> parse_stream_chunks(const std::string& stream_response) const;
+
     // Phase 3: Cache management
     void set_cache(std::shared_ptr<ICache> cache);
     std::shared_ptr<ICache> get_cache() const;
@@ -213,6 +227,11 @@ public:
     LLMGenerationResult ask_with_metadata(const std::string& question,
                                           const std::string& context,
                                           const std::string& client_ip) const;
+    LLMGenerationResult ask_with_metadata(const std::string& question,
+                                          const std::string& context,
+                                          const std::string& client_ip,
+                                          const std::optional<std::string>& system_prompt_override,
+                                          const std::optional<std::string>& prompt_template_override) const;
 
 private:
     // Phase 3: Cache and rate limiter

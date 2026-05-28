@@ -4,6 +4,21 @@ Website: https://qornix.org
 
 Live demo: https://demo.qornix.org
 
+## Быстрые ответы
+
+Если вы индексируете этот репозиторий через `qornix_rag`, начните с [`doc/WHAT_IS_QORNIX_RAG_RU.md`](doc/WHAT_IS_QORNIX_RAG_RU.md). Там есть прямые ответы на базовые вопросы:
+
+- что такое `qornix_web`;
+- что такое `qornix_orm`;
+- для чего нужен `qornix_web`;
+- для чего нужен `qornix_orm`;
+- что такое `qornix_rag`;
+- для чего нужен `qornix_rag`;
+- что такое RAG;
+- как связаны `qornix_web`, `qornix_orm` и `qornix_rag`.
+
+English version: [`doc/WHAT_IS_QORNIX_EN.md`](doc/WHAT_IS_QORNIX_EN.md).
+
 ## Schema-driven Dynamic API
 
 Qornix Web is designed for C++ schema-driven backend applications. The central workflow is:
@@ -22,10 +37,12 @@ Start with the showcase or generate an app:
 ./create_new_project.sh ../my_react_app --with-dynamic-api-react
 ./create_new_project.sh ../my_angular_app --with-dynamic-api-angular
 ./create_new_project.sh ../my_rag_app --template rag_app
+./create_new_project.sh ../my_api_rag_app --with-dynamic-api --with-rag
 ```
 
 Use `--with-dynamic-api` for the backend/admin showcase, `--with-dynamic-api-vue` for a Vue/Vite frontend scaffold, `--with-dynamic-api-react` for a React/Vite frontend scaffold, or `--with-dynamic-api-angular` for an Angular frontend scaffold served from `/`.
 Use `--template rag_app` for a full Qornix Web application with embedded RAG UI at `/rag` and API routes under `/api/rag/*`.
+Use `--with-rag` to add the embedded RAG UI and `/api/rag/*` routes to the default, Dynamic API, Vue, React, or Angular host templates.
 
 See `doc/schema_driven_dynamic_api.md`, `doc/dynamic_api_vue_app_template.md`, `doc/dynamic_api_react_app_template.md`, `doc/dynamic_api_angular_app_template.md`, `doc/rag_app_template.md` and `example/schema_driven_backend`.
 
@@ -866,7 +883,7 @@ cmake .. -DMY_APP_ENABLE_JWT=ON
 
 ### `qornix_rag`
 
-RAG module for local/wiki-style retrieval, QA storage, source indexing and LLM Ask workflows.
+RAG module for local/wiki-style retrieval, secure document upload, QA storage, source/document indexing, hybrid search and LLM Ask workflows. The modernized module supports code/text/Markdown/HTML/CSV/PDF/DOCX/XLSX/PPTX/image OCR ingestion, metadata-aware chunking, TF-IDF or ONNX embeddings, local HNSW/Xapian hybrid search, optional Faiss/Qdrant/pgvector vector stores, citations, analytics, feedback and LLM provider diagnostics.
 
 For a dedicated generated RAG application:
 
@@ -874,27 +891,51 @@ For a dedicated generated RAG application:
 ./create_new_project.sh ../my_rag_app --template rag_app
 cd ../my_rag_app
 cmake -S . -B build
-cmake --build build
+cmake --build build -j$(nproc)
 ./build/my_rag_app
 ```
 
 Open:
 
 ```text
+http://127.0.0.1:8008/
 http://127.0.0.1:8008/rag
 http://127.0.0.1:8008/api/rag/health
 ```
 
-The generated app uses its own `config.yaml`, links the reusable RAG extension, and does not use the standalone `qornix_rag/run.sh` launcher.
-It starts with TF-IDF retrieval, so no embedding model files are required for the first run. To enable ONNX semantic retrieval, place the embedding model and tokenizer under the generated app's `models/` directory and set `rag.embedding.backend: onnx`.
+The generated app uses its own `config.yaml`, `data/`, `models/`, `data/uploads/` and `knowledge_base/` directories, links the reusable RAG extension, and does not use the standalone `qornix_rag/run.sh` launcher. It starts with TF-IDF retrieval, so no embedding model files are required for the first run. To enable ONNX semantic retrieval, install ONNX Runtime C++ SDK, place a compatible embedding model and tokenizer under the generated app's `models/` directory, and set `rag.embedding.backend: onnx`.
+
+To add RAG to another generated host application instead of using the dedicated RAG template:
+
+```bash
+./create_new_project.sh ../my_api_rag_app --with-dynamic-api --with-rag
+./create_new_project.sh ../my_react_rag_app --with-dynamic-api-react --with-rag
+```
+
+This keeps the host app's normal UI/API and mounts RAG separately at `/rag` and `/api/rag/*`.
+
+To run standalone RAG from the framework repository:
+
+```bash
+./qornix_rag/run.sh --port 8082 --scan-path /path/to/project
+```
+
+Omit `--scan-path` to start standalone RAG in upload/API/QA mode without startup filesystem scanning.
 
 To build the framework RAG module directly:
 
 ```bash
-cmake .. -DQORNIX_BUILD_RAG=ON
+cmake -S . -B build -DQORNIX_BUILD_RAG=ON
+cmake --build build --target qornix_rag -j$(nproc)
 ```
 
-See [`doc/rag_app_template.md`](doc/rag_app_template.md) for the generated RAG application guide.
+Primary RAG documentation:
+
+- [`qornix_rag/doc/FULL_RAG_GUIDE.md`](qornix_rag/doc/FULL_RAG_GUIDE.md)
+- [`qornix_rag/README.md`](qornix_rag/README.md)
+- [`qornix_rag/doc/CONFIG.md`](qornix_rag/doc/CONFIG.md)
+- [`qornix_rag/doc/API.md`](qornix_rag/doc/API.md)
+- [`doc/rag_app_template.md`](doc/rag_app_template.md)
 
 ## Common issues
 

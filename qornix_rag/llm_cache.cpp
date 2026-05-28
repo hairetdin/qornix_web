@@ -6,10 +6,175 @@
  */
 
 #include "llm_cache.h"
-#include <iostream>
-#include <sstream>
-#include <iomanip>
+
+
+#include <cerrno>
+#include <chrono>
 #include <cstring>
+#include <fcntl.h>
+#include <iostream>
+#include <netdb.h>
+#include <sstream>
+#include <stdexcept>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <vector>
+
+namespace {
+
+constexpr int kRedisConnectTimeoutMs = 750;
+constexpr int kRedisIoTimeoutMs = 1500;
+
+std::string with_prefix(const CacheConfig& config, const std::string& key) {
+    return config.key_prefix + key;
+}
+
+std::chrono::seconds effective_redis_ttl(const CacheConfig& config, const CacheEntry& entry) {
+    if (entry.ttl.count() > 0) {
+        return entry.ttl;
+    }
+    if (config.redis_ttl.count() > 0) {
+        return config.redis_ttl;
+    }
+    return config.ttl.count() > 0 ? config.ttl : std::chrono::hours(1);
+}
+
+std::string serialize_cache_entry(const CacheEntry& entry) {
+    std::ostringstream oss;
+    oss << "qornix_llm_cache_entry_v1\n"
+        << entry.tokens_used << "\n"
+        << entry.answer.size() << "\n"
+        << entry.answer;
+    return oss.str();
+}
+
+std::optional<CacheEntry> deserialize_cache_entry(const std::string& raw, std::chrono::seconds ttl) {
+    const std::string magic = "qornix_llm_cache_entry_v1\n";
+    if (raw.rfind(magic, 0) != 0) {
+        return std::nullopt;
+    }
+
+    size_t pos = magic.size();
+    const size_t tokens_end = raw.find('\n', pos);
+    if (tokens_end == std::string::npos) {
+        return std::nullopt;
+    }
+    const std::string tokens_text = raw.substr(pos, tokens_end - pos);
+    pos = tokens_end + 1;
+
+    const size_t size_end = raw.find('\n', pos);
+    if (size_end == std::string::npos) {
+        return std::nullopt;
+    }
+    const std::string size_text = raw.substr(pos, size_end - pos);
+    pos = size_end + 1;
+
+    size_t tokens = 0;
+    size_t answer_size = 0;
+    try {
+        tokens = static_cast<size_t>(std::stoull(tokens_text));
+        answer_size = static_cast<size_t>(std::stoull(size_text));
+    } catch (...) {
+        return std::nullopt;
+    }
+
+    if (raw.size() - pos != answer_size) {
+        return std::nullopt;
+    }
+
+    CacheEntry entry;
+    entry.answer = raw.substr(pos, answer_size);
+    entry.tokens_used = tokens;
+    entry.created_at = std::chrono::steady_clock::now();
+    entry.ttl = ttl.count() > 0 ? ttl : std::chrono::hours(1);
+    return entry;
+}
+
+bool set_socket_timeout(int fd, int timeout_ms) {
+    timeval tv{};
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    return setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0
+        && setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == 0;
+}
+
+bool send_all(int fd, const std::string& data) {
+    size_t sent = 0;
+    while (sent < data.size()) {
+        const ssize_t n = ::send(fd, data.data() + sent, data.size() - sent, MSG_NOSIGNAL);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (n == 0) {
+            return false;
+        }
+        sent += static_cast<size_t>(n);
+    }
+    return true;
+}
+
+bool recv_exact(int fd, std::string& out, size_t count) {
+    out.clear();
+    out.reserve(count);
+    while (out.size() < count) {
+        char buffer[4096];
+        const size_t remaining = count - out.size();
+        const size_t to_read = std::min(sizeof(buffer), remaining);
+        const ssize_t n = ::recv(fd, buffer, to_read, 0);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (n == 0) {
+            return false;
+        }
+        out.append(buffer, static_cast<size_t>(n));
+    }
+    return true;
+}
+
+bool recv_line(int fd, std::string& line) {
+    line.clear();
+    char ch = '\0';
+    char prev = '\0';
+    while (true) {
+        const ssize_t n = ::recv(fd, &ch, 1, 0);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (n == 0) {
+            return false;
+        }
+        if (prev == '\r' && ch == '\n') {
+            line.pop_back();
+            return true;
+        }
+        line.push_back(ch);
+        prev = ch;
+    }
+}
+
+std::string build_resp_command(const std::vector<std::string>& parts) {
+    std::ostringstream oss;
+    oss << "*" << parts.size() << "\r\n";
+    for (const auto& part : parts) {
+        oss << "$" << part.size() << "\r\n" << part << "\r\n";
+    }
+    return oss.str();
+}
+
+} // namespace
 
 // ============================================================================
 // Memory cache implementation
@@ -92,34 +257,250 @@ CacheStats MemoryCache::get_stats() const {
 }
 
 // ============================================================================
-// Redis cache implementation (stub — fallback to memory)
-//
-// Redis support requires hiredis library.
-// If hiredis is not found, this class returns is_available()=false
-// and create_cache() falls back to MemoryCache.
+// Redis cache implementation
 // ============================================================================
 
 struct RedisCache::RedisConnection {
-    // Placeholder — actual implementation would use hiredis
-    // redisContext* ctx = nullptr;
-    std::string host;
-    int port = 0;
+    enum class Type {
+        SimpleString,
+        Error,
+        Integer,
+        BulkString,
+        Array,
+        Nil,
+        Invalid
+    };
+
+    struct RespValue {
+        Type type = Type::Invalid;
+        std::string str;
+        long long integer = 0;
+        std::vector<RespValue> array;
+
+        bool ok() const {
+            return type != Type::Invalid && type != Type::Error;
+        }
+    };
+
+    int fd = -1;
+
+    ~RedisConnection() {
+        close();
+    }
+
+    void close() {
+        if (fd >= 0) {
+            ::close(fd);
+            fd = -1;
+        }
+    }
+
+    bool connect_to(const std::string& host, int port, int timeout_ms) {
+        close();
+
+        addrinfo hints{};
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+
+        addrinfo* result = nullptr;
+        const std::string port_str = std::to_string(port);
+        if (::getaddrinfo(host.c_str(), port_str.c_str(), &hints, &result) != 0) {
+            return false;
+        }
+
+        bool connected = false;
+        for (addrinfo* rp = result; rp != nullptr && !connected; rp = rp->ai_next) {
+            int candidate = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+            if (candidate < 0) {
+                continue;
+            }
+
+            const int original_flags = ::fcntl(candidate, F_GETFL, 0);
+            if (original_flags >= 0) {
+                ::fcntl(candidate, F_SETFL, original_flags | O_NONBLOCK);
+            }
+
+            int rc = ::connect(candidate, rp->ai_addr, rp->ai_addrlen);
+            if (rc < 0 && errno == EINPROGRESS) {
+                fd_set write_fds;
+                FD_ZERO(&write_fds);
+                FD_SET(candidate, &write_fds);
+
+                timeval tv{};
+                tv.tv_sec = timeout_ms / 1000;
+                tv.tv_usec = (timeout_ms % 1000) * 1000;
+                rc = ::select(candidate + 1, nullptr, &write_fds, nullptr, &tv);
+                if (rc > 0 && FD_ISSET(candidate, &write_fds)) {
+                    int socket_error = 0;
+                    socklen_t len = sizeof(socket_error);
+                    if (::getsockopt(candidate, SOL_SOCKET, SO_ERROR, &socket_error, &len) == 0 && socket_error == 0) {
+                        connected = true;
+                    }
+                }
+            } else if (rc == 0) {
+                connected = true;
+            }
+
+            if (connected) {
+                if (original_flags >= 0) {
+                    ::fcntl(candidate, F_SETFL, original_flags);
+                }
+                fd = candidate;
+                set_socket_timeout(fd, kRedisIoTimeoutMs);
+            } else {
+                ::close(candidate);
+            }
+        }
+
+        ::freeaddrinfo(result);
+        return connected;
+    }
+
+    std::optional<RespValue> read_value() {
+        if (fd < 0) {
+            return std::nullopt;
+        }
+
+        char prefix = '\0';
+        const ssize_t n = ::recv(fd, &prefix, 1, 0);
+        if (n <= 0) {
+            return std::nullopt;
+        }
+
+        std::string line;
+        RespValue value;
+
+        switch (prefix) {
+        case '+':
+            if (!recv_line(fd, line)) return std::nullopt;
+            value.type = Type::SimpleString;
+            value.str = line;
+            return value;
+        case '-':
+            if (!recv_line(fd, line)) return std::nullopt;
+            value.type = Type::Error;
+            value.str = line;
+            return value;
+        case ':':
+            if (!recv_line(fd, line)) return std::nullopt;
+            try {
+                value.type = Type::Integer;
+                value.integer = std::stoll(line);
+                return value;
+            } catch (...) {
+                return std::nullopt;
+            }
+        case '$': {
+            if (!recv_line(fd, line)) return std::nullopt;
+            long long length = -1;
+            try {
+                length = std::stoll(line);
+            } catch (...) {
+                return std::nullopt;
+            }
+            if (length < 0) {
+                value.type = Type::Nil;
+                return value;
+            }
+            std::string body;
+            if (!recv_exact(fd, body, static_cast<size_t>(length))) return std::nullopt;
+            std::string crlf;
+            if (!recv_exact(fd, crlf, 2) || crlf != "\r\n") return std::nullopt;
+            value.type = Type::BulkString;
+            value.str = std::move(body);
+            return value;
+        }
+        case '*': {
+            if (!recv_line(fd, line)) return std::nullopt;
+            long long count = -1;
+            try {
+                count = std::stoll(line);
+            } catch (...) {
+                return std::nullopt;
+            }
+            if (count < 0) {
+                value.type = Type::Nil;
+                return value;
+            }
+            value.type = Type::Array;
+            value.array.reserve(static_cast<size_t>(count));
+            for (long long i = 0; i < count; ++i) {
+                auto child = read_value();
+                if (!child) {
+                    return std::nullopt;
+                }
+                value.array.push_back(std::move(*child));
+            }
+            return value;
+        }
+        default:
+            return std::nullopt;
+        }
+    }
+
+    std::optional<RespValue> command(const std::vector<std::string>& parts) {
+        if (fd < 0) {
+            return std::nullopt;
+        }
+        const auto request = build_resp_command(parts);
+        if (!send_all(fd, request)) {
+            close();
+            return std::nullopt;
+        }
+        auto response = read_value();
+        if (!response || response->type == Type::Error) {
+            return response;
+        }
+        return response;
+    }
 };
 
 RedisCache::RedisCache(const CacheConfig& config)
-    : config_(config) {
-    stats_.max_size = config_.max_size;
-    // Connect asynchronously — will be attempted on first get/put
+    : connection_(std::make_unique<RedisConnection>()),
+      config_(config) {
+    stats_.max_size = 0; // Redis capacity is controlled by Redis maxmemory/eviction policy.
+    connected_.store(connect());
 }
 
 RedisCache::~RedisCache() = default;
 
 bool RedisCache::connect() {
-    // TODO: Implement Redis connection using hiredis
-    // For now, return false to trigger fallback
-    std::cerr << "[RedisCache] Redis backend not yet implemented — "
-              << "install hiredis for Redis cache support" << std::endl;
-    return false;
+    if (!connection_) {
+        connection_ = std::make_unique<RedisConnection>();
+    }
+
+    if (!connection_->connect_to(config_.redis_host, config_.redis_port, kRedisConnectTimeoutMs)) {
+        connected_.store(false);
+        return false;
+    }
+
+    if (!config_.redis_password.empty()) {
+        auto auth = connection_->command({"AUTH", config_.redis_password});
+        if (!auth || !auth->ok()) {
+            connection_->close();
+            connected_.store(false);
+            return false;
+        }
+    }
+
+    auto select = connection_->command({"SELECT", std::to_string(config_.redis_db)});
+    if (!select || !select->ok()) {
+        connection_->close();
+        connected_.store(false);
+        return false;
+    }
+
+    auto ping = connection_->command({"PING"});
+    const bool pong = ping && ping->ok()
+        && (ping->str == "PONG" || ping->type == RedisConnection::Type::SimpleString);
+    if (!pong) {
+        connection_->close();
+        connected_.store(false);
+        return false;
+    }
+
+    connected_.store(true);
+    return true;
 }
 
 std::string RedisCache::redis_command(const std::string& cmd) {
@@ -128,50 +509,110 @@ std::string RedisCache::redis_command(const std::string& cmd) {
 }
 
 std::optional<CacheEntry> RedisCache::parse_redis_value(const std::string& raw) {
-    (void)raw;
-    return std::nullopt;
+    return deserialize_cache_entry(raw, config_.redis_ttl);
 }
 
 std::optional<CacheEntry> RedisCache::get(const std::string& key) {
-    if (!connected_.load()) {
-        if (!connect()) {
-            return std::nullopt;
-        }
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!connected_.load() && !connect()) {
+        stats_.misses++;
+        return std::nullopt;
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    stats_.misses++;
-    // TODO: Implement Redis GET
-    return std::nullopt;
+    auto response = connection_->command({"GET", with_prefix(config_, key)});
+    if (!response) {
+        connected_.store(false);
+        stats_.misses++;
+        return std::nullopt;
+    }
+    if (response->type == RedisConnection::Type::Nil) {
+        stats_.misses++;
+        return std::nullopt;
+    }
+    if (response->type != RedisConnection::Type::BulkString) {
+        stats_.misses++;
+        return std::nullopt;
+    }
+
+    auto entry = parse_redis_value(response->str);
+    if (!entry) {
+        stats_.misses++;
+        return std::nullopt;
+    }
+
+    stats_.hits++;
+    return entry;
 }
 
 void RedisCache::put(const std::string& key, const CacheEntry& entry) {
-    if (!connected_.load()) {
-        if (!connect()) {
-            return;
-        }
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!connected_.load() && !connect()) {
+        return;
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    // TODO: Implement Redis SET with TTL
+    const auto ttl = effective_redis_ttl(config_, entry);
+    auto response = connection_->command({
+        "SETEX",
+        with_prefix(config_, key),
+        std::to_string(std::max<long long>(1, ttl.count())),
+        serialize_cache_entry(entry)
+    });
+
+    if (!response || !response->ok()) {
+        connected_.store(false);
+        return;
+    }
+
+    // Redis does not expose cheap per-prefix size on SETEX. Track approximate writes.
+    if (stats_.size == 0) {
+        stats_.size = 1;
+    }
 }
 
 void RedisCache::invalidate(const std::string& key) {
-    if (!connected_.load()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!connected_.load() && !connect()) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    // TODO: Implement Redis DEL
+    auto response = connection_->command({"DEL", with_prefix(config_, key)});
+    if (!response || !response->ok()) {
+        connected_.store(false);
+        return;
+    }
+    if (response->type == RedisConnection::Type::Integer && response->integer > 0 && stats_.size > 0) {
+        stats_.size--;
+    }
 }
 
 void RedisCache::clear() {
-    if (!connected_.load()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!connected_.load() && !connect()) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    // TODO: Implement Redis FLUSHDB
+    std::string cursor = "0";
+    do {
+        auto response = connection_->command({"SCAN", cursor, "MATCH", config_.key_prefix + "*", "COUNT", "100"});
+        if (!response || response->type != RedisConnection::Type::Array || response->array.size() != 2) {
+            connected_.store(false);
+            return;
+        }
+        const auto& next_cursor = response->array[0];
+        const auto& keys = response->array[1];
+        if (next_cursor.type != RedisConnection::Type::BulkString || keys.type != RedisConnection::Type::Array) {
+            connected_.store(false);
+            return;
+        }
+        cursor = next_cursor.str;
+        for (const auto& key_value : keys.array) {
+            if (key_value.type == RedisConnection::Type::BulkString) {
+                connection_->command({"DEL", key_value.str});
+            }
+        }
+    } while (cursor != "0");
+
+    stats_.size = 0;
 }
 
 CacheStats RedisCache::get_stats() const {
@@ -189,10 +630,12 @@ std::shared_ptr<ICache> create_cache(const CacheConfig& config) {
     }
 
     if (config.backend == "redis") {
-        // Try Redis first
         auto redis = std::make_shared<RedisCache>(config);
         if (redis->is_available()) {
-            std::cout << "  ✅ Cache: Redis backend connected" << std::endl;
+            std::cout << "  ✅ Cache: Redis backend connected ("
+                      << config.redis_host << ":" << config.redis_port
+                      << ", db=" << config.redis_db
+                      << ", ttl=" << config.redis_ttl.count() << "s)" << std::endl;
             return redis;
         }
         std::cerr << "  ⚠️  Redis backend unavailable, falling back to memory cache" << std::endl;

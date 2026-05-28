@@ -229,6 +229,24 @@ endif()
 find_yaml_cpp_for(test_embedding_config)
 add_test(NAME test_embedding_config COMMAND test_embedding_config)
 
+add_executable(test_upload_validation
+    test_upload_validation.cpp
+)
+target_include_directories(test_upload_validation PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+target_link_libraries(test_upload_validation PRIVATE
+    ${QORNIX_RAG_CORE_LINK_TARGET}
+)
+if(NOT QORNIX_RAG_CORE_LINK_TARGET)
+    target_sources(test_upload_validation PRIVATE
+        ../rag_upload.cpp
+        ../ingestion_pipeline.cpp
+    )
+endif()
+add_test(NAME test_upload_validation COMMAND test_upload_validation)
+
 add_executable(test_rag_service
     test_rag_service.cpp
 )
@@ -576,6 +594,7 @@ message(STATUS "  - test_ingestion_pipeline")
 message(STATUS "  - test_document_chunker")
 message(STATUS "  - test_vector_store")
 message(STATUS "  - test_embedding_config")
+message(STATUS "  - test_upload_validation")
 message(STATUS "  - test_rag_service")
 message(STATUS "  - test_rag_quality_eval")
 message(STATUS "  - test_graceful_degradation")

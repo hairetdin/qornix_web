@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 https://github.com/hairetdin
+ *
+ * This file is part of Qornix project.
+ * Licensed under GNU GPL v3.0 (see LICENSE file) or commercial license.
+ */
+
 #include "dynamic_query_service.h"
 #include "async_database_interface.h"
 #include "db/mock_async_driver.h"

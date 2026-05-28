@@ -1,6 +1,6 @@
 # Qornix RAG Standalone
 
-Standalone mode is a local single-user RAG/wiki application. It is intended to run on your machine, index local project files, maintain a local QA knowledge base, and ask a configured LLM questions with retrieved context.
+Standalone mode is a local single-user RAG/wiki application. It is intended to run on your machine, index local project files and uploaded documents, maintain a local QA knowledge base, and ask a configured LLM questions with retrieved context. For the complete dependency/model/database guide, see [FULL_RAG_GUIDE.md](FULL_RAG_GUIDE.md).
 
 ## Run From Source
 
@@ -52,7 +52,7 @@ Standalone mode has no authentication. Use `0.0.0.0` only when the network expos
 At startup:
 
 ```bash
-./qornix_rag/run.sh --project /path/to/project
+./qornix_rag/run.sh --scan-path /path/to/project
 ```
 
 From the API:
@@ -60,7 +60,7 @@ From the API:
 ```bash
 curl -X POST http://localhost:8081/api/index \
   -H "Content-Type: application/json" \
-  -d '{"project_path":"/path/to/project"}'
+  -d '{"scan_path":"/path/to/project"}'
 ```
 
 From the UI, use `Sources / Health` and the reindex action.
@@ -110,6 +110,29 @@ Recommended setup:
 ```
 
 The script downloads a default ONNX embedding model and changes `embedding.backend` to `onnx` in `qornix_rag/config.yaml`. See `qornix_rag/models/README.md` for manual download/export options and compatibility requirements.
+
+
+## Upload Documents
+
+The standalone UI includes an **Upload** tab. Uploaded files are stored under `upload.uploads_dir`, validated by extension/MIME/size allowlists, ingested, chunked, embedded, and made searchable.
+
+API example:
+
+```bash
+curl -X POST http://localhost:8081/api/documents/upload \
+  -F "files=@/path/to/document.pdf" \
+  -F "files=@/path/to/notes.md"
+```
+
+Delete an uploaded file through the UI or API:
+
+```bash
+curl -X POST http://localhost:8081/api/uploads/delete \
+  -H "Content-Type: application/json" \
+  -d '{"path":"qornix_rag/data/uploads/upload_.../document.pdf","reindex":true}'
+```
+
+Deletion is restricted to files inside the configured upload directory.
 
 ## QA Knowledge Base
 

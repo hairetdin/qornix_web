@@ -9,12 +9,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cctype>
 #include <iostream>
 #include <regex>
 #include <set>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <boost/json.hpp>
 
 using qornix::rag::QASource;
@@ -162,6 +164,110 @@ std::string sourcePathForDocument(const Document& doc) {
         : it->second;
 }
 
+std::string metadataValue(const std::map<std::string, std::string>& metadata, const std::string& key) {
+    auto it = metadata.find(key);
+    return it == metadata.end() ? std::string{} : it->second;
+}
+
+void addLocatorPart(std::vector<std::string>& parts, const std::string& label, const std::string& value) {
+    if (!value.empty()) {
+        parts.push_back(label + " " + value);
+    }
+}
+
+std::string joinLocatorParts(const std::vector<std::string>& parts) {
+    std::string out;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (i > 0) {
+            out += ", ";
+        }
+        out += parts[i];
+    }
+    return out;
+}
+
+std::string sourceLocatorForDocument(const Document& doc) {
+    std::vector<std::string> parts;
+    const auto& metadata = doc.metadata;
+
+    addLocatorPart(parts, "page", metadataValue(metadata, "chunk_page"));
+    addLocatorPart(parts, "slide", metadataValue(metadata, "chunk_slide"));
+
+    const std::string sheet = metadataValue(metadata, "chunk_sheet");
+    if (!sheet.empty()) {
+        std::string row = metadataValue(metadata, "chunk_row_start");
+        const std::string row_end = metadataValue(metadata, "chunk_row_end");
+        if (!row.empty() && !row_end.empty() && row_end != row) {
+            row += "-" + row_end;
+        }
+        parts.push_back(row.empty() ? "sheet " + sheet : "sheet " + sheet + ", row " + row);
+    }
+
+    const std::string heading = metadataValue(metadata, "chunk_heading");
+    if (!heading.empty()) {
+        parts.push_back("heading " + heading);
+    }
+
+    const std::string symbol_name = metadataValue(metadata, "chunk_symbol_name");
+    if (!symbol_name.empty()) {
+        const std::string symbol_kind = metadataValue(metadata, "chunk_symbol_kind");
+        parts.push_back((symbol_kind.empty() ? "symbol" : symbol_kind) + " " + symbol_name);
+    }
+
+    const std::string ocr_region = metadataValue(metadata, "chunk_ocr_region");
+    if (!ocr_region.empty()) {
+        std::string part = "ocr " + ocr_region;
+        const std::string confidence = metadataValue(metadata, "chunk_ocr_confidence").empty()
+            ? metadataValue(metadata, "image_ocr_confidence_avg")
+            : metadataValue(metadata, "chunk_ocr_confidence");
+        if (!confidence.empty()) {
+            part += " confidence " + confidence;
+        }
+        parts.push_back(std::move(part));
+    }
+
+    return joinLocatorParts(parts);
+}
+
+std::string resolveRequestedScanPath(const std::shared_ptr<RagEngine>& engine,
+                                     const std::optional<std::string>& scan_path) {
+    if (scan_path && !scan_path->empty()) {
+        return *scan_path;
+    }
+    if (engine) {
+        return engine->get_indexed_project_root();
+    }
+    return {};
+}
+
+std::string citationLabelForDocument(const std::string& citation_id, const Document& doc) {
+    std::string label = "[" + citation_id + "] " + sourcePathForDocument(doc);
+    const std::string locator = sourceLocatorForDocument(doc);
+    if (!locator.empty()) {
+        label += " (" + locator + ")";
+    }
+    return label;
+}
+
+std::map<std::string, std::string> curatedMetadata(const Document& doc) {
+    std::map<std::string, std::string> metadata;
+    static const std::vector<std::string> preferred = {
+        "metadata_contract", "structure_contract", "ingestion_parser", "chunk_strategy",
+        "chunk_index", "chunk_count", "chunk_page", "chunk_sheet", "chunk_row_start",
+        "chunk_row_end", "chunk_slide", "chunk_heading", "chunk_symbol_name",
+        "chunk_symbol_kind", "chunk_symbol_scope", "chunk_ocr_region",
+        "image_ocr_confidence_avg", "pdf_page_count", "docx_heading_count",
+        "xlsx_sheet_count", "pptx_slide_count"
+    };
+    for (const auto& key : preferred) {
+        auto it = doc.metadata.find(key);
+        if (it != doc.metadata.end() && !it->second.empty()) {
+            metadata[key] = it->second;
+        }
+    }
+    return metadata;
+}
+
 std::string citationId(const std::string& prefix, size_t index) {
     return prefix + std::to_string(index + 1);
 }
@@ -185,6 +291,9 @@ RagServiceSearchItem projectSearchItem(const SearchResult& result) {
     item.lines = result.document.lines_count;
     item.size = result.document.size_bytes;
     item.source_type = "project";
+    item.source_locator = sourceLocatorForDocument(result.document);
+    item.citation_label = citationLabelForDocument(item.citation_id, result.document);
+    item.metadata = curatedMetadata(result.document);
     return item;
 }
 
@@ -202,6 +311,7 @@ RagServiceSearchItem qaSearchItem(const QASource::QAPair& pair, double score) {
     item.lines = 2;
     item.size = pair.question.size() + pair.answer.size();
     item.source_type = "qa";
+    item.citation_label = item.path;
     item.category = pair.category;
     item.pair_id = pair.id;
     item.tags = pair.tags;
@@ -300,6 +410,325 @@ void postProcessGrounding(RagServiceAskResponse& response) {
     }
 }
 
+
+std::string lowerQualityCopy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+std::string normalizeQualityWhitespace(const std::string& value) {
+    std::string output;
+    output.reserve(value.size());
+    bool previous_space = false;
+    for (unsigned char ch : value) {
+        if (std::isspace(ch) || std::ispunct(ch)) {
+            if (!previous_space) {
+                output.push_back(' ');
+            }
+            previous_space = true;
+        } else {
+            output.push_back(static_cast<char>(ch));
+            previous_space = false;
+        }
+    }
+    while (!output.empty() && output.front() == ' ') output.erase(output.begin());
+    while (!output.empty() && output.back() == ' ') output.pop_back();
+    return output;
+}
+
+std::vector<std::string> qualityTerms(const std::string& value) {
+    static const std::set<std::string> stop_words = {
+        "what", "which", "where", "when", "why", "how", "does", "do", "did", "the", "and", "or",
+        "is", "are", "was", "were", "a", "an", "to", "of", "for", "in", "on", "with", "that", "this",
+        "как", "что", "где", "когда", "почему", "зачем", "это", "или", "для", "при", "про", "надо", "нужно"
+    };
+    std::vector<std::string> terms;
+    std::istringstream stream(normalizeQualityWhitespace(lowerQualityCopy(value)));
+    std::string term;
+    while (stream >> term) {
+        if (term.size() < 2 || stop_words.count(term) > 0) {
+            continue;
+        }
+        terms.push_back(term);
+    }
+    return terms;
+}
+
+std::string rewriteQualityQuery(const std::string& query) {
+    std::vector<std::string> terms = qualityTerms(query);
+    if (terms.empty()) {
+        return normalizeQualityWhitespace(query);
+    }
+    std::string out;
+    std::set<std::string> seen;
+    for (const auto& term : terms) {
+        if (!seen.insert(term).second) {
+            continue;
+        }
+        if (!out.empty()) out += ' ';
+        out += term;
+    }
+    return out.empty() ? normalizeQualityWhitespace(query) : out;
+}
+
+std::string compactQueryKey(const std::string& value) {
+    return normalizeQualityWhitespace(lowerQualityCopy(value));
+}
+
+std::string resultMergeKey(const SearchResult& result) {
+    const auto& doc = result.document;
+    std::string key = doc.relative_path;
+    const std::vector<std::string> discriminators = {
+        "chunk_index", "chunk_page", "chunk_sheet", "chunk_row_start", "chunk_slide", "chunk_symbol_name", "chunk_ocr_region"
+    };
+    for (const auto& discriminator : discriminators) {
+        auto it = doc.metadata.find(discriminator);
+        if (it != doc.metadata.end() && !it->second.empty()) {
+            key += "|" + discriminator + "=" + it->second;
+        }
+    }
+    return key;
+}
+
+double cosineQualityScore(const std::vector<float>& lhs, const std::vector<float>& rhs) {
+    if (lhs.empty() || rhs.empty() || lhs.size() != rhs.size()) {
+        return 0.0;
+    }
+    double dot = 0.0;
+    double lhs_norm = 0.0;
+    double rhs_norm = 0.0;
+    for (size_t i = 0; i < lhs.size(); ++i) {
+        dot += static_cast<double>(lhs[i]) * static_cast<double>(rhs[i]);
+        lhs_norm += static_cast<double>(lhs[i]) * static_cast<double>(lhs[i]);
+        rhs_norm += static_cast<double>(rhs[i]) * static_cast<double>(rhs[i]);
+    }
+    if (lhs_norm <= 0.0 || rhs_norm <= 0.0) {
+        return 0.0;
+    }
+    return dot / (std::sqrt(lhs_norm) * std::sqrt(rhs_norm));
+}
+
+struct QualitySearchOutput {
+    std::vector<SearchResult> results;
+    std::vector<RagServiceRetrievalQuery> retrieval_queries;
+    std::string rewritten_query;
+    bool multi_query_applied = false;
+    std::string retrieval_strategy = "single_query";
+    std::string reranker_type = "none";
+};
+
+QualitySearchOutput runQualitySearch(RagEngine& engine,
+                                     const std::string& query,
+                                     size_t top_k,
+                                     const std::vector<MetadataFilter>& filters) {
+    QualitySearchOutput output;
+    output.rewritten_query = rewriteQualityQuery(query);
+    output.multi_query_applied = engine.is_multi_query_retrieval_enabled();
+    output.reranker_type = engine.is_embedding_reranker_enabled()
+        ? "embedding_model_semantic_reranker"
+        : (engine.is_reranking_enabled() ? "metadata_lexical_reranker" : "none");
+
+    std::vector<std::pair<std::string, std::string>> candidates;
+    auto add_candidate = [&](std::string candidate, const std::string& origin) {
+        candidate = normalizeQualityWhitespace(candidate);
+        if (candidate.empty()) return;
+        const auto key = compactQueryKey(candidate);
+        for (const auto& existing : candidates) {
+            if (compactQueryKey(existing.first) == key) {
+                return;
+            }
+        }
+        candidates.emplace_back(std::move(candidate), origin);
+    };
+
+    add_candidate(query, "original");
+    const auto expanded = engine.expand_query(query);
+    if (expanded != query) {
+        add_candidate(expanded, "expanded");
+    }
+    if (output.rewritten_query != query) {
+        add_candidate(output.rewritten_query, "rewritten");
+    }
+
+    // A compact high-signal variant helps long natural-language questions and generated-app route queries.
+    const auto terms = qualityTerms(query);
+    if (terms.size() > 2) {
+        std::string compact;
+        for (size_t i = 0; i < terms.size() && i < 6; ++i) {
+            if (!compact.empty()) compact += ' ';
+            compact += terms[i];
+        }
+        add_candidate(compact, "keywords");
+    }
+
+    const size_t max_variants = output.multi_query_applied
+        ? std::max<size_t>(1, engine.multi_query_max_variants())
+        : 1;
+    if (candidates.size() > max_variants) {
+        candidates.resize(max_variants);
+    }
+    output.retrieval_strategy = candidates.size() > 1 ? "multi_query_union" : "single_query";
+    output.multi_query_applied = candidates.size() > 1;
+
+    std::unordered_map<std::string, SearchResult> merged;
+    std::unordered_map<std::string, double> best_scores;
+    const std::vector<float> original_embedding = engine.is_embedding_reranker_enabled()
+        ? engine.generate_embedding(query)
+        : std::vector<float>{};
+
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        const auto& [candidate_query, origin] = candidates[i];
+        SearchOptions options;
+        options.top_k = std::max<size_t>(top_k, 1) * (candidates.size() > 1 ? 2 : 1);
+        options.filters = filters;
+        auto results = engine.search(candidate_query, options);
+        RagServiceRetrievalQuery diag;
+        diag.query = candidate_query;
+        diag.origin = origin;
+        diag.result_count = results.size();
+        output.retrieval_queries.push_back(std::move(diag));
+
+        const double query_weight = origin == "original" ? 1.00 : (origin == "expanded" ? 0.97 : (origin == "rewritten" ? 0.94 : 0.90));
+        for (auto result : results) {
+            double base = result.fused_score > 0.0 ? result.fused_score : result.score;
+            double quality_score = base * query_weight;
+            if (!original_embedding.empty() && !result.document.embedding.empty()) {
+                quality_score += std::max(0.0, cosineQualityScore(original_embedding, result.document.embedding)) * 0.20;
+            }
+            if (result.snippet.find(query) != std::string::npos) {
+                quality_score += 0.08;
+            }
+            result.score = quality_score;
+            result.fused_score = quality_score;
+            result.document.metadata["retrieval_query_origin"] = origin;
+            result.document.metadata["retrieval_strategy"] = output.retrieval_strategy;
+            result.document.metadata["reranker_type"] = output.reranker_type;
+
+            const auto key = resultMergeKey(result);
+            auto best_it = best_scores.find(key);
+            if (best_it == best_scores.end() || quality_score > best_it->second) {
+                best_scores[key] = quality_score;
+                merged[key] = std::move(result);
+            }
+        }
+    }
+
+    output.results.reserve(merged.size());
+    for (auto& [_, result] : merged) {
+        output.results.push_back(std::move(result));
+    }
+    std::stable_sort(output.results.begin(), output.results.end(), [](const SearchResult& a, const SearchResult& b) {
+        return a.score > b.score;
+    });
+    if (output.results.size() > top_k) {
+        output.results.resize(top_k);
+    }
+    return output;
+}
+
+double tokenOverlapScore(const std::string& claim, const std::string& context) {
+    const auto claim_terms = qualityTerms(claim);
+    if (claim_terms.empty() || context.empty()) {
+        return 0.0;
+    }
+    const std::string context_lower = lowerQualityCopy(context);
+    size_t matched = 0;
+    std::set<std::string> unique_terms(claim_terms.begin(), claim_terms.end());
+    for (const auto& term : unique_terms) {
+        if (context_lower.find(term) != std::string::npos) {
+            matched++;
+        }
+    }
+    return static_cast<double>(matched) / static_cast<double>(unique_terms.size());
+}
+
+std::vector<std::string> splitAnswerClaims(const std::string& answer) {
+    std::vector<std::string> claims;
+    std::string current;
+    for (char ch : answer) {
+        current.push_back(ch);
+        if (ch == '.' || ch == '!' || ch == '?' || ch == '\n') {
+            auto normalized = normalizeQualityWhitespace(current);
+            if (normalized.size() >= 24) {
+                claims.push_back(std::move(normalized));
+            }
+            current.clear();
+        }
+        if (claims.size() >= 12) {
+            break;
+        }
+    }
+    auto normalized = normalizeQualityWhitespace(current);
+    if (claims.size() < 12 && normalized.size() >= 24) {
+        claims.push_back(std::move(normalized));
+    }
+    return claims;
+}
+
+void evaluateClaimGrounding(RagServiceAskResponse& response) {
+    if (response.context.empty()) {
+        response.grounding_evaluator = "none";
+        response.claim_grounding_status = "no_context";
+        return;
+    }
+    if (response.llm_status == "unavailable" || response.llm_status == "not_configured") {
+        response.grounding_evaluator = "retrieval_citation_baseline";
+        response.claim_grounding_status = response.grounding_status;
+        return;
+    }
+
+    std::map<std::string, std::string> context_by_citation;
+    for (const auto& item : response.context) {
+        context_by_citation[item.citation_id] = item.snippet;
+    }
+
+    response.grounding_evaluator = "citation_lexical_claim_grounding";
+    response.grounded_claims.clear();
+    bool saw_uncited = false;
+    bool saw_unsupported = false;
+    bool saw_claim = false;
+    for (const auto& claim_text : splitAnswerClaims(response.answer)) {
+        RagServiceGroundingClaim claim;
+        claim.claim = claim_text;
+        claim.citations = extractCitations(claim_text);
+        if (claim.citations.empty()) {
+            claim.status = "uncited";
+            saw_uncited = true;
+        } else {
+            double best = 0.0;
+            for (const auto& citation : claim.citations) {
+                auto it = context_by_citation.find(citation);
+                if (it != context_by_citation.end()) {
+                    best = std::max(best, tokenOverlapScore(claim_text, it->second));
+                }
+            }
+            claim.support_score = best;
+            if (best >= 0.30) {
+                claim.status = "grounded";
+            } else if (best >= 0.12) {
+                claim.status = "partial";
+            } else {
+                claim.status = "unsupported";
+                saw_unsupported = true;
+            }
+        }
+        saw_claim = true;
+        response.grounded_claims.push_back(std::move(claim));
+    }
+
+    if (!saw_claim) {
+        response.claim_grounding_status = "no_claims";
+    } else if (saw_unsupported) {
+        response.claim_grounding_status = "unsupported_claims";
+    } else if (saw_uncited) {
+        response.claim_grounding_status = "uncited_claims";
+    } else {
+        response.claim_grounding_status = "grounded";
+    }
+}
+
 std::string sanitizeHistoryContent(const std::string& content, size_t max_chars = 700) {
     std::string output;
     output.reserve(std::min(content.size(), max_chars));
@@ -377,16 +806,17 @@ RagService::RagService(std::shared_ptr<RagEngine> engine,
 #endif
 {}
 
-RagServiceIndexResponse RagService::indexProject(const std::optional<std::string>& project_path) {
+RagServiceIndexResponse RagService::indexProject(const std::optional<std::string>& scan_path) {
     RagServiceIndexResponse response;
     if (!rag_engine_) {
         response.message = "RAG engine is not configured";
         return response;
     }
 
-    std::string path = project_path.value_or(rag_engine_->get_indexed_project_root());
+    std::string path = resolveRequestedScanPath(rag_engine_, scan_path);
     if (path.empty()) {
-        path = ".";
+        response.message = "scan_path is not configured";
+        return response;
     }
     rag_engine_->index_project(path);
 #if QORNIX_HAS_SQLITE
@@ -407,21 +837,22 @@ RagServiceIndexResponse RagService::indexProject(const std::optional<std::string
     }
 #endif
     response.success = true;
-    response.message = "Project indexed successfully";
+    response.message = "Scan path indexed successfully";
     response.stats = rag_engine_->get_statistics();
     return response;
 }
 
-RagServiceIngestResponse RagService::ingestProject(const std::optional<std::string>& project_path) {
+RagServiceIngestResponse RagService::ingestProject(const std::optional<std::string>& scan_path) {
+    RagServiceIngestResponse response;
     if (!rag_engine_) {
-        RagServiceIngestResponse response;
         response.message = "RAG engine is not configured";
         return response;
     }
 
-    std::string path = project_path.value_or(rag_engine_->get_indexed_project_root());
+    std::string path = resolveRequestedScanPath(rag_engine_, scan_path);
     if (path.empty()) {
-        path = ".";
+        response.message = "scan_path is not configured";
+        return response;
     }
 
     RagServiceIngestionJob job;
@@ -434,16 +865,17 @@ RagServiceIngestResponse RagService::ingestProject(const std::optional<std::stri
     return runIngestionJob(std::move(job), path);
 }
 
-RagServiceIngestResponse RagService::startBackgroundIngestProject(const std::optional<std::string>& project_path) {
+RagServiceIngestResponse RagService::startBackgroundIngestProject(const std::optional<std::string>& scan_path) {
     RagServiceIngestResponse response;
     if (!rag_engine_) {
         response.message = "RAG engine is not configured";
         return response;
     }
 
-    std::string path = project_path.value_or(rag_engine_->get_indexed_project_root());
+    std::string path = resolveRequestedScanPath(rag_engine_, scan_path);
     if (path.empty()) {
-        path = ".";
+        response.message = "scan_path is not configured";
+        return response;
     }
 
     RagServiceIngestionJob job;
@@ -616,8 +1048,16 @@ bool RagService::deletePersistedDocument(const std::string& relative_path,
 }
 
 RagServiceSearchResponse RagService::search(const std::string& query, size_t top_k) {
+    return search(query, top_k, {});
+}
+
+RagServiceSearchResponse RagService::search(const std::string& query,
+                                            size_t top_k,
+                                            const std::vector<MetadataFilter>& filters) {
     RagServiceSearchResponse response;
     response.query = query;
+    response.filters = filters;
+    response.filters_applied = !filters.empty();
     const auto started = std::chrono::steady_clock::now();
 
     if (!rag_engine_ || query.empty()) {
@@ -629,17 +1069,29 @@ RagServiceSearchResponse RagService::search(const std::string& query, size_t top
     response.query_expansion_applied = response.expanded_query != query;
     response.reranking_applied = rag_engine_->is_reranking_enabled();
 
-    auto results = rag_engine_->search(query, top_k);
-    response.results.reserve(results.size());
-    for (const auto& result : results) {
-        response.results.push_back(projectSearchItem(result));
+    auto quality = runQualitySearch(*rag_engine_, query, top_k, filters);
+    response.rewritten_query = quality.rewritten_query;
+    response.multi_query_applied = quality.multi_query_applied;
+    response.retrieval_strategy = quality.retrieval_strategy;
+    response.reranker_type = quality.reranker_type;
+    response.retrieval_queries = quality.retrieval_queries;
+
+    response.results.reserve(quality.results.size());
+    for (const auto& result : quality.results) {
+        auto item = projectSearchItem(result);
+        item.citation_id = citationId("S", response.results.size());
+        item.citation_label = citationLabelForDocument(item.citation_id, result.document);
+        response.results.push_back(std::move(item));
     }
 
-    const auto qa_pairs = searchQa(query, std::min<size_t>(top_k, 5));
-    for (size_t i = 0; i < qa_pairs.size(); ++i) {
-        auto item = qaSearchItem(qa_pairs[i], qaScore(qa_pairs[i], query, i));
-        item.citation_id = citationId("Q", i);
-        response.results.push_back(std::move(item));
+    if (filters.empty()) {
+        const auto qa_pairs = searchQa(query, std::min<size_t>(top_k, 5));
+        for (size_t i = 0; i < qa_pairs.size(); ++i) {
+            auto item = qaSearchItem(qa_pairs[i], qaScore(qa_pairs[i], query, i));
+            item.citation_id = citationId("Q", i);
+            item.citation_label = "[" + item.citation_id + "] " + item.source_path;
+            response.results.push_back(std::move(item));
+        }
     }
 
     const auto finished = std::chrono::steady_clock::now();
@@ -648,15 +1100,27 @@ RagServiceSearchResponse RagService::search(const std::string& query, size_t top
 }
 
 RagServiceAskResponse RagService::ask(const std::string& question, size_t top_k, const std::string& client_ip) {
-    return ask(question, top_k, client_ip, {});
+    return ask(question, top_k, client_ip, {}, {});
 }
 
 RagServiceAskResponse RagService::ask(const std::string& question,
                                       size_t top_k,
                                       const std::string& client_ip,
                                       const std::vector<RagServiceConversationTurn>& history) {
+    return ask(question, top_k, client_ip, history, {});
+}
+
+RagServiceAskResponse RagService::ask(const std::string& question,
+                                      size_t top_k,
+                                      const std::string& client_ip,
+                                      const std::vector<RagServiceConversationTurn>& history,
+                                      const std::vector<MetadataFilter>& filters,
+                                      const std::optional<std::string>& system_prompt,
+                                      const std::optional<std::string>& prompt_template) {
     RagServiceAskResponse response;
     response.question = question;
+    response.filters = filters;
+    response.filters_applied = !filters.empty();
     if (!rag_engine_ || question.empty()) {
         response.success = false;
         response.llm_status = "invalid_request";
@@ -667,7 +1131,7 @@ RagServiceAskResponse RagService::ask(const std::string& question,
     response.reranking_applied = rag_engine_->is_reranking_enabled();
 
     std::string context_text;
-    const auto qa_pairs = searchQa(question, std::min<size_t>(top_k, 5));
+    const auto qa_pairs = filters.empty() ? searchQa(question, std::min<size_t>(top_k, 5)) : std::vector<QASource::QAPair>{};
     for (size_t i = 0; i < qa_pairs.size(); ++i) {
         const auto& pair = qa_pairs[i];
         const std::string citation = citationId("Q", i);
@@ -689,18 +1153,30 @@ RagServiceAskResponse RagService::ask(const std::string& question,
         item.pair_id = pair.id;
         item.tags = pair.tags;
         item.attribution = qaAttribution(pair);
+        item.citation_label = "[" + citation + "] " + item.source_path;
         response.context.push_back(std::move(item));
         response.sources.push_back(qaPath(pair));
         response.citations.push_back(citation);
     }
 
-    auto results = rag_engine_->search(question, top_k);
-    for (size_t i = 0; i < results.size(); ++i) {
-        const auto& result = results[i];
+    auto quality = runQualitySearch(*rag_engine_, question, top_k, filters);
+    response.rewritten_query = quality.rewritten_query;
+    response.multi_query_applied = quality.multi_query_applied;
+    response.retrieval_strategy = quality.retrieval_strategy;
+    response.reranker_type = quality.reranker_type;
+    response.retrieval_queries = quality.retrieval_queries;
+
+    for (size_t i = 0; i < quality.results.size(); ++i) {
+        const auto& result = quality.results[i];
         const std::string citation = citationId("S", i);
         const std::string source_path = sourcePathForDocument(result.document);
+        const std::string locator = sourceLocatorForDocument(result.document);
         std::ostringstream ctx;
-        ctx << "[" << citation << "] " << source_path << ": " << result.snippet;
+        ctx << "[" << citation << "] " << source_path;
+        if (!locator.empty()) {
+            ctx << " (" << locator << ")";
+        }
+        ctx << ": " << result.snippet;
         if (!context_text.empty()) {
             context_text += "\n---\n";
         }
@@ -714,8 +1190,11 @@ RagServiceAskResponse RagService::ask(const std::string& question,
         item.confidence = confidenceFromScore(result.fused_score > 0.0 ? result.fused_score : result.score);
         item.snippet = result.snippet;
         item.source_type = "project";
+        item.source_locator = locator;
+        item.citation_label = citationLabelForDocument(citation, result.document);
+        item.metadata = curatedMetadata(result.document);
         response.context.push_back(std::move(item));
-        response.sources.push_back(source_path);
+        response.sources.push_back(locator.empty() ? source_path : source_path + " (" + locator + ")");
         response.citations.push_back(citation);
     }
 
@@ -739,7 +1218,12 @@ RagServiceAskResponse RagService::ask(const std::string& question,
 
     if (llm_client_ && llm_client_->is_enabled()) {
         const auto started = std::chrono::steady_clock::now();
-        const auto llm_result = llm_client_->ask_with_metadata(question, context_text, client_ip);
+        const auto llm_result = llm_client_->ask_with_metadata(
+            question,
+            context_text,
+            client_ip,
+            system_prompt,
+            prompt_template);
         const auto finished = std::chrono::steady_clock::now();
         response.answer = llm_result.answer;
         response.llm_parser_error = llm_result.parser_error;
@@ -765,7 +1249,14 @@ RagServiceAskResponse RagService::ask(const std::string& question,
     }
 
     postProcessGrounding(response);
+    evaluateClaimGrounding(response);
     return response;
+}
+
+bool RagService::recordFeedback(const RagServiceFeedbackEntry& feedback) {
+    return !feedback.rating.empty() || !feedback.comment.empty() ||
+           !feedback.category.empty() || !feedback.query.empty() ||
+           !feedback.question.empty();
 }
 
 RagServiceHealth RagService::health() const {
@@ -797,19 +1288,32 @@ RagServiceHealth RagService::health() const {
     health.vector_store_size = vector_diagnostics.size;
     health.vector_store_dimension = vector_diagnostics.dimension;
     health.query_expansion = rag_engine_->is_query_expansion_enabled();
+    health.multi_query_retrieval = rag_engine_->is_multi_query_retrieval_enabled();
+    health.embedding_reranker = rag_engine_->is_embedding_reranker_enabled();
     health.reranking = rag_engine_->is_reranking_enabled();
+    health.xapian = rag_engine_->get_xapian_diagnostics();
 
     if (llm_client_ && llm_client_->is_enabled()) {
-        health.llm_response_time_ms = llm_client_->health_check();
+        health.llm_response_time_ms = llm_client_->provider_health_check();
         health.available_models = llm_client_->list_available_models();
         health.configured_model_available = llm_client_->configured_model_available();
-        health.llm_available = health.llm_response_time_ms >= 0;
         health.llm_provider = llm_client_->provider_name();
+        health.llm_provider_available = health.llm_response_time_ms >= 0;
+        health.llm_available = health.llm_provider_available;
+        health.llm_ready = health.llm_provider_available &&
+            ((health.llm_provider != "ollama" && health.available_models.empty()) ||
+             health.configured_model_available);
         health.llm_model = llm_client_->get_model();
         health.llm_api_url = llm_client_->get_api_url();
-        health.llm_status = health.llm_response_time_ms >= 0
-            ? "ok"
-            : (health.available_models.empty() ? "provider_unavailable" : "model_not_found");
+        if (!health.llm_provider_available) {
+            health.llm_status = "provider_unavailable";
+        } else if (health.available_models.empty()) {
+            health.llm_status = "models_unreported";
+        } else if (!health.configured_model_available) {
+            health.llm_status = "model_not_found";
+        } else {
+            health.llm_status = "ok";
+        }
     }
 
     return health;
@@ -855,9 +1359,15 @@ RagServiceEmbeddingModelsResponse RagService::embeddingModels() const {
     effective.pooling = info.pooling;
     effective.dimension = info.dimension;
     effective.max_seq_len = info.max_seq_len;
+    effective.tokenizer_vocab_size = info.tokenizer_vocab_size;
+    effective.effective_chunk_token_limit = info.effective_chunk_token_limit;
     effective.active = true;
     effective.ready = info.ready;
+    effective.files_present = info.backend != "onnx" || (!info.model_path.empty() && !info.tokenizer_path.empty());
+    effective.persistent_cache_enabled = info.persistent_cache_enabled;
     effective.status = info.status;
+    effective.tokenizer_status = info.tokenizer_status;
+    effective.model_signature = info.model_signature;
 
     const auto& registry = rag_engine_->get_embedding_model_registry();
     if (registry.models.empty()) {
@@ -878,9 +1388,17 @@ RagServiceEmbeddingModelsResponse RagService::embeddingModels() const {
         item.pooling = model.pooling;
         item.dimension = model.dimension;
         item.max_seq_len = model.max_seq_len;
+        item.tokenizer_vocab_size = model.tokenizer_vocab_size;
+        item.effective_chunk_token_limit = model.max_seq_len > 2 ? model.max_seq_len - 2 : model.max_seq_len;
         item.active = id == response.active_model_id;
-        item.ready = item.active ? info.ready : true;
-        item.status = item.active ? info.status : "installed";
+        item.ready = item.active ? info.ready : (model.backend != "onnx" || model.files_present);
+        item.discovered = model.discovered;
+        item.files_present = model.files_present;
+        item.persistent_cache_enabled = rag_engine_->get_embedding_config().persistent_cache_enabled;
+        item.status = item.active ? info.status : (model.files_present ? "installed" : "not ready");
+        item.tokenizer_status = item.active ? info.tokenizer_status : model.tokenizer_status;
+        item.model_status = model.model_status;
+        item.source = model.source;
         included_active = included_active || item.active;
         response.models.push_back(std::move(item));
     }
@@ -894,7 +1412,7 @@ RagServiceEmbeddingSwitchResponse RagService::switchEmbeddingModel(
     const std::string& model_id,
     bool reindex,
     bool force_reembed,
-    const std::optional<std::string>& project_path) {
+    const std::optional<std::string>& scan_path) {
     RagServiceEmbeddingSwitchResponse response;
     response.active_model_id = model_id;
     response.force_reembed = force_reembed;
@@ -919,7 +1437,7 @@ RagServiceEmbeddingSwitchResponse RagService::switchEmbeddingModel(
     response.message = "Embedding model switched; reindex required";
 
     if (reindex) {
-        auto indexed = indexProject(project_path);
+        auto indexed = indexProject(scan_path);
         response.reindexed = indexed.success;
         response.stats = indexed.stats;
         response.reindex_required = !indexed.success;
@@ -1127,6 +1645,11 @@ std::vector<std::string> RagService::listQaTags(const std::string& query,
                                                 size_t limit,
                                                 const std::string& source_id) const {
     limit = limit == 0 ? 50 : std::min<size_t>(limit, 200);
+#if QORNIX_HAS_SQLITE
+    if (sqlite_source_ && (source_id.empty() || source_id == sqlite_source_->getId() || source_id == sqlite_source_->getSourceId())) {
+        return sqlite_source_->listQATags(query, limit);
+    }
+#endif
     std::vector<std::string> tags;
     auto contains = [](const std::vector<std::string>& values, const std::string& value) {
         return std::find(values.begin(), values.end(), value) != values.end();

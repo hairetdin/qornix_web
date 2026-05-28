@@ -32,7 +32,7 @@ Use --with-dynamic-api-vue to generate a Schema-driven Dynamic API application w
 Use --with-dynamic-api-react to generate a Schema-driven Dynamic API application with a React/Vite frontend scaffold.
 Use --with-dynamic-api-angular to generate a Schema-driven Dynamic API application with an Angular frontend scaffold.
 Use --template rag_app to generate a Qornix Web application with embedded qornix_rag routes.
-Use --with-rag to add embedded qornix_rag routes to the default application template.
+Use --with-rag to add embedded qornix_rag routes to any non-rag_app template.
 USAGE
 }
 
@@ -198,8 +198,8 @@ framework_root="$(script_dir)"
 template_dir="${framework_root}/templates/${template_name}"
 [ -d "$template_dir" ] || fail "Application template not found: $template_dir"
 
-if [ "$with_rag" = "true" ] && [ "$template_name" != "app" ]; then
-    fail "--with-rag currently supports the default app template. Use --template rag_app for a dedicated RAG app."
+if [ "$with_rag" = "true" ] && [ "$template_name" = "rag_app" ]; then
+    fail "--with-rag is already included in --template rag_app."
 fi
 
 project_abs_path="$(absolute_path "$project_path")"
@@ -228,19 +228,26 @@ if [ "$with_rag" = "true" ]; then
     rag_template_dir="${framework_root}/templates/rag_app"
     [ -d "$rag_template_dir" ] || fail "RAG template assets not found: $rag_template_dir"
 
+    rag_backend_prefix=""
+    case "$template_name" in
+        dynamic_api_vue_app|dynamic_api_react_app|dynamic_api_angular_app)
+            rag_backend_prefix="backend/"
+            ;;
+    esac
+
     mkdir -p \
-        "$project_abs_path/templates" \
-        "$project_abs_path/static" \
-        "$project_abs_path/doc" \
+        "$project_abs_path/${rag_backend_prefix}templates" \
+        "$project_abs_path/${rag_backend_prefix}static" \
+        "$project_abs_path/${rag_backend_prefix}doc" \
         "$project_abs_path/knowledge_base" \
         "$project_abs_path/models" \
         "$project_abs_path/data" \
         "$project_abs_path/logs"
 
-    cp "${rag_template_dir}/templates/rag_interface.html" "$project_abs_path/templates/rag_interface.html"
-    cp "${rag_template_dir}/static/rag_app.css" "$project_abs_path/static/rag_app.css"
-    cp "${rag_template_dir}/doc/rag_app.md" "$project_abs_path/doc/rag_app.md"
-    cp "${rag_template_dir}/doc/operations.md" "$project_abs_path/doc/operations.md"
+    cp "${rag_template_dir}/templates/rag_interface.html" "$project_abs_path/${rag_backend_prefix}templates/rag_interface.html"
+    cp "${rag_template_dir}/static/rag_app.css" "$project_abs_path/${rag_backend_prefix}static/rag_app.css"
+    cp "${rag_template_dir}/doc/rag_app.md" "$project_abs_path/${rag_backend_prefix}doc/rag_app.md"
+    cp "${rag_template_dir}/doc/operations.md" "$project_abs_path/${rag_backend_prefix}doc/operations.md"
     cp "${rag_template_dir}/knowledge_base/README.md" "$project_abs_path/knowledge_base/README.md"
     cp "${rag_template_dir}/models/README.md" "$project_abs_path/models/README.md"
     cp "${rag_template_dir}/download_onnx_model.sh" "$project_abs_path/download_onnx_model.sh"
@@ -320,6 +327,11 @@ rag:
     request_timeout_ms: 30000
     temperature: 0.2
     max_tokens: 2048
+    prompt_template: |
+      Контекст:
+      {context}
+
+      Вопрос: {question}
 
   embedding:
     backend: tfidf
@@ -360,7 +372,21 @@ rag:
     protect_admin_routes: true
     protect_write_routes: true
 
+  upload:
+    enabled: true
+    uploads_dir: data/uploads
+    max_file_size_kb: 16384
+    max_files_per_request: 20
+    auto_ingest: true
+    async_ingest: false
+    overwrite_existing: false
+    allowed_extensions: \".txt,.md,.rst,.adoc,.json,.yaml,.yml,.xml,.html,.htm,.csv,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp\"
+    allowed_mime_types: \"text/plain,text/markdown,text/csv,text/html,application/json,application/xml,application/pdf,application/x-yaml,application/yaml,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/tiff,image/bmp,image/webp\"
+
   indexing:
+    # Optional directory scan root. Leave unset to start in upload/API/QA mode.
+    # scan_path: knowledge_base
+    auto_index_on_startup: true
     max_file_size_kb: 4096
 
   sqlite:
@@ -425,9 +451,11 @@ cmake -D${project_name_upper}_ENABLE_RAG=OFF ..
 \`\`\`
 
 The RAG module stores local QA data in \`data/rag_kb.db\`, reads Markdown files
-from \`knowledge_base/\`, serves the RAG UI from \`templates/rag_interface.html\`,
-and starts with dependency-light TF-IDF retrieval. Optional ONNX embedding files
-can be placed under \`models/\` or downloaded with:
+from \`knowledge_base/\`, serves the RAG UI from the generated templates directory,
+and starts with dependency-light TF-IDF retrieval. It does not scan a directory
+on startup unless \`rag.indexing.scan_path\` is set; uploads, QA and explicit
+\`scan_path\` API indexing are available immediately. Optional ONNX embedding
+files can be placed under \`models/\` or downloaded with:
 
 \`\`\`bash
 ./download_onnx_model.sh

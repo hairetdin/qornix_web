@@ -1,5 +1,5 @@
 {
-  "name": "post_stabilization_6_retrieval_quality",
+  "name": "post_stabilization_7_rag_quality_beyond_baseline",
   "documents": [
     {
       "path": "doc/rag_routes.md",
@@ -20,6 +20,14 @@
     {
       "path": "doc/conversation_rules.md",
       "content": "# Conversation history\nConversation history may resolve follow-up wording, but it is not a factual source. Answers must cite retrieved sources rather than previous chat turns."
+    },
+    {
+      "path": "doc/long_ingestion_runbook.md",
+      "content": "# Long ingestion runbook\nSection 1: Background notes for operators and maintainers.\nSection 2: Background notes for operators and maintainers.\nSection 3: Background notes for operators and maintainers.\nSection 4: Background notes for operators and maintainers.\nSection 5: Background notes for operators and maintainers.\nSection 6: Background notes for operators and maintainers.\nSection 7: Background notes for operators and maintainers.\nSection 8: Background notes for operators and maintainers.\nSection 9: Background notes for operators and maintainers.\nSection 10: Background notes for operators and maintainers.\nSection 11: Background notes for operators and maintainers.\nSection 12: Background notes for operators and maintainers.\nSection 13: Background notes for operators and maintainers.\nSection 14: Background notes for operators and maintainers.\nSection 15: Background notes for operators and maintainers.\nSection 16: Background notes for operators and maintainers.\nSection 17: Background notes for operators and maintainers.\nSection 18: Background notes for operators and maintainers.\nSection 19: Background notes for operators and maintainers.\nSection 20: Background notes for operators and maintainers.\nSection 21: Background notes for operators and maintainers.\nSection 22: Background notes for operators and maintainers.\nSection 23: Background notes for operators and maintainers.\nSection 24: Background notes for operators and maintainers.\nThe long document quality check says multi query retrieval should keep the ingestion retry budget visible in diagnostics. Operators inspect retrieval_queries when long runbooks contain repeated generic sections.\nAppendix 25: Generated filler around diagnostics and route wiring.\nAppendix 26: Generated filler around diagnostics and route wiring.\nAppendix 27: Generated filler around diagnostics and route wiring.\nAppendix 28: Generated filler around diagnostics and route wiring.\nAppendix 29: Generated filler around diagnostics and route wiring.\nAppendix 30: Generated filler around diagnostics and route wiring.\nAppendix 31: Generated filler around diagnostics and route wiring.\nAppendix 32: Generated filler around diagnostics and route wiring.\nAppendix 33: Generated filler around diagnostics and route wiring.\nAppendix 34: Generated filler around diagnostics and route wiring.\nAppendix 35: Generated filler around diagnostics and route wiring.\nAppendix 36: Generated filler around diagnostics and route wiring.\nAppendix 37: Generated filler around diagnostics and route wiring.\nAppendix 38: Generated filler around diagnostics and route wiring.\nAppendix 39: Generated filler around diagnostics and route wiring.\nAppendix 40: Generated filler around diagnostics and route wiring.\nAppendix 41: Generated filler around diagnostics and route wiring.\nAppendix 42: Generated filler around diagnostics and route wiring.\nAppendix 43: Generated filler around diagnostics and route wiring.\nAppendix 44: Generated filler around diagnostics and route wiring."
+    },
+    {
+      "path": "generated/rag_app/templates/home.md",
+      "content": "# Generated RAG app home\nGenerated template apps expose a root RAG dashboard with search, ask, source attribution, ingestion job progress, feedback capture, and model switching controls."
     }
   ],
   "qa_pairs": [
@@ -80,6 +88,23 @@
       "top_k": 3,
       "expected_grounding_status": "no_context",
       "expected_llm_status": "unavailable"
+    },
+    {
+      "id": "long_document_multi_query_diagnostics",
+      "type": "search",
+      "query": "Where are retrieval query diagnostics described for long ingestion runbooks?",
+      "top_k": 3,
+      "expected_top_source": "doc/long_ingestion_runbook.md",
+      "expected_snippet_contains": "retrieval_queries"
+    },
+    {
+      "id": "generated_template_app_quality",
+      "type": "ask",
+      "question": "What controls are exposed by generated template RAG apps?",
+      "top_k": 3,
+      "expected_context_source": "generated/rag_app/templates/home.md",
+      "expected_citation_prefix": "S",
+      "expected_grounding_status": "grounded"
     }
   ]
 }

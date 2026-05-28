@@ -248,3 +248,4 @@ A later project-specific iteration can turn this scaffold into an XML-driven fro
 - Backend operation buttons.
 
 That work remains optional because many projects only need a conventional React frontend over the generated backend API.
+@WITH_RAG_README@

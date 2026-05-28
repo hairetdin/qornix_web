@@ -10,6 +10,8 @@ This project is created by:
 
 It embeds the reusable `qornix_rag` module into a normal Qornix Web application. It does not use the standalone-only `qornix_rag/run.sh` launcher.
 
+By default the app starts in upload/API/QA mode and does not scan a directory on startup. Set `rag.indexing.scan_path` in `config.yaml` or pass `scan_path` to `/api/rag/index` when you want filesystem ingestion.
+
 ## Build
 
 ```bash
@@ -239,3 +241,11 @@ The generated `CMakeLists.txt` points to the Qornix Web checkout used by the gen
 ```bash
 cmake -DQORNIX_WEB_ROOT=/path/to/qornix_web ..
 ```
+
+## Upload documents from the web UI
+
+The generated RAG UI includes an **Upload** tab. Uploaded files are stored under `data/uploads` by default, validated against extension/MIME/size allowlists, ingested, and then made searchable through the same hybrid index used by Search and Ask.
+
+Supported upload formats follow the framework ingestion pipeline: text/Markdown, JSON/YAML/XML/HTML, CSV/XLSX, PDF, DOCX, PPTX, and common image formats when OCR tooling is available.
+
+Configure upload limits in `config.yaml` under `rag.upload`.

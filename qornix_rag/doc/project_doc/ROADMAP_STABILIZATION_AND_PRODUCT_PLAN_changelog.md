@@ -2127,6 +2127,35 @@ authenticated generated rag_app smoke:
   authenticated+admin-token /api/rag/admin/diagnostics -> 200
 ```
 
+## 2026-05-27 - Advanced ingestion metadata completed
+
+Status: `done`
+
+Goal:
+- close `0.1 Current explicit open work` item 4;
+- promote the PDF/DOCX/XLSX/CSV/PPTX/image parser baselines from plain text extraction to a stable advanced metadata contract;
+- keep optional parser dependencies graceful when `pdftotext`, `tesseract`, `libzip`, or `pugixml` are unavailable.
+
+Implemented:
+- added `advanced_ingestion_metadata_v1` metadata contract markers for rich parser outputs;
+- expanded PDF ingestion with `pdftotext -layout`, extraction diagnostics, raw metadata hints, `pdfinfo -box` page-box metadata, optional attachment listing via `pdfdetach`, and optional outline probing via `mutool`;
+- expanded DOCX ingestion with paragraph/heading/table counts, footnote/endnote/comment/style counts, document relationship count, and core/app document properties when `libzip` + `pugixml` are available;
+- expanded CSV and XLSX ingestion with typed cell counters, formulas/formula coordinates, merged ranges, dimensions, styles, workbook defined names, table metadata, and `spreadsheet_rows_v2`;
+- expanded PPTX ingestion with notes, comments, alt text, media relationships, slide layouts, presentation properties, and textless-slide diagnostics;
+- expanded image OCR ingestion with image dimensions, EXIF-presence hints, TSV-based OCR confidence/region coordinates/word and line counters, fallback plain OCR, and `ocr_regions_v2`;
+- fixed the HTML parser regexes to use portable C++ `std::regex` patterns instead of unsupported inline `(?is)` flags;
+- updated ingestion pipeline tests for the new metadata contracts and parser diagnostics.
+
+Validation:
+```text
+g++ -std=c++20 -I. -I qornix_rag qornix_rag/tests/test_ingestion_pipeline.cpp qornix_rag/ingestion_pipeline.cpp -o /tmp/test_ingestion_pipeline_noopt
+/tmp/test_ingestion_pipeline_noopt
+# IngestionPipeline tests passed
+
+cmake -S . -B build
+# blocked in this sandbox because yaml-cpp is not installed: yaml-cpp not found. Install with: apt-get install libyaml-cpp-dev
+```
+
 ## Current milestone state
 
 - Milestone 0: `done`
@@ -2178,16 +2207,152 @@ authenticated generated rag_app smoke:
 - Post-stabilization 28 - generated-app hardening baseline: `done`
 - Post-stabilization 29 - generated-app RAG UI polish: `done`
 - Vector backend production hardening: `done`
-- Next - Advanced ingestion metadata: `pending`
+- Advanced ingestion metadata: `done`
+- Code and chunking depth: `done`
+- Embedding/model registry hardening: `done`
+- RAG quality beyond deterministic baseline: `done`
+- QA/wiki deeper quality: `done`
+- Next - Operations, deployment, and security depth: `pending`
 
 ## Deferred / known follow-ups
 
-These items are intentionally not closed by the completed stabilization baselines through Post-stabilization 28. Post-stabilization 25-28 completed the first embedding/model operations, QA/wiki quality, production vector backend adapter, and generated-app hardening baselines; the items below are deeper follow-ups beyond those baselines:
+These items are intentionally not closed by the completed stabilization baselines through generated-app UI polish, vector backend production hardening, and advanced ingestion metadata. Post-stabilization 25-29 plus the current production-hardening entries completed the first embedding/model operations, QA/wiki quality, production vector backend, generated-app hardening/UI, and parser-metadata baselines; the items below are deeper follow-ups beyond those baselines:
 
 - arbitrary document ingestion beyond current text/Markdown/code/HTML/PDF-text/DOCX-text/CSV/XLSX-text/PPTX-text/image-OCR/QA flows;
-- richer image/OCR metadata plus richer PDF/DOCX/XLSX/CSV/PPTX structure and metadata parsing;
+- deeper document understanding beyond current metadata-aware chunking, such as semantic table extraction, layout-aware OCR ordering, and full compiler-grade code AST extraction;
 - production security hardening beyond the generated-app hardening baseline, such as durable audit storage, delivered account recovery, MFA, tracing, alerting, and secret-management docs;
 - retrieval relevance and query normalization;
-- ORM-backed QA list abstractions, optional FTS, richer autocomplete, and deeper QA provenance/versioning;
+- ORM-backed QA list abstractions beyond the current SQLite FTS/tag/history baseline;
 - model selection UI, automatic model discovery, deeper tokenizer compatibility validation, and additional LLM diagnostics polish;
 - remaining LLM parser follow-ups such as model-list/token-usage parsing through `Boost.JSON`, real-provider response fixtures, and unified structured parsing for streaming callbacks.
+
+## 2026-05-27 - Code and chunking depth completed
+
+Scope:
+
+- close `0.1 Current explicit open work` item 5;
+- preserve advanced ingestion metadata through chunking, persisted chunks, retrieval, API responses, and citation labels;
+- add metadata-aware retrieval filters for `type`, `language`, `source_path`, `page`, `sheet`, `row`, `slide`, `symbol`, `ocr_confidence`, and raw metadata keys;
+- expose `filters_applied`, normalized `filters`, `source_locator`, `citation_label`, and curated structural `metadata` in `/api/search` and `/api/ask`;
+- extend chunking to DOCX heading sections and PPTX slide sections in addition to existing Markdown, code symbol, PDF page, spreadsheet row, and OCR region chunking;
+- improve source-code symbol metadata with namespace/class/struct/impl scope tracking;
+- index metadata text into Xapian so parser/chunk metadata participates in hybrid retrieval before exact filter checks;
+- document the metadata filter API and update chunk quality coverage.
+
+Validation:
+
+- `test_document_chunker` passes with DOCX heading, PPTX slide, symbol scope, PDF page, spreadsheet row, OCR region, and tokenizer-budget coverage;
+- `rag_service.cpp` and `web.cpp` pass C++20 syntax checks in the sandbox with local Xapian stubs because the sandbox lacks libxapian headers.
+
+## 2026-05-27 - Embedding/model registry hardening completed
+
+Scope:
+
+- close `0.1 Current explicit open work` item 6;
+- add local ONNX model auto-discovery from `embedding.models_dir` for directories containing `.onnx` plus `tokenizer.json`;
+- validate model/tokenizer files at config load and surface tokenizer compatibility diagnostics through the embedding model API;
+- support Hugging Face tokenizer JSON vocab layouts for WordPiece, BPE, WordLevel, and Unigram-style arrays, including `added_tokens` and common special-token names;
+- apply the active embedding tokenizer budget to document chunking and persist `embedding_token_limit`, `tokenizer_type`, `embedding_estimated_tokens`, and `embedding_model_signature` in chunk metadata;
+- strengthen embedding model/cache signatures so model, tokenizer, dimension, pooling, sequence length, casing, and normalization changes invalidate stale vector reuse and saved vector snapshots;
+- extend `/api/embedding/models` responses with `tokenizer_vocab_size`, `effective_chunk_token_limit`, `files_present`, `discovered`, `persistent_cache_enabled`, `tokenizer_status`, `model_status`, and `model_signature`;
+- store embedding model signature metadata in SQLite `rag_embedding_models` rows during persisted index snapshots;
+- document auto-discovery, tokenizer compatibility, and cache/rebuild behavior.
+
+Validation:
+
+- `rag_config.cpp`, `rag_service.cpp`, `sqlite_source.cpp`, and `web.cpp` pass C++20 syntax checks in the sandbox with local Xapian stubs;
+- `test_embedding_config.cpp` was expanded with parser/config assertions and a local auto-discovery fixture;
+- full linked test execution was not run in the sandbox because this environment does not provide the same Boost.JSON/Xapian system libraries as the target development machine.
+
+## 2026-05-27 - RAG quality beyond deterministic baseline completed
+
+Scope:
+
+- close `0.1 Current explicit open work` item 7;
+- add bounded multi-query retrieval over original, expanded, rewritten, and compact keyword variants;
+- expose `rewritten_query`, `multi_query_applied`, `retrieval_strategy`, `retrieval_queries`, and `reranker_type` in `/api/search` and non-streaming `/api/ask`;
+- add an embedding-model semantic reranker layer that deduplicates and ranks multi-query candidates while preserving metadata-aware filters and citations;
+- add claim/citation grounding diagnostics for Ask responses with `grounding_evaluator`, `claim_grounding_status`, and `grounded_claims`;
+- add `/api/feedback` and analytics feedback capture for helpfulness, missing context, bad citations, and wrong-answer workflows;
+- extend analytics reports/exports with feedback totals and category counts;
+- expand the retrieval-quality fixture with long-document and generated-template-app cases;
+- document quality diagnostics and feedback capture in the API docs.
+
+Validation:
+
+- `test_analytics` passes with feedback capture/report/export coverage;
+- `rag_service.cpp`, `web.cpp`, `test_rag_service.cpp`, and `test_rag_quality_eval.cpp` pass C++20 syntax checks in the sandbox with local Xapian stubs because the sandbox lacks libxapian headers.
+
+
+## 2026-05-27 - QA/wiki deeper quality completed
+
+Scope:
+
+- close `0.1 Current explicit open work` item 8;
+- add `/api/qa/duplicate-check` for bounded duplicate preview before add/edit saves;
+- wire duplicate warnings into the standalone QA UI with a confirm-before-save flow;
+- harden richer QA Markdown rendering through a safe server-side subset: escaped raw HTML, safe inline code/strong text, fenced code, lists/headings, and allowlisted links only;
+- add optional SQLite FTS5-backed QA search with bounded `LIKE` fallback when FTS5 is unavailable;
+- add normalized `qa_tags` storage plus indexed tag listing/filtering/autocomplete;
+- add append-only `qa_pair_history` provenance with create/update/delete entries and expose it through `/api/qa/history`;
+- document duplicate preview, sanitized Markdown rendering, FTS/tag indexing, and QA history APIs.
+
+Validation:
+
+- `sqlite_source.cpp`, `rag_service.cpp`, `web.cpp`, `test_sqlite_source.cpp`, and `test_rag_service.cpp` pass C++20 syntax checks in the sandbox with local Xapian stubs;
+- `test_sqlite_source.cpp` now includes QA auxiliary quality coverage for tag indexing, QA search, and version history;
+- full linked SQLite/Boost.JSON execution was not run in the sandbox because this environment does not provide the same Boost.JSON/Xapian system libraries as the target development machine.
+## 2026-05-27 - Remaining LLM/provider diagnostics completed
+
+Scope:
+
+- close `0.1 Current explicit open work` item 10;
+- move provider model-list parsing from string scanning to structured `Boost.JSON` parsing;
+- support real model-list shapes for Ollama `/api/tags`, OpenAI-compatible `/v1/models`, vLLM, LM Studio, flat arrays, and single-model objects;
+- move token-usage parsing from `find`/`stoul` offsets to structured `Boost.JSON` parsing for OpenAI-compatible `usage` objects and Ollama final response metrics;
+- parse token usage from SSE/NDJSON final chunks with the same structured parser path;
+- unify streaming SSE/NDJSON content extraction with the same structured payload parser used by non-streaming responses;
+- fix streaming request JSON generation so `stream: true` is emitted inside the request object;
+- add provider fixtures for Ollama, OpenAI-compatible APIs, vLLM, and LM Studio.
+
+Validation:
+
+- `llm_client.cpp`, `rag_service.cpp`, `web.cpp`, and `test_llm_client.cpp` pass C++20 syntax checks in the sandbox with local Xapian stubs;
+- linked `test_llm_client` execution was not run in the sandbox because this environment does not provide the Boost.JSON runtime library used by the target development environment.
+
+## 2026-05-28 - Xapian language-aware retrieval hardening completed
+
+Scope:
+
+- close added item 11 after the explicit 0.1 work list was completed;
+- add config-driven Xapian controls for lexical search enablement, language, stemming, stemming strategy, CJK ngrams, word-break mode, spelling flag, and metadata prefixes;
+- replace the hardcoded English-only Xapian stemmer path with shared index/query configuration;
+- add config-driven Xapian language selection with a lightweight Cyrillic/default auto heuristic plus explicit Xapian language names, ISO 639 aliases, and `none`;
+- add fielded Xapian prefixes for path, source, type, language, metadata, symbol, page, sheet, and slide lookup;
+- keep legacy exact metadata terms while adding parser prefixes, preserving older metadata-aware retrieval behavior;
+- surface Xapian diagnostics through `/api/health`, `/api/stats`, and `/api/admin/diagnostics`;
+- document standalone and generated-app Xapian language-aware configuration.
+
+Validation:
+
+- `core.h`, `rag_config.cpp`, `rag_service.cpp`, `web.cpp`, and `test_embedding_config.cpp` pass C++20 syntax checks in the sandbox with local Xapian stubs because the sandbox lacks libxapian headers;
+- `test_embedding_config.cpp` was expanded with Xapian config parsing and invalid-option warning coverage;
+- linked Xapian execution was not run in the sandbox because this environment does not provide the target system libxapian package.
+
+## 2026-05-28 - Redis LLM response cache backend completed
+
+Scope:
+
+- complete the Phase 3 roadmap promise that LLM response caching supports both memory and Redis backends;
+- replace the previous Redis placeholder with a lightweight Redis RESP TCP client without adding a hiredis dependency;
+- support Redis `SELECT`, `PING`, optional `AUTH`, `GET`, `SETEX`, `DEL`, and prefix-scoped `SCAN` clear;
+- parse `cache.redis.*` and `cache.key_prefix` from standalone and generated-app config;
+- expose cache backend/availability in diagnostics;
+- update config examples, generated app config, dependency docs, and RAG product guide;
+- keep safe startup behavior: if Redis is configured but unavailable, the cache factory logs a warning and falls back to the in-process memory cache.
+
+Validation:
+
+- `llm_cache.cpp` passes C++20 syntax check;
+- `test_phase3` passes with memory cache, rate limiter, cache factory, and Redis-unavailable fallback coverage;
+- `depend_install.sh` passes `bash -n`.

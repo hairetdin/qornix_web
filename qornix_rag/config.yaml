@@ -9,7 +9,6 @@ server:
   # main.cpp for compatibility, but new configs should use server.address.
   address: 127.0.0.1
   port: 8081
-  project_path: .
 
 search:
   use_hybrid: true
@@ -18,11 +17,29 @@ search:
   top_k: 10
   min_score_threshold: 0.1
   use_query_expansion: true
+  # Xapian lexical search hardening. Xapian is the exact/lexical
+  # side of hybrid retrieval; vector search handles semantic similarity.
+  xapian_enabled: true
+  # auto is a lightweight Cyrillic-vs-default heuristic. For deterministic
+  # single-language projects, set an explicit Xapian language such as
+  # en/english, de/german, fr/french, es/spanish, ru/russian, or none.
+  xapian_language: auto
+  xapian_stemming: true
+  xapian_stemming_strategy: some
+  xapian_cjk_ngrams: false
+  xapian_word_breaks: true
+  xapian_spelling: false
+  xapian_metadata_prefixes: true
   use_reranking: true
   rerank_input_multiplier: 3
   rerank_path_boost: 0.15
   rerank_metadata_boost: 0.10
   rerank_exact_content_boost: 0.05
+  use_multi_query_retrieval: true
+  multi_query_max_variants: 4
+  use_embedding_reranker: true
+  rerank_embedding_boost: 0.20
+  rerank_coverage_boost: 0.08
 
 vector_store:
   # Backends: local_hnsw (default), faiss, qdrant, pgvector.
@@ -51,9 +68,24 @@ security:
   protect_admin_routes: true
   protect_write_routes: true
 
+upload:
+  enabled: true
+  uploads_dir: qornix_rag/data/uploads
+  max_file_size_kb: 16384
+  max_files_per_request: 20
+  auto_ingest: true
+  async_ingest: false
+  overwrite_existing: false
+  # Comma-separated allowlists are used because the standalone config loader
+  # flattens scalar YAML values. Keep this list aligned with ingestion support.
+  allowed_extensions: ".txt,.md,.rst,.adoc,.json,.yaml,.yml,.xml,.html,.htm,.csv,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
+  allowed_mime_types: "text/plain,text/markdown,text/csv,text/html,application/json,application/xml,application/pdf,application/x-yaml,application/yaml,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/tiff,image/bmp,image/webp"
+
 indexing:
-  # Keep startup predictable for local wiki usage. Set to false to start the
-  # web UI first and trigger indexing manually through the UI/API.
+  # Optional directory scan root. Leave unset to start in upload/API/QA mode
+  # without scanning the filesystem on startup.
+  # scan_path: /path/to/project
+  # If scan_path is set, this controls whether it is indexed during startup.
   auto_index_on_startup: true
   embedding_dim: 256
   max_file_size_kb: 4096
@@ -69,6 +101,11 @@ embedding:
   # Safe default for a fresh git clone. Works without bundled model files.
   backend: tfidf
   enable_fallback: true
+  models_dir: qornix_rag/models
+  auto_discover_models: true
+  validate_model_files: true
+  persistent_cache_enabled: true
+  chunk_token_margin: 2
 
   # Optional ONNX semantic retrieval. Model files are not committed to GitHub
   # because they are large and may have separate licenses.
@@ -86,6 +123,7 @@ embedding:
   # onnx_threads: 2
   # normalize_embeddings: true
   # lowercase_tokens: true
+  # chunk_token_margin: 2
 
   # Optional model registry. The active model is applied to the embedding
   # backend at startup; paths are validated and shown in /api/health.
@@ -138,6 +176,12 @@ llm:
     - Если информации недостаточно, скажи "Недостаточно информации в локальной базе, но я нашел дополнительную информацию." и добавь информацию 
     - Приводи примеры кода если это уместно
     - Приводи другие примеры по контексту из любого источника, если информации слишком мало
+
+  prompt_template: |
+    Контекст:
+    {context}
+
+    Вопрос: {question}
     - Отвечай на русском языке
     - Цитируй файлы из которых взята информация
 
@@ -155,12 +199,13 @@ llm:
 # Phase 3: Caching (optional)
 # ============================================================================
 # Cache LLM responses to speed up repeated questions
-# Backend: "memory" (default, in-process) or "redis" (requires hiredis)
+# Backend: "memory" (default, in-process) or "redis" (external Redis over RESP; no hiredis required)
 cache:
-  enabled: true                          # Enable/disable caching
+  enabled: true                          # Enable/disable LLM response caching
   backend: "memory"                      # memory | redis
   ttl_seconds: 3600                      # Time-to-live for cache entries (1 hour)
-  max_size: 1000                         # Maximum number of cached entries
+  max_size: 1000                         # Memory LRU capacity; Redis capacity is controlled by Redis
+  key_prefix: "qornix_rag:"              # Redis key prefix / namespace
 
   # Redis settings (only used if backend = "redis")
   redis:

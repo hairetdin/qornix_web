@@ -102,6 +102,8 @@
         .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
         .row > * { flex: 1; }
         .row .small { flex: 0 0 110px; }
+        .prompt-template-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(160px, 240px) auto auto; gap: 10px; align-items: end; margin-top: 12px; }
+        .prompt-textarea { min-height: 110px; font-family: "JetBrains Mono", "Fira Code", Consolas, monospace; font-size: 13px; }
         .btn {
             border: 0;
             background: var(--accent);
@@ -252,6 +254,7 @@
         .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin-top: 12px; }
         .stat { background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
         .stat strong { display: block; font-size: 24px; color: var(--accent); margin-bottom: 4px; }
+        .scan-path-grid { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 10px; align-items: end; margin-top: 12px; }
         .model-grid { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 10px; align-items: end; margin-top: 10px; }
         .check-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--muted); font-size: 14px; }
         .check-row input { width: auto; }
@@ -311,7 +314,7 @@
         @media (max-width: 900px) {
             .grid, .qa-grid { grid-template-columns: 1fr; }
             .qa-list-tools { grid-template-columns: 1fr; }
-            .model-grid, .file-row { grid-template-columns: 1fr; }
+            .model-grid, .file-row, .scan-path-grid, .prompt-template-grid { grid-template-columns: 1fr; }
             .shell { padding: 14px; }
             .hero { border-radius: 18px; }
             .stats-grid { grid-template-columns: 1fr; }
@@ -326,7 +329,7 @@
             <div class="toolbar">
                 <span class="pill" id="hero-llm">LLM: checking...</span>
                 <span class="pill" id="hero-index">Index: checking...</span>
-                <span class="pill" id="hero-project">Project: -</span>
+                <span class="pill" id="hero-project">Scan: -</span>
                 <span class="pill" id="hero-auth">Auth: checking...</span>
             </div>
         </section>
@@ -336,6 +339,7 @@
         <nav class="tabs" aria-label="RAG sections">
             <button class="tab-btn active" data-tab="ask">Ask</button>
             <button class="tab-btn" data-tab="search">Search</button>
+            <button class="tab-btn" data-tab="upload">Upload</button>
             <button class="tab-btn" data-tab="qa">QA</button>
             <button class="tab-btn" data-tab="sources">Sources / Health</button>
             <button class="tab-btn" data-tab="admin">Admin</button>
@@ -359,6 +363,24 @@
                             <button class="btn secondary" onclick="clearAsk()">Очистить</button>
                         </div>
                     </div>
+                    <h3>Prompt template</h3>
+                    <div class="prompt-template-grid">
+                        <div>
+                            <label for="prompt-template-select">Saved template</label>
+                            <select id="prompt-template-select"></select>
+                        </div>
+                        <div>
+                            <label for="prompt-template-name">Template name</label>
+                            <input id="prompt-template-name" autocomplete="off" placeholder="Code review">
+                        </div>
+                        <button class="btn secondary" onclick="savePromptTemplate()">Save</button>
+                        <button class="btn danger" onclick="deletePromptTemplate()">Delete</button>
+                    </div>
+                    <label for="system-prompt-input">System prompt</label>
+                    <textarea id="system-prompt-input" class="prompt-textarea"></textarea>
+                    <label for="prompt-template-input">User prompt template</label>
+                    <textarea id="prompt-template-input" class="prompt-textarea"></textarea>
+                    <p class="muted">Use <code>{context}</code> and <code>{question}</code> placeholders.</p>
                     <div class="status-line" id="ask-status"></div>
                     <div id="answer-box" class="answer">Ответ появится здесь.</div>
                 </div>
@@ -388,6 +410,28 @@
                     </div>
                 </div>
                 <div id="search-results" class="list"><div class="notice">Введите запрос для поиска.</div></div>
+            </div>
+        </section>
+
+        <section id="tab-upload" class="tab-panel">
+            <div class="grid">
+                <div class="card">
+                    <h2>Upload documents</h2>
+                    <p class="muted">Загрузите документы в контролируемую папку uploads. После ingestion они попадут в тот же hybrid index и будут доступны в Search/Ask.</p>
+                    <label for="upload-files">Files</label>
+                    <input id="upload-files" type="file" multiple accept=".txt,.md,.rst,.adoc,.json,.yaml,.yml,.xml,.html,.htm,.csv,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp">
+                    <label class="check-row"><input id="upload-async" type="checkbox"> Run ingestion in background</label>
+                    <div style="margin-top: 12px;">
+                        <button class="btn" id="upload-btn" onclick="uploadDocuments()">Upload and ingest</button>
+                        <button class="btn secondary" onclick="loadIngestionJobs()">Show ingestion jobs</button>
+                    </div>
+                    <div id="upload-status" style="margin-top: 12px;"></div>
+                </div>
+                <aside class="card">
+                    <h2>Uploaded files</h2>
+                    <p class="muted">Последняя загрузка. Удаление ограничено configured uploads_dir и после удаления запускает reindex.</p>
+                    <div id="upload-output" class="list"><div class="notice">Файлы ещё не загружались.</div></div>
+                </aside>
             </div>
         </section>
 
@@ -470,15 +514,19 @@
                 <div class="card">
                     <h2>Health</h2>
                     <div id="health-box" class="list"><div class="notice">Загрузка...</div></div>
-                    <h3>Project stats</h3>
+                    <h3>Index stats</h3>
                     <div class="stats-grid">
                         <div class="stat"><strong id="total-files">-</strong><span>Files</span></div>
                         <div class="stat"><strong id="total-lines">-</strong><span>Lines</span></div>
                         <div class="stat"><strong id="total-size">-</strong><span>Size KB</span></div>
                         <div class="stat"><strong id="index-time">-</strong><span>Index ms</span></div>
                     </div>
-                    <div style="margin-top: 14px;">
-                        <button class="btn" id="reindex-btn" onclick="reindexProject()">Переиндексировать проект</button>
+                    <div class="scan-path-grid">
+                        <div>
+                            <label for="scan-path-input">Scan path</label>
+                            <input id="scan-path-input" autocomplete="off" placeholder="/path/to/project or knowledge_base">
+                        </div>
+                        <button class="btn" id="reindex-btn" onclick="reindexProject()">Переиндексировать путь</button>
                     </div>
                     <h3>Embedding models</h3>
                     <div id="embedding-model-box" class="notice">Loading model registry...</div>
@@ -553,11 +601,13 @@
 
     <script>
         const API_BASE = '{{QORNIX_RAG_API_BASE}}';
-        let currentProjectRoot = '.';
+        let currentProjectRoot = '';
+        let scanPathTouched = false;
         let currentLlmDiagnostic = null;
         let editingQaPairId = null;
         let selectedQaPairId = null;
         let lastQAPairs = [];
+        let lastUploadedFiles = [];
         let lastQATags = [];
         let lastEmbeddingModels = [];
         let qaCurrentPage = 1;
@@ -567,10 +617,19 @@
         let currentAuthUser = null;
         let currentCsrfToken = '';
         const ADMIN_TOKEN_STORAGE_KEY = 'qornix-rag-admin-token';
+        const PROMPT_TEMPLATES_STORAGE_KEY = 'qornix-rag-prompt-templates';
+        const PROMPT_ACTIVE_STORAGE_KEY = 'qornix-rag-active-prompt-template';
+        const DEFAULT_SYSTEM_PROMPT = `Ты — помощник разработчика, который отвечает на вопросы по локальной базе знаний.
+Отвечай кратко и по делу. Если контекста недостаточно, скажи об этом.`;
+        const DEFAULT_USER_PROMPT_TEMPLATE = `Контекст:
+{context}
+
+Вопрос: {question}`;
 
         window.addEventListener('load', async () => {
             setupTabs();
             setupShortcuts();
+            loadPromptTemplates();
             restoreAdminToken();
             await loadCurrentAuthUser(false);
             await refreshDashboard();
@@ -600,6 +659,9 @@
             document.getElementById('search-input').addEventListener('keydown', (event) => {
                 if (event.key === 'Enter') performSearch();
             });
+            document.getElementById('prompt-template-select').addEventListener('change', () => {
+                applySelectedPromptTemplate();
+            });
             document.getElementById('qa-filter').addEventListener('input', () => {
                 qaCurrentPage = 1;
                 window.clearTimeout(qaListDebounce);
@@ -621,6 +683,112 @@
                 qaCurrentPage = 1;
                 loadQAPairs();
             });
+            const scanPathInput = document.getElementById('scan-path-input');
+            scanPathInput.addEventListener('input', () => {
+                scanPathTouched = true;
+                currentProjectRoot = scanPathInput.value.trim();
+                document.getElementById('hero-project').textContent = `Scan: ${currentProjectRoot || '-'}`;
+            });
+            scanPathInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') reindexProject();
+            });
+        }
+
+        function defaultPromptTemplates() {
+            return [{
+                name: 'Default',
+                system_prompt: DEFAULT_SYSTEM_PROMPT,
+                prompt_template: DEFAULT_USER_PROMPT_TEMPLATE
+            }];
+        }
+
+        function getPromptTemplates() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(PROMPT_TEMPLATES_STORAGE_KEY) || '[]');
+                return Array.isArray(parsed) && parsed.length ? parsed : defaultPromptTemplates();
+            } catch (_) {
+                return defaultPromptTemplates();
+            }
+        }
+
+        function setPromptTemplates(templates) {
+            localStorage.setItem(PROMPT_TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
+        }
+
+        function loadPromptTemplates() {
+            const templates = getPromptTemplates();
+            const select = document.getElementById('prompt-template-select');
+            const active = localStorage.getItem(PROMPT_ACTIVE_STORAGE_KEY) || templates[0]?.name || 'Default';
+            select.innerHTML = templates.map((template) =>
+                `<option value="${escapeAttr(template.name)}" ${template.name === active ? 'selected' : ''}>${escapeHtml(template.name)}</option>`
+            ).join('');
+            if (!templates.some((template) => template.name === select.value) && templates[0]) {
+                select.value = templates[0].name;
+            }
+            applySelectedPromptTemplate();
+        }
+
+        function applySelectedPromptTemplate() {
+            const select = document.getElementById('prompt-template-select');
+            const templates = getPromptTemplates();
+            const selected = templates.find((template) => template.name === select.value) || templates[0] || defaultPromptTemplates()[0];
+            document.getElementById('prompt-template-name').value = selected.name || '';
+            document.getElementById('system-prompt-input').value = selected.system_prompt || DEFAULT_SYSTEM_PROMPT;
+            document.getElementById('prompt-template-input').value = selected.prompt_template || DEFAULT_USER_PROMPT_TEMPLATE;
+            localStorage.setItem(PROMPT_ACTIVE_STORAGE_KEY, selected.name || 'Default');
+        }
+
+        function savePromptTemplate() {
+            const name = document.getElementById('prompt-template-name').value.trim();
+            const systemPrompt = document.getElementById('system-prompt-input').value.trim();
+            const promptTemplate = document.getElementById('prompt-template-input').value.trim();
+            if (!name) {
+                showAskStatus('Введите имя prompt template.', 'warn');
+                return;
+            }
+            if (!promptTemplate.includes('{question}')) {
+                showAskStatus('Prompt template должен содержать {question}.', 'warn');
+                return;
+            }
+            const templates = getPromptTemplates().filter((template) => template.name !== name);
+            templates.push({ name, system_prompt: systemPrompt, prompt_template: promptTemplate });
+            templates.sort((a, b) => a.name.localeCompare(b.name));
+            setPromptTemplates(templates);
+            localStorage.setItem(PROMPT_ACTIVE_STORAGE_KEY, name);
+            loadPromptTemplates();
+            showAskStatus('Prompt template saved locally.', 'ok');
+        }
+
+        function deletePromptTemplate() {
+            const select = document.getElementById('prompt-template-select');
+            const name = select.value;
+            if (!name) return;
+            const templates = getPromptTemplates().filter((template) => template.name !== name);
+            setPromptTemplates(templates.length ? templates : defaultPromptTemplates());
+            localStorage.removeItem(PROMPT_ACTIVE_STORAGE_KEY);
+            loadPromptTemplates();
+            showAskStatus('Prompt template deleted.', 'ok');
+        }
+
+        function currentPromptPayload() {
+            return {
+                system_prompt: document.getElementById('system-prompt-input').value.trim(),
+                prompt_template: document.getElementById('prompt-template-input').value.trim(),
+                prompt_template_id: document.getElementById('prompt-template-select').value
+            };
+        }
+
+        function getScanPathInput() {
+            return document.getElementById('scan-path-input').value.trim();
+        }
+
+        function setScanPathInput(path) {
+            const normalized = (path || '').trim();
+            currentProjectRoot = normalized;
+            if (!scanPathTouched || !getScanPathInput()) {
+                document.getElementById('scan-path-input').value = normalized;
+            }
+            document.getElementById('hero-project').textContent = `Scan: ${normalized || '-'}`;
         }
 
         async function api(path, options = {}) {
@@ -665,6 +833,29 @@
             return text;
         }
 
+        async function apiUpload(path, formData, options = {}) {
+            const targetPath = API_BASE && path.startsWith('/api/')
+                ? `${API_BASE}${path.slice(4)}`
+                : `${API_BASE}${path}`;
+            const response = await fetch(targetPath, {
+                method: 'POST',
+                headers: {
+                    ...adminAuthHeaders(),
+                    ...csrfHeaders('POST'),
+                    ...(options.headers || {})
+                },
+                body: formData
+            });
+            let data = null;
+            try { data = await response.json(); } catch (_) { data = {}; }
+            if (!response.ok) {
+                const message = data.error || data.message || `HTTP ${response.status}`;
+                throw new Error(message);
+            }
+            rememberCsrfToken(data);
+            return data;
+        }
+
         async function refreshDashboard() {
             await Promise.allSettled([loadStats(), loadHealth(), loadSources(), loadEmbeddingModels(), loadQATags()]);
         }
@@ -673,13 +864,12 @@
             try {
                 const data = await api('/api/stats');
                 const stats = data.stats || {};
-                currentProjectRoot = data.project_root || currentProjectRoot || '.';
+                setScanPathInput(data.project_root || currentProjectRoot || '');
                 document.getElementById('total-files').textContent = stats.total_files || 0;
                 document.getElementById('total-lines').textContent = Number(stats.total_lines || 0).toLocaleString();
                 document.getElementById('total-size').textContent = stats.total_size_kb || 0;
                 document.getElementById('index-time').textContent = stats.index_duration_ms || 0;
                 document.getElementById('hero-index').textContent = `Index: ${data.indexed ? 'ready' : 'not ready'}`;
-                document.getElementById('hero-project').textContent = `Project: ${currentProjectRoot || '.'}`;
             } catch (error) {
                 document.getElementById('hero-index').textContent = 'Index: error';
                 console.error(error);
@@ -1017,6 +1207,14 @@ Available models: ${escapeHtml(modelsText)}</div>
                 }
                 return;
             }
+            if (document.getElementById('embedding-reindex').checked && !getScanPathInput()) {
+                if (box) {
+                    box.className = 'notice warn';
+                    box.textContent = 'Set scan path before switching with immediate reindex.';
+                }
+                document.getElementById('scan-path-input').focus();
+                return;
+            }
             btn.disabled = true;
             btn.textContent = 'Switching...';
             try {
@@ -1026,7 +1224,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                         model_id: modelId,
                         force_reembed: Boolean(document.getElementById('embedding-force-reembed').checked),
                         reindex: Boolean(document.getElementById('embedding-reindex').checked),
-                        project_path: currentProjectRoot || '.'
+                        scan_path: getScanPathInput()
                     })
                 });
                 box.className = `notice ${data.success ? 'ok' : 'warn'}`;
@@ -1062,7 +1260,7 @@ Available models: ${escapeHtml(modelsText)}</div>
             try {
                 const data = await api('/api/ask', {
                     method: 'POST',
-                    body: JSON.stringify({ question, top_k: topK, stream: false })
+                    body: JSON.stringify({ question, top_k: topK, stream: false, ...currentPromptPayload() })
                 });
                 renderAnswer(data.answer || 'Пустой ответ.');
                 const statusType = data.llm_status === 'ok' ? 'ok' : 'warn';
@@ -1264,6 +1462,44 @@ Available models: ${escapeHtml(modelsText)}</div>
             }
         }
 
+        function renderQADuplicateWarning(data) {
+            const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+            if (!candidates.length) return '';
+            const items = candidates.slice(0, 3).map((item) =>
+                `<li><strong>${escapeHtml(truncateText(item.question || item.pair_id || '', 100))}</strong> ` +
+                `<span class="badge">${formatScore(item.similarity)}</span> ` +
+                `<span class="muted">${escapeHtml(item.reason || 'similar QA entry')}</span></li>`
+            ).join('');
+            return `<div class="notice warn"><strong>Возможный дубль QA перед сохранением.</strong><ul>${items}</ul></div>`;
+        }
+
+        async function checkQaDuplicateBeforeSave(question, answer, category) {
+            const warning = document.getElementById('qa-duplicate-warning');
+            if (warning) warning.innerHTML = '';
+            try {
+                const data = await api('/api/qa/duplicate-check', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        question,
+                        answer,
+                        category,
+                        exclude_pair_id: editingQaPairId || '',
+                        threshold: 0.72,
+                        limit: 5
+                    })
+                });
+                if (data.warning) {
+                    const html = renderQADuplicateWarning(data);
+                    if (warning) warning.innerHTML = html;
+                    return confirm('Найдены похожие QA-записи. Всё равно сохранить?');
+                }
+            } catch (error) {
+                // Duplicate preview is advisory; failed checks must not block QA editing.
+                if (warning) warning.innerHTML = renderNotice(`Duplicate check skipped: ${error.message}`, 'warn');
+            }
+            return true;
+        }
+
         async function addQAPair() {
             const question = document.getElementById('qa-question').value.trim();
             const answer = document.getElementById('qa-answer').value.trim();
@@ -1271,6 +1507,10 @@ Available models: ${escapeHtml(modelsText)}</div>
             const tags = parseCommaList(document.getElementById('qa-tags').value);
             if (!question || !answer) {
                 document.getElementById('qa-message').innerHTML = renderNotice('Question и Answer обязательны.', 'error');
+                return;
+            }
+            const shouldSave = await checkQaDuplicateBeforeSave(question, answer, category);
+            if (!shouldSave) {
                 return;
             }
             const btn = document.getElementById('qa-add-btn');
@@ -1288,6 +1528,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 document.getElementById('qa-question').value = '';
                 document.getElementById('qa-answer').value = '';
                 document.getElementById('qa-tags').value = '';
+                document.getElementById('qa-duplicate-warning').innerHTML = '';
                 document.getElementById('qa-message').innerHTML = renderNotice(
                     editingQaPairId
                         ? 'QA-пара обновлена. Она сразу будет учитываться в Ask и Search.'
@@ -1527,6 +1768,7 @@ Available models: ${escapeHtml(modelsText)}</div>
             document.getElementById('qa-answer').value = pair.answer || '';
             document.getElementById('qa-category').value = pair.category || 'general';
             document.getElementById('qa-tags').value = Array.isArray(pair.tags) ? pair.tags.join(', ') : '';
+            document.getElementById('qa-duplicate-warning').innerHTML = '';
             document.getElementById('qa-message').innerHTML = renderNotice(`Режим правки QA: ${pair.id}`, 'warn');
             updateQAFormMode();
             renderQATable();
@@ -1538,6 +1780,8 @@ Available models: ${escapeHtml(modelsText)}</div>
             selectedQaPairId = null;
             updateQAFormMode();
             if (lastQAPairs.length) renderQATable();
+            const duplicateWarning = document.getElementById('qa-duplicate-warning');
+            if (duplicateWarning) duplicateWarning.innerHTML = '';
             if (clearMessage) {
                 document.getElementById('qa-message').innerHTML = '';
             }
@@ -1650,21 +1894,112 @@ ${label}`)) {
             }
         }
 
+        function renderUploadedFiles(files, job) {
+            const output = document.getElementById('upload-output');
+            if (!output) return;
+            lastUploadedFiles = Array.isArray(files) ? files : [];
+            const jobBlock = job ? `
+                <div class="item">
+                    <div class="item-title">Ingestion job</div>
+                    <div class="meta">
+                        <span class="badge ${job.status === 'completed' ? 'ok' : (job.status === 'failed' ? 'error' : 'warn')}">${escapeHtml(job.status || 'unknown')}</span>
+                        <span>progress: ${job.progress_percent ?? 0}%</span>
+                        <span>documents: ${job.documents_imported ?? 0}</span>
+                        <span>errors: ${job.errors ?? 0}</span>
+                    </div>
+                    <div class="progress-track"><div class="progress-fill" style="width: ${Math.max(0, Math.min(100, Number(job.progress_percent || 0)))}%;"></div></div>
+                    <div class="snippet">${escapeHtml(job.root_path || '')}</div>
+                </div>` : '';
+            const filesBlock = lastUploadedFiles.length
+                ? lastUploadedFiles.map((file, index) => `
+                    <div class="item">
+                        <div class="item-title">${escapeHtml(file.original_filename || file.stored_filename || 'upload')}</div>
+                        <div class="meta">
+                            <span>${escapeHtml(file.content_type || 'unknown')}</span>
+                            <span>${Number(file.size_bytes || 0).toLocaleString()} bytes</span>
+                            <span>${escapeHtml(file.relative_path || '')}</span>
+                        </div>
+                        <div class="item-actions">
+                            <button class="btn danger" onclick="deleteUploadedDocument(${index})">Delete uploaded document</button>
+                        </div>
+                    </div>`).join('')
+                : renderNotice('No uploaded files in last response.');
+            output.innerHTML = jobBlock + filesBlock;
+        }
+
+        async function uploadDocuments() {
+            const input = document.getElementById('upload-files');
+            const status = document.getElementById('upload-status');
+            const btn = document.getElementById('upload-btn');
+            const files = input && input.files ? Array.from(input.files) : [];
+            if (!files.length) {
+                status.innerHTML = renderNotice('Choose one or more files first.', 'warn');
+                return;
+            }
+            const form = new FormData();
+            files.forEach((file) => form.append('files', file, file.name));
+            form.append('auto_ingest', 'true');
+            form.append('async', document.getElementById('upload-async').checked ? 'true' : 'false');
+            btn.disabled = true;
+            btn.textContent = 'Uploading...';
+            status.innerHTML = renderNotice('Uploading files and starting ingestion...', 'warn');
+            try {
+                const asyncFlag = document.getElementById('upload-async').checked ? 'true' : 'false';
+                const data = await apiUpload(`/api/documents/upload?async=${asyncFlag}`, form);
+                renderUploadedFiles(data.files || [], data.job || null);
+                status.innerHTML = renderNotice(data.ingestion_started
+                    ? `Uploaded ${data.count || files.length} file(s). Ingestion: ${data.ingestion_message || data.job?.status || 'started'}.`
+                    : `Uploaded ${data.count || files.length} file(s). Ingestion was not started.`, 'ok');
+                input.value = '';
+                await refreshDashboard();
+            } catch (error) {
+                status.innerHTML = renderNotice(error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Upload and ingest';
+            }
+        }
+
+        async function deleteUploadedDocument(index) {
+            const file = lastUploadedFiles[index];
+            if (!file || !file.relative_path) return;
+            const status = document.getElementById('upload-status');
+            try {
+                const data = await api('/api/uploads/delete', {
+                    method: 'POST',
+                    body: JSON.stringify({ relative_path: file.relative_path, reindex: true })
+                });
+                status.innerHTML = renderNotice(data.message || 'Uploaded document deleted.', 'ok');
+                lastUploadedFiles.splice(index, 1);
+                renderUploadedFiles(lastUploadedFiles, null);
+                await refreshDashboard();
+            } catch (error) {
+                status.innerHTML = renderNotice(error.message, 'error');
+            }
+        }
+
         async function reindexProject() {
             const btn = document.getElementById('reindex-btn');
+            const scanPath = getScanPathInput();
+            if (!scanPath) {
+                document.getElementById('health-box').innerHTML = renderNotice('Укажите scan path для индексации.', 'warn');
+                document.getElementById('scan-path-input').focus();
+                return;
+            }
             btn.disabled = true;
             btn.textContent = 'Индексация...';
             try {
                 await api('/api/index', {
                     method: 'POST',
-                    body: JSON.stringify({ project_path: currentProjectRoot || '.' })
+                    body: JSON.stringify({ scan_path: scanPath })
                 });
+                setScanPathInput(scanPath);
                 await refreshDashboard();
             } catch (error) {
                 document.getElementById('health-box').innerHTML = renderNotice(error.message, 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'Переиндексировать проект';
+                btn.textContent = 'Переиндексировать путь';
             }
         }
 

@@ -232,7 +232,7 @@ qornix_rag поддерживает два режима работы:
 ### Фаза 3: Оптимизация и кэширование
 
 **Задачи:**
-- [x] Кэширование ответов LLM (Memory backend, Redis fallback)
+- [x] Кэширование ответов LLM (Memory backend и рабочий Redis backend с memory fallback)
 - [x] Rate limiting (sliding window, global + per-IP)
 - [x] Batch processing вопросов (`POST /api/batch`)
 - [x] Prompt caching (кэширование результатов поиска)
@@ -243,7 +243,7 @@ qornix_rag поддерживает два режима работы:
 - ✅ Защита от DDoS (RateLimiter sliding window)
 - ✅ Статистика в API response (cache hits/misses, rate limiter allowed/rejected)
 - ✅ Thread-safe cache (4 writer + 4 reader threads tested)
-- ✅ Auto backend selection (memory/redis)
+- ✅ Auto backend selection (memory/redis) with Redis GET/SETEX/DEL/SCAN-backed clear and safe memory fallback
 - ✅ Batch processing с concurrent execution (max_concurrent enforced)
 - ✅ Prompt cache для кэширования результатов RAG поиска
 - ✅ Prometheus metrics: counters, gauges, summaries

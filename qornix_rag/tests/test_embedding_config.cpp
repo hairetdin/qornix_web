@@ -8,6 +8,8 @@
 #include "rag_config.h"
 
 #include <cassert>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <unordered_map>
 
@@ -25,6 +27,11 @@ int main() {
         flat["embedding.dimension"] = "384";
         flat["embedding.max_seq_len"] = "512";
         flat["embedding.onnx_threads"] = "4";
+        flat["embedding.models_dir"] = "models/custom";
+        flat["embedding.auto_discover_models"] = "false";
+        flat["embedding.validate_model_files"] = "false";
+        flat["embedding.persistent_cache_enabled"] = "true";
+        flat["embedding.chunk_token_margin"] = "3";
         flat["embedding.lowercase_tokens"] = "false";
         flat["vector_store.backend"] = "local_hnsw";
         flat["vector_store.index_path"] = "data/test_hnsw.bin";
@@ -40,6 +47,14 @@ int main() {
         flat["vector_store.auto_load"] = "true";
         flat["vector_store.auto_save"] = "true";
         flat["search.use_query_expansion"] = "true";
+        flat["search.xapian_enabled"] = "true";
+        flat["search.xapian_language"] = "ru";
+        flat["search.xapian_stemming"] = "true";
+        flat["search.xapian_stemming_strategy"] = "all";
+        flat["search.xapian_cjk_ngrams"] = "true";
+        flat["search.xapian_word_breaks"] = "true";
+        flat["search.xapian_spelling"] = "true";
+        flat["search.xapian_metadata_prefixes"] = "false";
         flat["search.use_reranking"] = "true";
         flat["search.rerank_input_multiplier"] = "4";
         flat["search.rerank_path_boost"] = "0.25";
@@ -51,6 +66,16 @@ int main() {
         flat["rag.security.admin_role"] = "rag_admin";
         flat["rag.security.protect_admin_routes"] = "true";
         flat["rag.security.protect_write_routes"] = "false";
+        flat["cache.enabled"] = "true";
+        flat["cache.backend"] = "redis";
+        flat["cache.max_size"] = "123";
+        flat["cache.ttl_seconds"] = "456";
+        flat["cache.key_prefix"] = "qornix_test:";
+        flat["cache.redis.host"] = "redis.local";
+        flat["cache.redis.port"] = "6380";
+        flat["cache.redis.db"] = "3";
+        flat["cache.redis.password"] = "secret";
+        flat["cache.redis.ttl_seconds"] = "789";
 
         auto config = makeRagConfigFromStandaloneFlatMap(flat, "unit");
         assert(config.engine.embedding.backend == "onnx");
@@ -62,6 +87,11 @@ int main() {
         assert(config.engine.embedding.dimension == 384);
         assert(config.engine.embedding.max_seq_len == 512);
         assert(config.engine.embedding.onnx_threads == 4);
+        assert(config.engine.embedding.models_dir == "models/custom");
+        assert(!config.engine.embedding.auto_discover_models);
+        assert(!config.engine.embedding.validate_model_files);
+        assert(config.engine.embedding.persistent_cache_enabled);
+        assert(config.engine.embedding.chunk_token_margin == 3);
         assert(!config.engine.embedding.lowercase_tokens);
         assert(config.engine.vector_store.backend == "local_hnsw");
         assert(config.engine.vector_store.index_path == "data/test_hnsw.bin");
@@ -77,6 +107,14 @@ int main() {
         assert(config.engine.vector_store.auto_load);
         assert(config.engine.vector_store.auto_save);
         assert(config.engine.search.use_query_expansion);
+        assert(config.engine.search.xapian_enabled);
+        assert(config.engine.search.xapian_language == "ru");
+        assert(config.engine.search.xapian_stemming);
+        assert(config.engine.search.xapian_stemming_strategy == "all");
+        assert(config.engine.search.xapian_cjk_ngrams);
+        assert(config.engine.search.xapian_word_breaks);
+        assert(config.engine.search.xapian_spelling);
+        assert(!config.engine.search.xapian_metadata_prefixes);
         assert(config.engine.search.use_reranking);
         assert(config.engine.search.rerank_input_multiplier == 4);
         assert(config.engine.search.rerank_path_boost > 0.24f);
@@ -88,6 +126,16 @@ int main() {
         assert(config.security.admin_role == "rag_admin");
         assert(config.security.protect_admin_routes);
         assert(!config.security.protect_write_routes);
+        assert(config.cache.enabled);
+        assert(config.cache.backend == "redis");
+        assert(config.cache.max_size == 123);
+        assert(config.cache.ttl.count() == 456);
+        assert(config.cache.key_prefix == "qornix_test:");
+        assert(config.cache.redis_host == "redis.local");
+        assert(config.cache.redis_port == 6380);
+        assert(config.cache.redis_db == 3);
+        assert(config.cache.redis_password == "secret");
+        assert(config.cache.redis_ttl.count() == 789);
     }
 
     {
@@ -138,6 +186,47 @@ int main() {
         assert(!config.engine.embedding_registry.warnings.empty());
     }
 
+
+    {
+        const auto fixture = std::filesystem::temp_directory_path() / "qornix_embedding_discovery_fixture";
+        std::filesystem::remove_all(fixture);
+        std::filesystem::create_directories(fixture / "mini-encoder");
+        {
+            std::ofstream model(fixture / "mini-encoder" / "model.onnx");
+            model << "fixture";
+        }
+        {
+            std::ofstream tokenizer(fixture / "mini-encoder" / "tokenizer.json");
+            tokenizer << R"({
+                "model": {
+                    "type": "BPE",
+                    "vocab": {"<pad>":0,"<s>":1,"</s>":2,"<unk>":3,"hello":4,"Ġworld":5},
+                    "unk_token": "<unk>"
+                },
+                "truncation": {"max_length": 128},
+                "added_tokens": [{"id": 6, "content": "[CUSTOM]"}]
+            })";
+        }
+
+        std::unordered_map<std::string, std::string> flat;
+        flat["embedding.models_dir"] = fixture.string();
+        flat["embedding.auto_discover_models"] = "true";
+        flat["embedding.validate_model_files"] = "true";
+        flat["embedding.max_seq_len"] = "256";
+
+        auto config = makeRagConfigFromStandaloneFlatMap(flat, "discovery-unit");
+        assert(config.engine.embedding_registry.models.size() == 1);
+        const auto& model = config.engine.embedding_registry.models.begin()->second;
+        assert(model.backend == "onnx");
+        assert(model.discovered);
+        assert(model.files_present);
+        assert(model.tokenizer_type == "BPE");
+        assert(model.tokenizer_vocab_size == 7);
+        assert(model.max_seq_len == 128);
+        assert(model.source.find("auto_discovered:") == 0);
+        std::filesystem::remove_all(fixture);
+    }
+
     {
         RagEngine engine;
         auto info = engine.get_embedding_model_info();
@@ -145,6 +234,9 @@ int main() {
         assert(info.id == "tfidf:d256");
         assert(info.dimension == 256);
         assert(info.ready);
+        assert(info.effective_chunk_token_limit == 254);
+        assert(info.persistent_cache_enabled);
+        assert(!info.model_signature.empty());
         assert(engine.get_embedding_cache_namespace() == "tfidf:d256");
     }
 
@@ -210,6 +302,32 @@ int main() {
         assert(info.active_model_id == "tfidf-b");
         assert(info.name == "Local TF-IDF B");
         assert(!engine.switch_active_embedding_model("missing-model"));
+    }
+
+    {
+        std::unordered_map<std::string, std::string> flat;
+        flat["search.xapian_language"] = "de";
+        auto config = makeRagConfigFromStandaloneFlatMap(flat, "xapian-german-unit");
+        assert(config.engine.search.xapian_language == "de");
+        assert(config.diagnostics.warnings.empty());
+    }
+
+    {
+        std::unordered_map<std::string, std::string> flat;
+        flat["search.xapian_language"] = "porter";
+        auto config = makeRagConfigFromStandaloneFlatMap(flat, "xapian-porter-unit");
+        assert(config.engine.search.xapian_language == "porter");
+        assert(config.diagnostics.warnings.empty());
+    }
+
+    {
+        std::unordered_map<std::string, std::string> flat;
+        flat["search.xapian_language"] = "klingon";
+        flat["search.xapian_stemming_strategy"] = "sometimes";
+        auto config = makeRagConfigFromStandaloneFlatMap(flat, "xapian-warning-unit");
+        assert(config.engine.search.xapian_language == "auto");
+        assert(config.engine.search.xapian_stemming_strategy == "some");
+        assert(config.diagnostics.warnings.size() >= 2);
     }
 
     std::cout << "Embedding config tests passed\n";

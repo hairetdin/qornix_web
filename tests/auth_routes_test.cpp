@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 https://github.com/hairetdin
+ *
+ * This file is part of Qornix project.
+ * Licensed under GNU GPL v3.0 (see LICENSE file) or commercial license.
+ */
+
 #include "auth_routes.h"
 
 #include <boost/url/parse.hpp>

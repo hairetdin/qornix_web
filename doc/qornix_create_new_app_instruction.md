@@ -131,6 +131,19 @@ Use this variant when you want a full Qornix Web application with the reusable `
 
 The generated application is configured through its own `config.yaml`. It does not use the standalone-only `qornix_rag/run.sh` launcher or the standalone `qornix_rag/config.yaml`.
 
+### Adding RAG to other templates
+
+Use `--with-rag` when you want to keep another host template and add the reusable RAG module to it:
+
+```bash
+./create_new_project.sh ../my_api_rag_app --with-dynamic-api --with-rag
+./create_new_project.sh ../my_vue_rag_app --with-dynamic-api-vue --with-rag
+./create_new_project.sh ../my_react_rag_app --with-dynamic-api-react --with-rag
+./create_new_project.sh ../my_angular_rag_app --with-dynamic-api-angular --with-rag
+```
+
+The host application's normal routes stay in place. RAG is mounted separately at `/rag` and `/api/rag/*`, with app-local `data/`, `models/`, `data/uploads/` and `knowledge_base/` directories.
+
 ## 2. Recommended workspace structure
 
 A new application does not copy framework sources into itself. It links `qornix_web` through CMake.

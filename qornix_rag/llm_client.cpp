@@ -23,6 +23,28 @@ namespace {
 
 namespace json = boost::json;
 
+std::string json_string_value(const json::value& value);
+std::vector<std::string> json_payload_lines(const std::string& text);
+
+std::string apply_prompt_template(std::string template_str,
+                                  const std::string& context,
+                                  const std::string& question) {
+    size_t pos = 0;
+    while ((pos = template_str.find("{context}", pos)) != std::string::npos) {
+        const std::string replacement = context.empty() ? "(Нет контекста)" : context;
+        template_str.replace(pos, 9, replacement);
+        pos += replacement.size();
+    }
+
+    pos = 0;
+    while ((pos = template_str.find("{question}", pos)) != std::string::npos) {
+        template_str.replace(pos, 10, question);
+        pos += question.size();
+    }
+
+    return template_str;
+}
+
 bool response_has_error(const std::string& response) {
     if (response.empty()) {
         return true;
@@ -102,21 +124,6 @@ std::string ollama_base_url(std::string url) {
     return url;
 }
 
-bool ollama_tags_contain_model(const std::string& response,
-                               const std::string& model) {
-    if (model.empty()) {
-        return true;
-    }
-
-    if (response.find("\"name\":\"" + model + "\"") != std::string::npos ||
-        response.find("\"name\":\"" + model + ":latest\"") != std::string::npos) {
-        return true;
-    }
-
-    // Fallback for pretty-printed JSON or model tags such as llama3:8b.
-    return response.find(model + ":") != std::string::npos;
-}
-
 std::string openai_models_url(std::string url) {
     const std::vector<std::string> suffixes = {
         "/v1/chat/completions",
@@ -139,41 +146,196 @@ std::string openai_models_url(std::string url) {
     return url + "/v1/models";
 }
 
-std::vector<std::string> extract_json_string_values(const std::string& json,
-                                                    const std::vector<std::string>& keys) {
-    std::vector<std::string> values;
 
-    for (const auto& key : keys) {
-        std::size_t pos = 0;
-        const std::string needle = "\"" + key + "\"";
+void add_unique_string(std::vector<std::string>& values, const std::string& value) {
+    if (!value.empty() && std::find(values.begin(), values.end(), value) == values.end()) {
+        values.push_back(value);
+    }
+}
 
-        while ((pos = json.find(needle, pos)) != std::string::npos) {
-            const std::size_t colon = json.find(':', pos + needle.size());
-            if (colon == std::string::npos) {
-                break;
+void collect_model_name_from_object(const json::object& object,
+                                    std::vector<std::string>& models) {
+    // Provider model-list shapes covered here:
+    // - Ollama /api/tags: {"models":[{"name":"llama3:latest", "model":"..."}]}
+    // - OpenAI/vLLM/LM Studio /v1/models: {"data":[{"id":"..."}]}
+    // - Some OpenAI-compatible servers expose {"models":["..."]} or
+    //   a single {"id"|"name"|"model":"..."} object.
+    for (const char* key : {"id", "name", "model"}) {
+        const auto it = object.find(key);
+        if (it != object.end() && it->value().is_string()) {
+            add_unique_string(models, json_string_value(it->value()));
+            return;
+        }
+    }
+}
+
+void collect_model_names_from_value(const json::value& value,
+                                    std::vector<std::string>& models) {
+    if (value.is_string()) {
+        add_unique_string(models, json_string_value(value));
+        return;
+    }
+
+    if (value.is_object()) {
+        collect_model_name_from_object(value.as_object(), models);
+        return;
+    }
+
+    if (value.is_array()) {
+        for (const auto& entry : value.as_array()) {
+            collect_model_names_from_value(entry, models);
+        }
+    }
+}
+
+std::vector<std::string> parse_model_list_structured(const std::string& response) {
+    std::vector<std::string> models;
+    if (response.empty()) {
+        return models;
+    }
+
+    auto collect_from_parsed = [&](const json::value& parsed) {
+        if (parsed.is_array()) {
+            collect_model_names_from_value(parsed, models);
+            return;
+        }
+
+        if (!parsed.is_object()) {
+            return;
+        }
+
+        const auto& object = parsed.as_object();
+        for (const char* key : {"models", "data"}) {
+            const auto it = object.find(key);
+            if (it != object.end()) {
+                collect_model_names_from_value(it->value(), models);
             }
+        }
 
-            const std::size_t value_start = json.find('"', colon + 1);
-            if (value_start == std::string::npos) {
-                pos = colon + 1;
-                continue;
-            }
+        // Also accept a single model object for small test servers.
+        collect_model_name_from_object(object, models);
+    };
 
-            const std::size_t value_end = json.find('"', value_start + 1);
-            if (value_end == std::string::npos) {
-                break;
-            }
+    boost::system::error_code ec;
+    json::value parsed = json::parse(response, ec);
+    if (!ec) {
+        collect_from_parsed(parsed);
+        return models;
+    }
 
-            std::string value = json.substr(value_start + 1, value_end - value_start - 1);
-            if (!value.empty() && std::find(values.begin(), values.end(), value) == values.end()) {
-                values.push_back(value);
-            }
-
-            pos = value_end + 1;
+    // Some debugging endpoints return NDJSON; parse each JSON payload line with
+    // the same structured parser rather than falling back to string scanning.
+    for (const auto& line : json_payload_lines(response)) {
+        ec = {};
+        parsed = json::parse(line, ec);
+        if (!ec) {
+            collect_from_parsed(parsed);
         }
     }
 
-    return values;
+    return models;
+}
+
+size_t json_size_value(const json::value& value) {
+    try {
+        if (value.is_uint64()) {
+            return static_cast<size_t>(value.as_uint64());
+        }
+        if (value.is_int64()) {
+            const auto n = value.as_int64();
+            return n > 0 ? static_cast<size_t>(n) : 0;
+        }
+        if (value.is_double()) {
+            const auto n = value.as_double();
+            return n > 0 ? static_cast<size_t>(n) : 0;
+        }
+        if (value.is_string()) {
+            const auto text = json_string_value(value);
+            if (!text.empty()) {
+                return static_cast<size_t>(std::stoull(text));
+            }
+        }
+    } catch (...) {
+        return 0;
+    }
+    return 0;
+}
+
+size_t object_size_field(const json::object& object,
+                         std::initializer_list<const char*> keys) {
+    for (const char* key : keys) {
+        const auto it = object.find(key);
+        if (it != object.end()) {
+            const auto value = json_size_value(it->value());
+            if (value > 0) {
+                return value;
+            }
+        }
+    }
+    return 0;
+}
+
+void merge_token_stats(LLMTokenStats& stats, const LLMTokenStats& candidate) {
+    // Streaming chunks often repeat or only report final usage in the last event.
+    // Taking max keeps parsing idempotent across single JSON, SSE, and NDJSON.
+    stats.prompt_tokens = std::max(stats.prompt_tokens, candidate.prompt_tokens);
+    stats.completion_tokens = std::max(stats.completion_tokens, candidate.completion_tokens);
+    stats.total_tokens = std::max(stats.total_tokens, candidate.total_tokens);
+}
+
+LLMTokenStats token_stats_from_object(const json::object& object) {
+    LLMTokenStats stats;
+
+    const auto usage_it = object.find("usage");
+    if (usage_it != object.end() && usage_it->value().is_object()) {
+        const auto& usage = usage_it->value().as_object();
+        stats.prompt_tokens = object_size_field(usage, {
+            "prompt_tokens", "input_tokens", "promptTokens", "inputTokens"
+        });
+        stats.completion_tokens = object_size_field(usage, {
+            "completion_tokens", "output_tokens", "completionTokens", "outputTokens"
+        });
+        stats.total_tokens = object_size_field(usage, {
+            "total_tokens", "totalTokens"
+        });
+    }
+
+    // Ollama chat/generate final response fields.
+    if (stats.prompt_tokens == 0) {
+        stats.prompt_tokens = object_size_field(object, {"prompt_eval_count", "prompt_tokens"});
+    }
+    if (stats.completion_tokens == 0) {
+        stats.completion_tokens = object_size_field(object, {"eval_count", "completion_tokens"});
+    }
+    if (stats.total_tokens == 0) {
+        stats.total_tokens = object_size_field(object, {"total_tokens", "totalTokens"});
+    }
+    if (stats.total_tokens == 0 && (stats.prompt_tokens > 0 || stats.completion_tokens > 0)) {
+        stats.total_tokens = stats.prompt_tokens + stats.completion_tokens;
+    }
+
+    return stats;
+}
+
+void collect_token_stats_from_value(const json::value& value, LLMTokenStats& stats) {
+    if (value.is_object()) {
+        const auto& object = value.as_object();
+        merge_token_stats(stats, token_stats_from_object(object));
+
+        const auto choices_it = object.find("choices");
+        if (choices_it != object.end() && choices_it->value().is_array()) {
+            for (const auto& choice : choices_it->value().as_array()) {
+                collect_token_stats_from_value(choice, stats);
+            }
+        }
+        return;
+    }
+
+    if (value.is_array()) {
+        for (const auto& item : value.as_array()) {
+            collect_token_stats_from_value(item, stats);
+        }
+    }
 }
 
 bool model_name_matches(const std::string& configured_model,
@@ -316,6 +478,104 @@ void collect_llm_payload(const json::value& value,
 
     append_with_spacing(result.answer, object_string(object, "content"));
     append_with_spacing(result.answer, object_string(object, "response"));
+}
+
+
+void collect_stream_chunks_from_value(const json::value& value,
+                                      std::vector<std::string>& chunks) {
+    if (!value.is_object()) {
+        return;
+    }
+
+    const auto& object = value.as_object();
+
+    const auto error_it = object.find("error");
+    if (error_it != object.end()) {
+        if (error_it->value().is_string()) {
+            add_unique_string(chunks, "Ошибка LLM: " + json_string_value(error_it->value()));
+            return;
+        }
+        if (error_it->value().is_object()) {
+            const auto message = object_string(error_it->value().as_object(), "message");
+            if (!message.empty()) {
+                add_unique_string(chunks, "Ошибка LLM: " + message);
+                return;
+            }
+        }
+    }
+
+    const auto choices_it = object.find("choices");
+    if (choices_it != object.end() && choices_it->value().is_array()) {
+        for (const auto& choice : choices_it->value().as_array()) {
+            if (!choice.is_object()) {
+                continue;
+            }
+            const auto& choice_obj = choice.as_object();
+
+            const auto delta_it = choice_obj.find("delta");
+            if (delta_it != choice_obj.end() && delta_it->value().is_object()) {
+                const auto content = object_string(delta_it->value().as_object(), "content");
+                if (!content.empty()) {
+                    chunks.push_back(content);
+                }
+            }
+
+            const auto message_it = choice_obj.find("message");
+            if (message_it != choice_obj.end() && message_it->value().is_object()) {
+                const auto content = object_string(message_it->value().as_object(), "content");
+                if (!content.empty()) {
+                    chunks.push_back(content);
+                }
+            }
+
+            const auto text = object_string(choice_obj, "text");
+            if (!text.empty()) {
+                chunks.push_back(text);
+            }
+        }
+    }
+
+    const auto message_it = object.find("message");
+    if (message_it != object.end() && message_it->value().is_object()) {
+        const auto content = object_string(message_it->value().as_object(), "content");
+        if (!content.empty()) {
+            chunks.push_back(content);
+        }
+    }
+
+    const auto content = object_string(object, "content");
+    if (!content.empty()) {
+        chunks.push_back(content);
+    }
+
+    const auto response = object_string(object, "response");
+    if (!response.empty()) {
+        chunks.push_back(response);
+    }
+}
+
+std::vector<std::string> parse_stream_chunks_structured(const std::string& stream_response) {
+    std::vector<std::string> chunks;
+    if (stream_response.empty()) {
+        return chunks;
+    }
+
+    boost::system::error_code ec;
+    json::value parsed = json::parse(stream_response, ec);
+    if (!ec) {
+        collect_stream_chunks_from_value(parsed, chunks);
+        return chunks;
+    }
+
+    for (const auto& line : json_payload_lines(stream_response)) {
+        ec = {};
+        parsed = json::parse(line, ec);
+        if (!ec) {
+            collect_stream_chunks_from_value(parsed, chunks);
+        }
+    }
+
+    return chunks;
 }
 
 std::vector<std::string> json_payload_lines(const std::string& text) {
@@ -626,50 +886,59 @@ LLMClient::LLMClient(const LLMConfig& config)
 
 std::string LLMClient::build_prompt(const std::string& context,
                                     const std::string& question) const {
-    std::ostringstream prompt;
-    prompt << "Контекст:\n";
-    if (!context.empty()) {
-        prompt << context;
-    } else {
-        prompt << "(Нет доступного контекста)";
-    }
-    prompt << "\n\nВопрос: " << question;
-    return prompt.str();
+    return apply_prompt_template(config_.prompt_template, context, question);
 }
 
 std::string LLMClient::build_request_json(const std::string& prompt) const {
+    return build_request_json(prompt, false);
+}
+
+std::string LLMClient::build_request_json(const std::string& prompt, bool stream) const {
+    return build_request_json(prompt, stream, std::nullopt);
+}
+
+std::string LLMClient::build_request_json(
+    const std::string& prompt,
+    bool stream,
+    const std::optional<std::string>& system_prompt_override) const {
     std::ostringstream json;
+    const std::string& system_prompt = system_prompt_override && !system_prompt_override->empty()
+        ? *system_prompt_override
+        : config_.system_prompt;
 
     if (is_ollama_url(config_.api_url)) {
-        json << "{\"model\":\"" << json_escape(config_.model) << "\","
-             << "\"stream\":false,"
-             << "\"messages\":[";
+        json << "{\"model\":\"" << json_escape(config_.model) << "\",";
+        json << "\"stream\":" << (stream ? "true" : "false") << ",";
+        json << "\"messages\":[";
 
         json << "{\"role\":\"system\",\"content\":\""
-             << json_escape(config_.system_prompt) << "\"},";
+             << json_escape(system_prompt) << "\"},";
 
         json << "{\"role\":\"user\",\"content\":\""
              << json_escape(prompt) << "\"}],";
 
-        json << "\"options\":{"
-             << "\"temperature\":" << std::fixed << std::setprecision(1)
-             << config_.temperature << ","
-             << "\"top_p\":" << std::fixed << std::setprecision(1)
-             << config_.top_p << ","
-             << "\"num_predict\":" << config_.max_tokens
-             << "}}";
+        json << "\"options\":{";
+        json << "\"temperature\":" << std::fixed << std::setprecision(1)
+             << config_.temperature << ",";
+        json << "\"top_p\":" << std::fixed << std::setprecision(1)
+             << config_.top_p << ",";
+        json << "\"num_predict\":" << config_.max_tokens;
+        json << "}}";
         return json.str();
     }
 
-    json << "{\"model\":\"" << json_escape(config_.model) << "\","
-         << "\"max_tokens\":" << config_.max_tokens << ","
-         << "\"temperature\":" << std::fixed << std::setprecision(1)
-         << config_.temperature << ","
-         << "\"messages\":[";
+    json << "{\"model\":\"" << json_escape(config_.model) << "\",";
+    json << "\"max_tokens\":" << config_.max_tokens << ",";
+    json << "\"temperature\":" << std::fixed << std::setprecision(1)
+         << config_.temperature << ",";
+    if (stream) {
+        json << "\"stream\":true,";
+    }
+    json << "\"messages\":[";
 
     // System message
     json << "{\"role\":\"system\",\"content\":\""
-         << json_escape(config_.system_prompt) << "\"},";
+         << json_escape(system_prompt) << "\"},";
 
     // User message
     json << "{\"role\":\"user\",\"content\":\""
@@ -943,7 +1212,7 @@ bool LLMClient::is_available() const {
 #endif
 }
 
-int LLMClient::health_check() const {
+int LLMClient::provider_health_check() const {
 #if !QORNIX_HAS_CURL
     return -1;
 #endif
@@ -957,21 +1226,9 @@ int LLMClient::health_check() const {
 
     if (is_ollama_url(url)) {
         url = ollama_base_url(url) + "/api/tags";
-        const std::string response = make_get_request(url, 3000);
-
-        auto end = std::chrono::steady_clock::now();
-        const long long duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            end - start).count();
-
-        if (response_has_error(response) ||
-            !ollama_tags_contain_model(response, config_.model)) {
-            return -1;
-        }
-
-        return static_cast<int>(duration);
+    } else {
+        url = openai_models_url(url);
     }
-
-    url = openai_models_url(url);
 
     const std::string response = make_get_request(url, 3000);
 
@@ -983,12 +1240,29 @@ int LLMClient::health_check() const {
         return -1;
     }
 
-    const auto models = extract_json_string_values(response, {"id", "name", "model"});
+    return static_cast<int>(duration);
+}
+
+int LLMClient::health_check() const {
+#if !QORNIX_HAS_CURL
+    return -1;
+#endif
+
+    const int provider_duration = provider_health_check();
+    if (provider_duration < 0) {
+        return -1;
+    }
+
+    const auto models = list_available_models();
     if (!models.empty() && !model_list_contains(models, config_.model)) {
         return -1;
     }
 
-    return static_cast<int>(duration);
+    if (is_ollama_url(config_.api_url) && models.empty()) {
+        return -1;
+    }
+
+    return provider_duration;
 }
 
 std::string LLMClient::provider_name() const {
@@ -1016,8 +1290,12 @@ std::vector<std::string> LLMClient::list_available_models() const {
         return {};
     }
 
-    return extract_json_string_values(response, {"name", "model", "id"});
+    return parse_available_models_response(response);
 #endif
+}
+
+std::vector<std::string> LLMClient::parse_available_models_response(const std::string& json_response) const {
+    return parse_model_list_structured(json_response);
 }
 
 bool LLMClient::configured_model_available() const {
@@ -1044,10 +1322,7 @@ std::vector<std::string> LLMClient::ask_stream(const std::string& question,
     }
 
     std::string prompt = build_prompt(context, question);
-    std::string request_body = build_request_json(prompt);
-
-    // Enable streaming in request
-    request_body += ",\"stream\":true}"; // Replace closing brace
+    std::string request_body = build_request_json(prompt, true);
 
     std::string url = config_.api_url;
     if (url.find("/chat/completions") == std::string::npos &&
@@ -1059,6 +1334,7 @@ std::vector<std::string> LLMClient::ask_stream(const std::string& question,
         }
     }
 
+    std::string raw_response;
     CURL* curl = curl_easy_init();
     if (!curl) {
         chunks.push_back("Ошибка: CURL инициализация");
@@ -1077,8 +1353,8 @@ std::vector<std::string> LLMClient::ask_stream(const std::string& question,
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_body.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, stream_write_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &chunks);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &raw_response);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long)config_.request_timeout_ms);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
@@ -1089,8 +1365,19 @@ std::vector<std::string> LLMClient::ask_stream(const std::string& question,
     curl_slist_free_all(headers);
 
     if (res != CURLE_OK) {
-        chunks.clear();
         chunks.push_back("Ошибка подключения к LLM: " + std::string(curl_easy_strerror(res)));
+        return chunks;
+    }
+
+    chunks = parse_stream_chunks(raw_response);
+    if (chunks.empty()) {
+        const auto parsed = parse_response_result(raw_response);
+        if (!parsed.answer.empty()) {
+            chunks.push_back(parsed.answer);
+        }
+    }
+    if (chunks.empty()) {
+        chunks.push_back("Ошибка: не удалось распознать потоковый ответ");
     }
 
     return chunks;
@@ -1116,8 +1403,7 @@ bool LLMClient::ask_stream_sse(const std::string& question,
     }
 
     std::string prompt = build_templated_prompt(context, question);
-    std::string request_body = build_request_json(prompt);
-    request_body += ",\"stream\":true}";
+    std::string request_body = build_request_json(prompt, true);
 
     std::string url = config_.api_url;
     if (url.find("/chat/completions") == std::string::npos &&
@@ -1163,50 +1449,25 @@ bool LLMClient::ask_stream_sse(const std::string& question,
         return false;
     }
 
-    // Parse SSE/JSON stream
-    bool found_content = false;
-    std::string full_answer;
-    
-    // Try to find content in JSON response
-    size_t content_pos = raw_response.find("\"content\"");
-    if (content_pos != std::string::npos) {
-        size_t colon_pos = raw_response.find(':', content_pos + 9);
-        if (colon_pos != std::string::npos) {
-            size_t value_start = raw_response.find('"', colon_pos + 1);
-            if (value_start != std::string::npos) {
-                size_t value_end = raw_response.find('"', value_start + 1);
-                if (value_end != std::string::npos) {
-                    full_answer = raw_response.substr(value_start + 1,
-                                                      value_end - value_start - 1);
-                    found_content = true;
-                }
-            }
-        }
-    }
-
-    if (found_content) {
-        // Stream the answer in chunks (word by word)
-        std::istringstream stream(full_answer);
-        std::string word;
-        std::string chunk;
-        
-        while (stream >> word) {
-            chunk += (chunk.empty() ? "" : " ") + word;
-            if (chunk.size() >= 20 || stream.eof()) {
-                callback(chunk, false);
-                chunk.clear();
-            }
-        }
-        if (!chunk.empty()) {
+    const auto chunks = parse_stream_chunks(raw_response);
+    if (!chunks.empty()) {
+        for (const auto& chunk : chunks) {
             callback(chunk, false);
         }
-        callback("", true); // Done signal
-    } else {
-        callback("Ошибка: не удалось распознать ответ", true);
-        return false;
+        callback("", true);
+        return true;
     }
 
-    return true;
+    const auto parsed = parse_response_result(raw_response);
+    if (!parsed.answer.empty() && parsed.status != "parser_error") {
+        callback(parsed.answer, false);
+        callback("", true);
+        return true;
+    }
+
+    callback(parsed.answer.empty() ? "Ошибка: не удалось распознать потоковый ответ" : parsed.answer,
+             true);
+    return false;
 #else
     (void)question;
     (void)context;
@@ -1241,51 +1502,30 @@ size_t LLMClient::estimate_tokens(const std::string& text) const {
 
 LLMTokenStats LLMClient::parse_token_stats(const std::string& json_response) const {
     LLMTokenStats stats;
-
-    // Try to extract usage from OpenAI format
-    // {"usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}}
-    size_t usage_pos = json_response.find("\"usage\"");
-    if (usage_pos != std::string::npos) {
-        size_t prompt_pos = json_response.find("\"prompt_tokens\"", usage_pos);
-        if (prompt_pos != std::string::npos) {
-            size_t colon_pos = json_response.find(':', prompt_pos + 15);
-            if (colon_pos != std::string::npos) {
-                size_t num_start = json_response.find_first_of("0123456789", colon_pos + 1);
-                if (num_start != std::string::npos) {
-                    stats.prompt_tokens = std::stoul(json_response.substr(num_start));
-                }
-            }
-        }
-
-        size_t completion_pos = json_response.find("\"completion_tokens\"", usage_pos);
-        if (completion_pos != std::string::npos) {
-            size_t colon_pos = json_response.find(':', completion_pos + 19);
-            if (colon_pos != std::string::npos) {
-                size_t num_start = json_response.find_first_of("0123456789", colon_pos + 1);
-                if (num_start != std::string::npos) {
-                    stats.completion_tokens = std::stoul(json_response.substr(num_start));
-                }
-            }
-        }
-
-        size_t total_pos = json_response.find("\"total_tokens\"", usage_pos);
-        if (total_pos != std::string::npos) {
-            size_t colon_pos = json_response.find(':', total_pos + 14);
-            if (colon_pos != std::string::npos) {
-                size_t num_start = json_response.find_first_of("0123456789", colon_pos + 1);
-                if (num_start != std::string::npos) {
-                    stats.total_tokens = std::stoul(json_response.substr(num_start));
-                }
-            }
-        }
+    if (json_response.empty()) {
+        return stats;
     }
 
-    // If no usage info, estimate
-    if (stats.prompt_tokens == 0 && stats.completion_tokens == 0) {
-        stats.total_tokens = 0;
+    boost::system::error_code ec;
+    json::value parsed = json::parse(json_response, ec);
+    if (!ec) {
+        collect_token_stats_from_value(parsed, stats);
+        return stats;
+    }
+
+    for (const auto& line : json_payload_lines(json_response)) {
+        ec = {};
+        parsed = json::parse(line, ec);
+        if (!ec) {
+            collect_token_stats_from_value(parsed, stats);
+        }
     }
 
     return stats;
+}
+
+std::vector<std::string> LLMClient::parse_stream_chunks(const std::string& stream_response) const {
+    return parse_stream_chunks_structured(stream_response);
 }
 
 LLMTokenStats LLMClient::estimate_cost(const std::string& question,
@@ -1311,22 +1551,7 @@ LLMTokenStats LLMClient::estimate_cost(const std::string& question,
 
 std::string LLMClient::build_templated_prompt(const std::string& context,
                                               const std::string& question) const {
-    std::string template_str = config_.prompt_template;
-    
-    // Replace {context} and {question} placeholders
-    size_t pos = 0;
-    
-    pos = template_str.find("{context}");
-    if (pos != std::string::npos) {
-        template_str.replace(pos, 9, context.empty() ? "(Нет контекста)" : context);
-    }
-    
-    pos = template_str.find("{question}");
-    if (pos != std::string::npos) {
-        template_str.replace(pos, 10, question);
-    }
-    
-    return template_str;
+    return apply_prompt_template(config_.prompt_template, context, question);
 }
 
 // ============================================================================
@@ -1379,6 +1604,15 @@ std::string LLMClient::ask(const std::string& question,
 LLMGenerationResult LLMClient::ask_with_metadata(const std::string& question,
                                                  const std::string& context,
                                                  const std::string& client_ip) const {
+    return ask_with_metadata(question, context, client_ip, std::nullopt, std::nullopt);
+}
+
+LLMGenerationResult LLMClient::ask_with_metadata(
+    const std::string& question,
+    const std::string& context,
+    const std::string& client_ip,
+    const std::optional<std::string>& system_prompt_override,
+    const std::optional<std::string>& prompt_template_override) const {
     LLMGenerationResult result;
 
     // Phase 3: Check rate limiter
@@ -1391,9 +1625,21 @@ LLMGenerationResult LLMClient::ask_with_metadata(const std::string& question,
         }
     }
 
+    const std::string effective_system_prompt =
+        system_prompt_override && !system_prompt_override->empty()
+            ? *system_prompt_override
+            : config_.system_prompt;
+    const std::string effective_prompt_template =
+        prompt_template_override && !prompt_template_override->empty()
+            ? *prompt_template_override
+            : config_.prompt_template;
+    const std::string cache_context = context
+        + "\n\n__qornix_prompt_template__\n" + effective_prompt_template
+        + "\n\n__qornix_system_prompt__\n" + effective_system_prompt;
+
     // Phase 3: Check cache
     if (cache_) {
-        std::string key = make_cache_key(question, context, config_.model, config_.temperature);
+        std::string key = make_cache_key(question, cache_context, config_.model, config_.temperature);
 
         auto cached = cache_->get(key);
         if (cached.has_value()) {
@@ -1414,8 +1660,8 @@ LLMGenerationResult LLMClient::ask_with_metadata(const std::string& question,
         result.answer = "LLM недоступен: qornix_rag собран без libcurl. "
                         "Установите libcurl development package и пересоберите проект.\n\n" + context;
 #else
-        std::string prompt = build_prompt(context, question);
-        std::string request_body = build_request_json(prompt);
+        std::string prompt = apply_prompt_template(effective_prompt_template, context, question);
+        std::string request_body = build_request_json(prompt, false, effective_system_prompt);
 
         // Try primary endpoint
         std::string url = config_.api_url;
@@ -1445,7 +1691,7 @@ LLMGenerationResult LLMClient::ask_with_metadata(const std::string& question,
                         }
                     }
 
-                    std::string failover_prompt = build_prompt(context, question);
+                    std::string failover_prompt = prompt;
                     std::ostringstream failover_json;
                     failover_json << "{\"model\":\"" << json_escape(endpoint.model) << "\","
                                   << "\"max_tokens\":" << config_.max_tokens << ","
@@ -1453,7 +1699,7 @@ LLMGenerationResult LLMClient::ask_with_metadata(const std::string& question,
                                   << config_.temperature << ","
                                   << "\"messages\":["
                                   << "{\"role\":\"system\",\"content\":\""
-                                  << json_escape(config_.system_prompt) << "\"},"
+                                  << json_escape(effective_system_prompt) << "\"},"
                                   << "{\"role\":\"user\",\"content\":\""
                                   << json_escape(failover_prompt) << "\"}]"
                                   << "}";
@@ -1490,7 +1736,7 @@ LLMGenerationResult LLMClient::ask_with_metadata(const std::string& question,
         entry.ttl = std::chrono::hours(1); // Default TTL
         entry.created_at = std::chrono::steady_clock::now();
 
-        std::string key = make_cache_key(question, context, config_.model, config_.temperature);
+        std::string key = make_cache_key(question, cache_context, config_.model, config_.temperature);
         cache_->put(key, entry);
     }
 

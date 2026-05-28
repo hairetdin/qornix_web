@@ -16,12 +16,14 @@
 #include "analytics_service.h"
 #include "deduplication_service.h"
 #include "rag_auth.h"
+#include "rag_upload.h"
 #if QORNIX_HAS_SQLITE
 #include "sqlite_source.h"
 #endif
 #include "markdown_source.h"
 
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -48,7 +50,7 @@ struct RagConfig {
 
     std::string address = "127.0.0.1";
     int port = 8081;
-    std::string project_path = ".";
+    std::optional<std::string> scan_path = std::nullopt;
     bool auto_index_on_startup = true;
 
     RagEngineConfig engine;
@@ -65,6 +67,7 @@ struct RagConfig {
     SQLiteSource::Config sqlite;
     bool sqlite_enabled = false;
 #endif
+    qornix::rag::RagUploadConfig upload;
     RagRouteConfig routes;
     RagSecurityConfig security;
     RagConfigDiagnostics diagnostics;

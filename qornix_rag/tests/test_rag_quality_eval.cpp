@@ -94,7 +94,11 @@ void assert_search_case(RagService& service, const boost::json::object& test_cas
     assert(response.success);
     assert(response.query_expansion_applied);
     assert(response.reranking_applied);
+    assert(response.multi_query_applied);
     assert(!response.expanded_query.empty());
+    assert(!response.rewritten_query.empty());
+    assert(!response.retrieval_queries.empty());
+    assert(!response.reranker_type.empty());
     assert(!response.results.empty());
     assert(response.results.front().source_path == expected_source);
     assert(contains_text(response.results.front().snippet, expected_snippet));
@@ -111,10 +115,15 @@ void assert_ask_case(RagService& service, const boost::json::object& test_case) 
     assert(response.success);
     assert(response.query_expansion_applied);
     assert(response.reranking_applied);
+    assert(response.multi_query_applied);
+    assert(!response.retrieval_queries.empty());
+    assert(!response.reranker_type.empty());
     assert(!response.context.empty());
     assert(response.context.front().source_path == expected_source);
     assert(response.context.front().citation_id.rfind(citation_prefix, 0) == 0);
     assert(response.grounding_status == expected_grounding);
+    assert(!response.grounding_evaluator.empty());
+    assert(response.claim_grounding_status != "not_evaluated");
     assert(!response.answer_citations.empty());
     assert(response.missing_citations.empty());
     assert(response.llm_status == "unavailable");

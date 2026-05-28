@@ -1,6 +1,6 @@
 # Operations for Generated RAG Apps
 
-This document applies to generated `rag_app` projects and to default generated apps created with `--with-rag`.
+This document applies to generated `rag_app` projects and to generated host apps created with `--with-rag`.
 
 Standalone `qornix_rag` is local-first and does not require auth. A generated Qornix Web app can be exposed on a network, so auth, TLS, proxy rules, and deployment security belong to the host application or infrastructure layer.
 
@@ -13,6 +13,7 @@ data/            SQLite QA and persisted RAG metadata
 knowledge_base/  Markdown/text knowledge source files
 logs/            application logs when file logging is enabled
 models/          optional local ONNX embedding model files
+data/uploads/    files uploaded through the RAG UI/API
 ```
 
 Do not bake user data, SQLite databases, logs, local model licenses, or API keys into a container image or release artifact.
@@ -39,7 +40,83 @@ Prometheus-style RAG metrics:
 GET /api/rag/metrics
 ```
 
-The generated application may also expose host-level Qornix Web metrics if the host app registers them.
+The endpoint returns Prometheus text exposition format:
+
+```bash
+curl -fsS http://127.0.0.1:8008/api/rag/metrics
+```
+
+The built-in collector is in-process and does not require `prometheus-cpp`. It exports LLM request counters, failed request counters, request duration summaries, token counters when reported by the provider/client path, LLM response cache hits/misses/size, rate-limit rejections, batch counters, and latest indexing file/line gauges.
+
+Prometheus scrape example:
+
+```yaml
+scrape_configs:
+  - job_name: qornix-rag-app
+    metrics_path: /api/rag/metrics
+    static_configs:
+      - targets: ['127.0.0.1:8008']
+```
+
+The generated application may also expose host-level Qornix Web metrics if the host app registers them. Protect RAG metrics with `rag:admin`, host-auth, internal networking, or reverse-proxy rules before exposing the application to other users.
+
+
+## Upload Operations
+
+Generated apps expose secure upload routes under the RAG API prefix:
+
+```http
+POST /api/rag/documents/upload
+POST /api/rag/uploads/delete
+```
+
+Upload config lives under `rag.upload`:
+
+```yaml
+rag:
+  upload:
+    enabled: true
+    uploads_dir: data/uploads
+    max_file_size_kb: 16384
+    max_files_per_request: 20
+    auto_ingest: true
+    async_ingest: false
+```
+
+The backend validates extension, MIME type, per-file size, max files per request, and safe filename handling before storing files. Uploaded files are ingested and made searchable through the same HNSW/Xapian hybrid index. Deletion is restricted to files inside `uploads_dir` and can trigger reindexing.
+
+Protect upload/delete routes with `rag:write` or an upstream authorization layer before exposing the app to other users.
+
+## Cache Operations
+
+RAG cache settings live under `rag.cache` in generated apps. The current supported backend is the in-process memory cache:
+
+```yaml
+rag:
+  cache:
+    enabled: true
+    backend: memory
+    max_size: 1000
+    ttl_seconds: 3600
+```
+
+Memory cache reduces repeated LLM calls within one running process. It is cleared on restart and is not shared across replicas, which keeps local operations simple.
+
+Redis is the intended external/shared cache target and the config shape is already reserved:
+
+```yaml
+rag:
+  cache:
+    backend: redis
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      db: 0
+      password: ""
+      ttl_seconds: 3600
+```
+
+Redis cache is implemented through the built-in RESP TCP client. Use it for multi-instance deployments, centralized TTL/eviction and cache sharing. If Redis is unavailable at startup, the app falls back to memory cache. Keep Redis on a private network, configure authentication for non-local access, and set finite TTLs for LLM cache keys.
 
 ## Rate Limits
 
@@ -246,7 +323,49 @@ This rebuilds the in-memory retrieval index from the restored data.
 - Prefer `qornix_auth` for generated apps exposed on a network: set `auth.enabled: true`, configure `auth.database` through `qornix_orm`, and use SQLite/PostgreSQL/MySQL according to the deployment.
 - Use route permissions deliberately: `rag:read` covers read/search/ask, `rag:write` covers indexing/ingestion/QA writes/source writes, `rag:admin` covers diagnostics/metrics/analytics, and `auth:admin` covers user management.
 - Keep `auth.csrf.enabled: true` for cookie-authenticated browser sessions; disable it only when all unsafe routes are protected by non-cookie credentials.
-- Protect `/api/rag/admin/diagnostics`, `/api/rag/metrics`, QA write, ingestion, and document delete endpoints with `qornix_auth`, `rag.security`, or an upstream auth layer.
+- Protect `/api/rag/admin/diagnostics`, `/api/rag/metrics`, upload/delete, QA write, ingestion, and document delete endpoints with `qornix_auth`, `rag.security`, or an upstream auth layer.
 - Store LLM API keys outside Git and container images.
-- Review upload/indexing path allowlists before enabling arbitrary user-controlled sources.
+- Review upload extension/MIME/size allowlists and indexing path allowlists before enabling arbitrary user-controlled sources.
 - Keep `rag.indexing.max_file_size_kb` conservative for shared deployments.
+
+
+## Xapian language-aware retrieval
+
+Generated RAG apps inherit the same Xapian controls as standalone mode:
+
+```yaml
+rag:
+  search:
+    xapian_enabled: true
+    xapian_language: auto
+    xapian_stemming: true
+    xapian_stemming_strategy: some
+    xapian_cjk_ngrams: false
+    xapian_word_breaks: true
+    xapian_spelling: false
+    xapian_metadata_prefixes: true
+```
+
+Use an explicit language for single-language documentation projects, for example `en`/`english`, `de`/`german`, `fr`/`french`, `es`/`spanish`, `ru`/`russian`, or any other stemmer supported by the installed Xapian package. `auto` uses a small Cyrillic-vs-default heuristic; it is not universal language detection. Use `none` with `xapian_stemming: false` for code-only projects where exact identifiers are more important than word forms. Diagnostics are available from `/api/rag/health` and `/api/rag/admin/diagnostics`. See Xapian's authoritative language list: https://xapian.org/docs/apidoc/html/classXapian_1_1Stem.html
+
+
+## Redis response cache
+
+Generated RAG apps support the same LLM response cache backends as standalone `qornix_rag`. Use `rag.cache.backend: memory` for a single local instance. Use `rag.cache.backend: redis` when several app instances should share cached LLM answers. Redis stores only completed LLM response cache entries; uploaded files, SQLite QA/wiki data, embeddings, HNSW/Faiss/Qdrant/pgvector and Xapian are separate storage layers.
+
+Example:
+
+```yaml
+rag:
+  cache:
+    enabled: true
+    backend: redis
+    ttl_seconds: 3600
+    key_prefix: qornix_rag:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      db: 0
+      password: ""
+      ttl_seconds: 3600
+```

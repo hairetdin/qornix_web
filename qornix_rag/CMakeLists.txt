@@ -34,6 +34,7 @@ set(QORNIX_RAG_CORE_SOURCES
     markdown_source.cpp
     analytics_service.cpp
     deduplication_service.cpp
+    rag_upload.cpp
 )
 
 set(QORNIX_RAG_CORE_HEADERS
@@ -60,6 +61,7 @@ set(QORNIX_RAG_CORE_HEADERS
     markdown_source.h
     analytics_service.h
     deduplication_service.h
+    rag_upload.h
 )
 
 add_library(qornix_rag_core STATIC
