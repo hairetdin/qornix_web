@@ -65,6 +65,8 @@ static std::map<std::string, std::string> loadFlatConfig(const std::string& path
                 const std::string full_key = prefix.empty() ? key : prefix + "." + key;
                 if (val.IsMap()) {
                     flatten(val, full_key);
+                } else if (val.IsNull()) {
+                    values[full_key] = "";
                 } else if (val.IsScalar()) {
                     values[full_key] = val.as<std::string>();
                 }
@@ -285,11 +287,11 @@ void ServerManager::run() {
     std::cout << "🦅 Qornix Web Server is running on " << settings_.address << ":" << settings_.port << std::endl;
     // std::cout << "🦅 Qornix Web Server started!" << std::endl;
     std::cout << "🌐 http://localhost:" << settings_.port << std::endl;
-    std::cout << "📖 Документация: смотрите README.md" << std::endl;
-    std::cout << "🔧 Добавляйте свои обработчики в handlers/ и настраивайте маршруты в routes.h" << std::endl;
-    std::cout << "🔧 Для динамических расширений используйте папку route_extensions/" << std::endl;
+    std::cout << "📖 Documentation: see README.md" << std::endl;
+    std::cout << "🔧 Add custom handlers in handlers/ and configure routes in routes.h" << std::endl;
+    std::cout << "🔧 Put dynamic route extensions in route_extensions/" << std::endl;
     if (!g_resolved_config_path.empty()) {
-        std::cout << "⚙️ Конфиг: " << g_resolved_config_path << std::endl;
+        std::cout << "⚙️ Config: " << g_resolved_config_path << std::endl;
     }
     std::cout << std::endl;
 

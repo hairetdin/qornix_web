@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>@PROJECT_NAME@ · Qornix RAG</title>
+  <link rel="stylesheet" href="/static/rag_app.css">
+  <style>
+    body { background: #f6f8fc; color: #172033; font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; }
+    .home-shell { max-width: 980px; margin: 0 auto; padding: 36px 22px; }
+    .home-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 28px; box-shadow: 0 12px 34px rgba(15, 23, 42, .08); }
+    h1 { margin: 0 0 10px; font-size: 32px; line-height: 1.2; }
+    p { color: #53657d; line-height: 1.6; margin: 0 0 18px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 24px 0; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 16px; border-radius: 10px; background: #4f46e5; color: #fff; text-decoration: none; font-weight: 700; }
+    .btn.secondary { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 20px; }
+    .card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; background: #f8fafc; }
+    .card strong { display: block; margin-bottom: 6px; }
+    code { background: #eef2ff; border-radius: 6px; padding: 2px 6px; }
+  </style>
+</head>
+<body>
+<main class="home-shell">
+  <section class="home-panel">
+    <h1>@PROJECT_NAME@</h1>
+    <p>A local Qornix RAG application for searchable knowledge bases, document uploads, QA pairs, and LLM-assisted answers.</p>
+    <div class="actions">
+      <a class="btn" href="/rag">Open RAG UI</a>
+      <a class="btn secondary" href="/api/rag/health">RAG health</a>
+      <a class="btn secondary" href="https://github.com/hairetdin/qornix_web" target="_blank" rel="noreferrer">Documentation</a>
+    </div>
+    <div class="grid">
+      <article class="card"><strong>RAG UI</strong><span><code>GET /rag</code></span></article>
+      <article class="card"><strong>Ask API</strong><span><code>POST /api/rag/ask</code></span></article>
+      <article class="card"><strong>Search API</strong><span><code>POST /api/rag/search</code></span></article>
+      <article class="card"><strong>Knowledge base</strong><span><code>knowledge_base/</code> and <code>data/rag_kb.db</code></span></article>
+    </div>
+  </section>
+</main>
+</body>
+</html>

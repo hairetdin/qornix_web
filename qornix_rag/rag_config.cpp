@@ -607,6 +607,10 @@ void applyCommonRagConfig(const Map& values, RagConfig& config) {
     config.rate_limit.per_ip_limit = getBool(values, {"rate_limit.per_ip_limit", "rag.rate_limit.per_ip_limit"}, config.rate_limit.per_ip_limit);
     config.rate_limit.max_requests_per_second_per_ip = getSize(values, {"rate_limit.max_requests_per_second_per_ip", "rag.rate_limit.max_requests_per_second_per_ip"}, config.rate_limit.max_requests_per_second_per_ip);
     config.rate_limit.max_requests_per_minute_per_ip = getSize(values, {"rate_limit.max_requests_per_minute_per_ip", "rag.rate_limit.max_requests_per_minute_per_ip"}, config.rate_limit.max_requests_per_minute_per_ip);
+    const auto rate_limit_whitelist_csv = getString(values, {"rate_limit.whitelist", "rag.rate_limit.whitelist"}, "");
+    if (!rate_limit_whitelist_csv.empty()) {
+        config.rate_limit.whitelist = qornix::rag::splitUploadCsvList(rate_limit_whitelist_csv);
+    }
 
     config.batch.max_concurrent = getSize(values, {"batch.max_concurrent", "rag.batch.max_concurrent"}, config.batch.max_concurrent);
     config.batch.question_timeout_ms = getInt(values, {"batch.question_timeout_ms", "rag.batch.question_timeout_ms"}, config.batch.question_timeout_ms);

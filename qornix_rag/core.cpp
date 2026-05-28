@@ -407,12 +407,12 @@ void RagEngine::index_project(const std::string &project_root) {
     path_to_index_.clear();
     vectorizer_ = TfidfVectorizer();
 
-    std::cout << "🔍 Сканирование проекта: " << project_root << std::endl;
+    std::cout << "🔍 Scanning project: " << project_root << std::endl;
 
     try {
         for (const auto &entry: std::filesystem::recursive_directory_iterator(project_root)) {
             if (stop_flag_ && !stop_flag_->load()) {
-                std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
+                std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
                 is_indexed_ = false;
                 auto index_end = std::chrono::steady_clock::now();
                 last_index_duration_ms_ = static_cast<size_t>(
@@ -457,7 +457,7 @@ void RagEngine::index_project(const std::string &project_root) {
                 continue;
             }
             if (stop_flag_ && !stop_flag_->load()) {
-                std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
+                std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
                 is_indexed_ = false;
                 auto index_end = std::chrono::steady_clock::now();
                 last_index_duration_ms_ = static_cast<size_t>(
@@ -475,7 +475,7 @@ void RagEngine::index_project(const std::string &project_root) {
             for (auto& chunk : chunks) {
                 chunk.embedding = generate_embedding(chunk.content);
                 if (stop_flag_ && !stop_flag_->load()) {
-                    std::cout << "🛑 Индексация прервана сигналом остановки" << std::endl;
+                    std::cout << "🛑 Indexing interrupted by stop signal" << std::endl;
                     is_indexed_ = false;
                     auto index_end = std::chrono::steady_clock::now();
                     last_index_duration_ms_ = static_cast<size_t>(
@@ -496,16 +496,16 @@ void RagEngine::index_project(const std::string &project_root) {
     is_indexed_ = true;
 
     auto stats = get_statistics();
-    std::cout << "✅ Проиндексировано файлов: " << stats.total_files << std::endl;
-    std::cout << "   Всего строк: " << stats.total_lines << std::endl;
-    std::cout << "   Размер: " << (stats.total_size_bytes / 1024) << " KB" << std::endl;
+    std::cout << "✅ Indexed files: " << stats.total_files << std::endl;
+    std::cout << "   Total lines: " << stats.total_lines << std::endl;
+    std::cout << "   Size: " << (stats.total_size_bytes / 1024) << " KB" << std::endl;
 
     build_hybrid_index();
     auto index_end = std::chrono::steady_clock::now();
     last_index_duration_ms_ = static_cast<size_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(index_end - index_start).count()
     );
-    std::cout << "   Время индексации: " << last_index_duration_ms_ << " ms" << std::endl;
+    std::cout << "   Indexing time: " << last_index_duration_ms_ << " ms" << std::endl;
 }
 
 // ============================================================================
@@ -841,7 +841,7 @@ void RagEngine::build_hybrid_index() {
         throw std::runtime_error("No documents to index. Call index_project() first.");
     }
 
-    std::cout << "🔨 Построение гибридного индекса..." << std::endl;
+    std::cout << "🔨 Building hybrid index..." << std::endl;
     bool hnsw_ready = false;
     bool xapian_ready = false;
 
@@ -872,7 +872,7 @@ void RagEngine::build_hybrid_index() {
             }
         }
 
-        std::cout << "✅ HNSW индекс построен (" << documents_.size() << " векторов)" << std::endl;
+        std::cout << "✅ HNSW index built (" << documents_.size() << " vectors)" << std::endl;
         hnsw_ready = true;
     } catch (const std::exception& e) {
         std::cerr << "❌ Error building HNSW index: " << e.what() << std::endl;
@@ -911,7 +911,7 @@ void RagEngine::build_hybrid_index() {
         }
 
         xapian_db_->commit();
-        std::cout << "✅ Xapian индекс построен (" << documents_.size() << " документов)" << std::endl;
+        std::cout << "✅ Xapian index built (" << documents_.size() << " documents)" << std::endl;
         xapian_ready = true;
     } catch (const Xapian::Error &e) {
         xapian_db_.reset();
@@ -920,11 +920,11 @@ void RagEngine::build_hybrid_index() {
 
     is_hybrid_indexed_ = hnsw_ready;
     if (hnsw_ready && xapian_ready) {
-        std::cout << "✅ Гибридный индекс построен: HNSW + Xapian" << std::endl;
+        std::cout << "✅ Hybrid index built: HNSW + Xapian" << std::endl;
     } else if (hnsw_ready) {
-        std::cout << "⚠️  Гибридный индекс частично готов: только HNSW" << std::endl;
+        std::cout << "⚠️  Hybrid index partially ready: HNSW only" << std::endl;
     } else {
-        std::cout << "❌ Гибридный индекс не построен" << std::endl;
+        std::cout << "❌ Hybrid index was not built" << std::endl;
     }
 }
 
@@ -967,7 +967,7 @@ std::vector<SearchResult> RagEngine::hybrid_search(
                 result.pop();
             }
 
-            std::cout << "📊 HNSW нашел: " << hnsw_scores.size() << " результатов" << std::endl;
+            std::cout << "📊 HNSW found: " << hnsw_scores.size() << " results" << std::endl;
         }
     } catch (const std::exception &e) {
         std::cerr << "⚠️  HNSW search error: " << e.what() << std::endl;
@@ -997,7 +997,7 @@ std::vector<SearchResult> RagEngine::hybrid_search(
                 xapian_scores[doc_id] = score;
             }
 
-            std::cout << "📊 Xapian нашел: " << matches.size() << " результатов" << std::endl;
+            std::cout << "📊 Xapian found: " << matches.size() << " results" << std::endl;
         }
     } catch (const Xapian::Error& e) {
         std::cerr << "⚠️  Xapian search error: " << e.get_description() << std::endl;
@@ -1063,7 +1063,7 @@ std::vector<SearchResult> RagEngine::hybrid_search(
         }
     }
 
-    std::cout << "✅ Гибридный поиск вернул: " << final_results.size() << " результатов" << std::endl;
+    std::cout << "✅ Hybrid search returned: " << final_results.size() << " results" << std::endl;
     return final_results;
 }
 
@@ -1126,9 +1126,9 @@ std::string RagEngine::build_context(const std::string &query, size_t max_length
     auto results = hybrid_search(query, query_embedding, 15);
 
     std::stringstream context;
-    context << "Ты эксперт по C++ разработке, помогаешь работать с кодовой базой проекта.\n\n";
-    context << "=== КОНТЕКСТ ПРОЕКТА ===\n";
-    context << "Запрос: " << query << "\n\n";
+    context << "You are a C++ development expert helping with the project codebase.\n\n";
+    context << "=== PROJECT CONTEXT ===\n";
+    context << "Query: " << query << "\n\n";
 
     size_t current_length = 0;
     size_t files_added = 0;
@@ -1139,15 +1139,15 @@ std::string RagEngine::build_context(const std::string &query, size_t max_length
         const std::string source_path = chunk_of != result.document.metadata.end()
             ? chunk_of->second
             : result.document.relative_path;
-        header += "ФАЙЛ: " + source_path + "\n";
+        header += "FILE: " + source_path + "\n";
         const auto chunk_index = result.document.metadata.find("chunk_index");
         if (chunk_index != result.document.metadata.end()) {
-            header += "Фрагмент: " + chunk_index->second + "\n";
+            header += "Chunk: " + chunk_index->second + "\n";
         }
-        header += "Тип: " + result.document.type + ", Язык: " + result.document.language + "\n";
+        header += "Type: " + result.document.type + ", Language: " + result.document.language + "\n";
         std::ostringstream score_stream;
         score_stream << std::fixed << std::setprecision(2) << result.score;
-        header += "Релевантность: " + score_stream.str() + "\n";
+        header += "Relevance: " + score_stream.str() + "\n";
         header += std::string(60, '=') + "\n\n";
 
         if (current_length + header.length() + result.document.content.length() > max_length) {
@@ -1169,8 +1169,8 @@ std::string RagEngine::build_context(const std::string &query, size_t max_length
     }
 
     context << "\n" + std::string(60, '=') + "\n";
-    context << "Всего файлов в контексте: " << files_added << "\n";
-    context << "Размер контекста: " << current_length << " символов\n";
+    context << "Files in context: " << files_added << "\n";
+    context << "Context size: " << current_length << " characters\n";
     context << std::string(60, '=') + "\n";
 
     return context.str();

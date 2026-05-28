@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -964,7 +964,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                     title: 'Configured model was not found',
                     summary: `${providerLabel(provider)} responds, but the configured model is ${quoteOrDash(configuredModel)} and it is not in the available model list. Available models: ${formatAvailableModels(availableModels)}.`,
                     actions: [
-                        `The simplest option is to open qornix_rag/config.yaml and replace llm.model with ${replacementLine}.`,
+                        `The simplest option is to open config.yaml and replace the configured LLM model with ${replacementLine}.`,
                         provider === 'ollama' ? `Or install the required model with: ${pullLine}.` : 'Or install/connect a model with the configured name.',
                         'Restart qornix_rag after changing config.yaml.'
                     ],
@@ -1006,7 +1006,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 ];
             }
             return [
-                'Check the LLM API URL in qornix_rag/config.yaml.',
+                'Check the LLM API URL in config.yaml.',
                 'Check the API key or connection parameters if the provider requires authentication.',
                 'After fixing the settings, restart qornix_rag or refresh the page.'
             ];

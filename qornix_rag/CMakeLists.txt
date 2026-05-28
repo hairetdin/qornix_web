@@ -300,6 +300,25 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(qornix_rag_core PRIVATE DEBUG_MODE)
 endif()
 
+if(NOT TARGET qornix_web_core)
+    add_library(qornix_web_core STATIC
+        ../server/http_server.cpp
+    )
+    add_library(qornix::web_core ALIAS qornix_web_core)
+    set_target_properties(qornix_web_core PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+    )
+    target_include_directories(qornix_web_core PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    )
+    target_compile_features(qornix_web_core PUBLIC cxx_std_20)
+    target_link_libraries(qornix_web_core PUBLIC
+        Boost::url
+        Boost::json
+    )
+    message(STATUS "Embedded minimal qornix_web_core enabled for standalone qornix_rag build")
+endif()
+
 add_library(qornix_rag_http STATIC
     web.cpp
     web.h
@@ -317,16 +336,6 @@ target_include_directories(qornix_rag_http PUBLIC
 
 if(TARGET qornix_web_core)
     target_link_libraries(qornix_rag_http PUBLIC qornix_web_core)
-else()
-    find_library(QORNIX_WEB_CORE_LIBRARY qornix_web_core
-        PATHS ${CMAKE_SOURCE_DIR}/build
-    )
-    if(QORNIX_WEB_CORE_LIBRARY)
-        target_link_libraries(qornix_rag_http PUBLIC ${QORNIX_WEB_CORE_LIBRARY})
-        message(STATUS "qornix_web_core found - RAG HTTP adapter enabled")
-    else()
-        message(FATAL_ERROR "qornix_web_core target/library is required for qornix_rag_http")
-    endif()
 endif()
 
 add_library(qornix_rag_extension STATIC

@@ -6,6 +6,7 @@
  */
 
 #include "app_paths.h"
+#include "handler_base.h"
 #include "rag_config.h"
 #include "rag_extension.h"
 #include "server_manager.h"
@@ -24,14 +25,46 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
+
+class StaticPageHandler : public HandlerBase {
+public:
+    StaticPageHandler(std::string templateName, std::string fallbackHtml)
+        : templateName_(std::move(templateName)), fallbackHtml_(std::move(fallbackHtml)) {}
+
+protected:
+    void handleGet(
+        const http::request<http::string_body>&,
+        http::response<http::string_body>& res,
+        const urls::url_view&,
+        const std::map<std::string, std::string>&
+    ) override {
+        buildHtmlResponse(res, http::status::ok, loadTemplate());
+    }
+
+private:
+    std::string templateName_;
+    std::string fallbackHtml_;
+
+    std::string loadTemplate() const {
+        std::ifstream file(qornix_app_paths::templatePath(templateName_), std::ios::binary);
+        if (!file.is_open()) {
+            return fallbackHtml_;
+        }
+        std::ostringstream buffer;
+        buffer << file.rdbuf();
+        return buffer.str();
+    }
+};
 
 void setEnv(const std::string& name, const std::filesystem::path& value) {
 #if defined(_WIN32)
@@ -52,6 +85,26 @@ std::string resolveAppPath(const std::string& path) {
     }
 
     return (qornix_app_paths::appRoot() / candidate).lexically_normal().string();
+}
+
+void setupApplicationPages(HttpServer& httpServer) {
+    const std::string fallbackHome =
+        R"HTML(<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Qornix RAG</title></head><body><h1>Qornix RAG</h1><p><a href="/rag">Open RAG UI</a></p><p><a href="/api/rag/health">RAG health</a></p></body></html>)HTML";
+
+    const std::string fallbackNotFound =
+        R"HTML(<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Page not found</title></head><body><h1>Page not found</h1><p><a href="/">Home</a></p><p><a href="/rag">Open RAG UI</a></p></body></html>)HTML";
+
+    auto home = std::make_shared<StaticPageHandler>("home.html", fallbackHome);
+    auto notFound = std::make_shared<StaticPageHandler>("404.html", fallbackNotFound);
+
+    httpServer.add_route("/", home);
+    httpServer.add_route("/notfound", notFound);
+    httpServer.add_route("/health", [](const Request& req, Response& res, const urls::url_view&, const Params&) {
+        res = response::json(R"({"status":"healthy","service":"@PROJECT_NAME@"})", req.version());
+    });
+    httpServer.add_route("/info", [](const Request& req, Response& res, const urls::url_view&, const Params&) {
+        res = response::json(R"({"service":"@PROJECT_NAME@","framework":"Qornix Web","module":"qornix_rag"})", req.version());
+    });
 }
 
 RagConfig makeApplicationRagConfig(const std::map<std::string, std::string>& flatConfig) {
@@ -316,6 +369,8 @@ int main(int argc, char* argv[]) {
         setEnv("QORNIX_RAG_TEMPLATES_DIR", qornix_app_paths::templatesDir());
 
         auto server = create_server_manager(argc, argv);
+
+        server->addRouteFunction(setupApplicationPages);
 
 #if defined(@PROJECT_NAME_UPPER@_ENABLE_AUTH) && defined(@PROJECT_NAME_UPPER@_ENABLE_ORM)
         auto authManager = makeApplicationAuthManager(server->getConfig());

@@ -65,11 +65,11 @@ private:
     static std::string getDefault404Template() {
         return R"(
         <!DOCTYPE html>
-        <html lang="ru">
+        <html lang="en">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Страница не найдена - 404</title>
+            <title>Page not found - 404</title>
             <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90' font-family='Arial, sans-serif'%3E🦅%3C/text%3E%3C/svg%3E">
             <style>
                 body {
@@ -134,12 +134,12 @@ private:
             <div class="error-section">
                 <div class="emoji">🔍</div>
                 <div class="error-code">404</div>
-                <h1 class="error-title">Страница не найдена</h1>
+                <h1 class="error-title">Page not found</h1>
                 <p class="error-message">
-                    Запрашиваемая страница не существует или была перемещена.<br>
-                    Проверьте правильность URL или вернитесь на главную страницу.
+                    The requested page does not exist or has moved.<br>
+                    Check the URL or return to the home page.
                 </p>
-                <a href="/" class="home-link">← Вернуться на главную</a>
+                <a href="/" class="home-link">← Back to home</a>
             </div>
         </div>
         </body>

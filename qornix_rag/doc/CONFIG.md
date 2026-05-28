@@ -14,6 +14,13 @@ dist/qornix_rag-portable-linux-x86_64/config/config.yaml
 
 Integrated `qornix_web` applications use the host application's config and map it into the RAG runtime config contract. The standalone config file is not required for integrated or third-party use.
 
+Most RAG settings are accepted in two forms:
+
+- standalone config: top-level sections such as `search`, `embedding`, `upload`, `security`, `cache`;
+- generated/integrated app config: the same sections under `rag.*`, such as `rag.search`, `rag.embedding`, `rag.upload`, `rag.security`, `rag.cache`.
+
+The persistent knowledge-base sections are normally written under `rag.*` in standalone too: `rag.sqlite`, `rag.markdown`, `rag.analytics`, and `rag.dedup`. The parser also accepts the shorter aliases `sqlite`, `markdown`, `analytics`, and `dedup`.
+
 ## Server
 
 ```yaml
@@ -25,11 +32,31 @@ server:
 - `server.address`: bind address. Keep `127.0.0.1` for local-only standalone use.
 - `server.port`: HTTP port.
 
+`server.host` is still accepted as a legacy alias for `server.address`, but new configs should use `server.address`.
+
 CLI options override config values:
 
 ```bash
 ./qornix_rag/run.sh --address 127.0.0.1 --port 8082 --scan-path /path/to/project
 ```
+
+Integrated/generated applications can also configure where the RAG routes are mounted:
+
+```yaml
+rag:
+  route:
+    expose_root_ui: false
+    ui_path: /rag
+    api_prefix: /api/rag
+```
+
+Route keys:
+
+| Key | Meaning |
+|---|---|
+| `rag.route.expose_root_ui` | Exposes the RAG UI route. Standalone defaults to `/`; integrated mode defaults to disabled. |
+| `rag.route.ui_path` | UI mount path for integrated/generated apps. |
+| `rag.route.api_prefix` | API prefix for integrated/generated apps. |
 
 ## Indexing
 
@@ -42,6 +69,16 @@ indexing:
 ```
 
 `indexing.scan_path` is the directory scan root. If it is omitted, the server starts in upload/API/QA mode without auto-scanning the filesystem. `auto_index_on_startup` only has an effect when `scan_path` is configured.
+
+Indexing keys:
+
+| Key | Meaning |
+|---|---|
+| `indexing.scan_path` | Optional filesystem root to scan. CLI `--scan-path` can override it. |
+| `indexing.auto_index_on_startup` | If `true`, scan `scan_path` during startup. |
+| `indexing.max_file_size_kb` | Maximum file size accepted by filesystem indexing. |
+
+The default directory exclusions are defined by the ingestion/indexing code (`.git`, `build`, `node_modules`, `.venv`, `dist`, and similar generated directories). There is currently no YAML key for overriding that list. Embedding vector size is controlled by `embedding.dimension`; with the default TF-IDF backend the runtime uses its built-in local dimension.
 
 PDF ingestion uses the optional `pdftotext` command when it is available in `PATH`. Image OCR ingestion uses the optional `tesseract` command when it is available in `PATH`. DOCX ingestion uses optional `libzip` support detected at build time. XLSX/PPTX ingestion uses optional `libzip` + `pugixml` support detected at build time. CSV ingestion is built in. If an optional parser dependency is missing or a document contains no extractable text, ingestion records a structured warning and skips that file.
 
@@ -57,6 +94,11 @@ Fresh source checkouts do not include large ONNX model files. The safe default i
 embedding:
   backend: tfidf
   enable_fallback: true
+  models_dir: qornix_rag/models
+  auto_discover_models: true
+  validate_model_files: true
+  persistent_cache_enabled: true
+  chunk_token_margin: 2
 ```
 
 This mode works without `qornix_rag/models/semantic_model.onnx` and `qornix_rag/models/tokenizer.json`.
@@ -103,6 +145,31 @@ embedding:
   enable_fallback: true
   lowercase_tokens: true
 ```
+
+Embedding keys:
+
+| Key | Meaning |
+|---|---|
+| `embedding.backend` | `tfidf` or `onnx`. |
+| `embedding.active_model_id` | Model id selected from `embedding.registry` or auto-discovered models. |
+| `embedding.model_id` | Explicit model id for non-registry configuration. |
+| `embedding.model_name` | Human-readable model name shown in diagnostics. |
+| `embedding.model_version` | Optional model version included in model signatures. |
+| `embedding.model_path` | ONNX model path. |
+| `embedding.tokenizer_path` | tokenizer JSON path. |
+| `embedding.tokenizer_type` | Tokenizer type, typically `WordPiece` or `basic_wordpiece`. |
+| `embedding.pooling` | `mean` or `cls`. |
+| `embedding.dimension` | Expected embedding dimension; `0` means discover when possible. |
+| `embedding.max_seq_len` | Maximum embedding input sequence length. |
+| `embedding.onnx_threads` | ONNX Runtime thread count. |
+| `embedding.models_dir` | Directory scanned when `auto_discover_models` is enabled. |
+| `embedding.auto_discover_models` | Discover local model manifests/files from `models_dir`. |
+| `embedding.validate_model_files` | Validate configured model/tokenizer paths during config loading. |
+| `embedding.persistent_cache_enabled` | Reuse persisted embeddings when model signatures match. |
+| `embedding.chunk_token_margin` | Safety margin subtracted from model token limits for chunking. |
+| `embedding.normalize_embeddings` | Normalize vectors before storage/search. |
+| `embedding.enable_fallback` | Fall back to TF-IDF if ONNX cannot be used. |
+| `embedding.lowercase_tokens` | Lowercase tokens during tokenizer processing. |
 
 For portable bundles, paths are rewritten to `models/semantic_model.onnx` and `models/tokenizer.json`.
 
@@ -161,6 +228,8 @@ vector_store:
   backend: local_hnsw
   index_path: "qornix_rag/data/hnsw_index.bin"
   metadata_path: "qornix_rag/data/hnsw_index.meta.json"
+  collection: qornix_rag_vectors
+  upsert_batch_size: 512
   auto_load: true
   auto_save: true
 ```
@@ -168,6 +237,24 @@ vector_store:
 When `index_path` is set, Qornix tries to load the local HNSW index before rebuilding it and saves the rebuilt index after successful indexing. The metadata sidecar validates backend, embedding model id, embedding dimension, vector count, and document/chunk snapshot hash before a saved index is reused.
 
 For generated `rag_app` or `--with-rag` projects, use app-relative paths such as `data/hnsw_index.bin`.
+
+Vector-store keys:
+
+| Key | Meaning |
+|---|---|
+| `vector_store.backend` | `local_hnsw`, `faiss`, `qdrant`, or `pgvector`. |
+| `vector_store.index_path` | Local index file path for `local_hnsw`/`faiss`. |
+| `vector_store.metadata_path` | Metadata sidecar for persisted local indexes. |
+| `vector_store.endpoint` | Qdrant endpoint URL. |
+| `vector_store.api_key` | Optional Qdrant API key. |
+| `vector_store.collection` | Qdrant collection name. |
+| `vector_store.connection_string` | PostgreSQL connection string for pgvector. |
+| `vector_store.table` | pgvector table name. |
+| `vector_store.distance` | Vector distance metric, for example `Cosine`. |
+| `vector_store.upsert_batch_size` | Batch size for external backend upserts. |
+| `vector_store.recreate` | Recreate the external collection/table when supported by tooling. |
+| `vector_store.auto_load` | Load a persisted local index before rebuilding. |
+| `vector_store.auto_save` | Save a local index after successful indexing. |
 
 Production-scale vector backends are selected through the same boundary:
 
@@ -243,11 +330,37 @@ search:
   rerank_path_boost: 0.15
   rerank_metadata_boost: 0.10
   rerank_exact_content_boost: 0.05
+  use_multi_query_retrieval: true
+  multi_query_max_variants: 4
+  use_embedding_reranker: true
+  rerank_embedding_boost: 0.20
+  rerank_coverage_boost: 0.08
 ```
 
 Query expansion is local and non-LLM-based. It adds normalized tokens, simple singular variants, identifier splits, and path-like stems. API responses expose `expanded_query` and `query_expansion_applied` so rewritten retrieval input is visible.
 
 Reranking applies after first-stage vector/Xapian retrieval. It boosts results with matching paths, chunk metadata, or exact content phrases, then returns the requested `top_k`.
+
+Search keys:
+
+| Key | Meaning |
+|---|---|
+| `search.use_hybrid` | Enable vector + lexical hybrid retrieval. If false, vector-store use is disabled. |
+| `search.vector_weight` | Weight for vector similarity in fused ranking. |
+| `search.text_weight` | Weight for lexical/Xapian score in fused ranking. |
+| `search.top_k` | Default retrieval result count when callers do not provide one. |
+| `search.min_score_threshold` | Minimum score for including a result. |
+| `search.use_query_expansion` | Enable local query expansion. |
+| `search.use_reranking` | Enable post-retrieval reranking. |
+| `search.rerank_input_multiplier` | First-stage candidate multiplier before reranking. |
+| `search.rerank_path_boost` | Boost for path matches. |
+| `search.rerank_metadata_boost` | Boost for metadata matches. |
+| `search.rerank_exact_content_boost` | Boost for exact content phrase matches. |
+| `search.use_multi_query_retrieval` | Run retrieval over deterministic query variants and union the results. |
+| `search.multi_query_max_variants` | Maximum number of query variants. |
+| `search.use_embedding_reranker` | Enable embedding-based reranking features. |
+| `search.rerank_embedding_boost` | Boost from embedding reranker similarity. |
+| `search.rerank_coverage_boost` | Boost for broader query-term coverage. |
 
 ### Xapian language-aware lexical retrieval
 
@@ -299,14 +412,13 @@ Standalone keeps route security disabled by default because it is intended for a
 Generated or integrated applications can enable a lightweight RAG route guard:
 
 ```yaml
-rag:
-  security:
-    enabled: true
-    mode: admin_token
-    admin_token_env: QORNIX_RAG_ADMIN_TOKEN
-    token_header: X-Qornix-RAG-Admin-Token
-    protect_admin_routes: true
-    protect_write_routes: true
+security:
+  enabled: true
+  mode: admin_token
+  admin_token_env: QORNIX_RAG_ADMIN_TOKEN
+  token_header: X-Qornix-RAG-Admin-Token
+  protect_admin_routes: true
+  protect_write_routes: true
 ```
 
 `mode: admin_token` accepts either `Authorization: Bearer <token>` or the configured token header. The token is read from `admin_token` first, then `admin_token_env`.
@@ -314,13 +426,28 @@ rag:
 `mode: host_header` is for applications or reverse proxies that already authenticate users and forward a role header:
 
 ```yaml
-rag:
-  security:
-    enabled: true
-    mode: host_header
-    role_header: X-Qornix-Role
-    admin_role: admin
+security:
+  enabled: true
+  mode: host_header
+  role_header: X-Qornix-Role
+  admin_role: admin
 ```
+
+Generated/integrated configs may use the same keys under `rag.security`.
+
+Security keys:
+
+| Key | Meaning |
+|---|---|
+| `security.enabled` | Enables the baseline route guard. |
+| `security.mode` | `admin_token` or `host_header`. |
+| `security.admin_token` | Inline admin token. Prefer `admin_token_env` for real deployments. |
+| `security.admin_token_env` | Environment variable used to read the admin token. |
+| `security.token_header` | Header accepted by `admin_token` mode. |
+| `security.role_header` | Header inspected by `host_header` mode. |
+| `security.admin_role` | Role value required for admin/write access in `host_header` mode. |
+| `security.protect_admin_routes` | Protect diagnostics/admin routes. |
+| `security.protect_write_routes` | Protect upload, ingest, QA write, delete, import, and similar write routes. |
 
 This guard is a baseline for RAG admin/write routes. It does not replace full application auth/RBAC, session management, TLS, or proxy hardening.
 
@@ -330,6 +457,7 @@ Default local Ollama-style config:
 
 ```yaml
 llm:
+  enabled: true
   api_url: "http://localhost:11434"
   api_key: ""
   model: "llama3"
@@ -337,6 +465,13 @@ llm:
   temperature: 0.7
   top_p: 0.9
   request_timeout_ms: 30000
+  system_prompt: |
+    You are a developer assistant.
+  prompt_template: |
+    Context:
+    {context}
+
+    Question: {question}
   stream: false
 ```
 
@@ -346,6 +481,23 @@ Diagnostics:
 - The UI shows a banner when the provider is unavailable or the configured model is missing.
 - For Ollama, run `ollama pull <model>` or change `llm.model` to an installed model.
 
+LLM keys:
+
+| Key | Meaning |
+|---|---|
+| `llm.enabled` | Enables LLM calls. If omitted, the parser enables LLM when `api_url`, `model`, or other LLM keys are present. |
+| `llm.api_url` | Provider base URL. Ollama uses `/api/chat`; OpenAI-compatible providers use `/v1/chat/completions`. |
+| `llm.api_key` | Optional provider API key. |
+| `llm.model` | Model name sent to the provider. |
+| `llm.max_tokens` | Maximum generated answer length. |
+| `llm.temperature` | Sampling temperature. |
+| `llm.top_p` | Nucleus sampling value. |
+| `llm.request_timeout_ms` | HTTP request timeout. |
+| `llm.system_prompt` | System prompt used by default Ask requests. |
+| `llm.prompt_template` | User prompt template. It should include `{question}` and may include `{context}`. |
+| `llm.stream` | Enables provider streaming for streaming Ask paths. |
+
+`LLMClient(config_path)` also has a direct YAML loader that can read `llm.failover.enabled` and `llm.failover.endpoints`. The standalone server and integrated extension currently construct `LLMClient` from the parsed `RagConfig` contract, so the sample standalone `config.yaml` does not expose failover endpoint lists as runtime settings.
 
 ## Metrics And Observability
 
@@ -403,6 +555,9 @@ rate_limit:
   max_requests_per_second: 10
   max_requests_per_minute: 100
   per_ip_limit: true
+  max_requests_per_second_per_ip: 2
+  max_requests_per_minute_per_ip: 30
+  whitelist: "127.0.0.1,192.168.1.100"
 ```
 
 `backend: memory` uses the in-process LRU cache. It is fastest and simplest for local use, but is cleared on restart and is not shared between app instances.
@@ -412,6 +567,58 @@ rate_limit:
 Standalone config uses top-level `cache`. Generated `rag_app` config uses the same keys under `rag.cache`.
 
 These settings apply to LLM requests in standalone mode and generated RAG apps.
+
+Cache keys:
+
+| Key | Meaning |
+|---|---|
+| `cache.enabled` | Enables LLM response caching. |
+| `cache.backend` | `memory` or `redis`. |
+| `cache.ttl_seconds` | Default answer cache TTL. |
+| `cache.max_size` | In-process LRU capacity for the memory backend. |
+| `cache.key_prefix` | Redis key namespace. |
+| `cache.redis.host` | Redis host. |
+| `cache.redis.port` | Redis port. |
+| `cache.redis.db` | Redis database number. |
+| `cache.redis.password` | Optional Redis password. |
+| `cache.redis.ttl_seconds` | Redis-specific TTL; defaults to `cache.ttl_seconds` when omitted. |
+
+Rate-limit keys:
+
+| Key | Meaning |
+|---|---|
+| `rate_limit.enabled` | Enables LLM request rate limiting. |
+| `rate_limit.max_requests_per_second` | Global per-second request limit. |
+| `rate_limit.max_requests_per_minute` | Global per-minute request limit. |
+| `rate_limit.per_ip_limit` | Enables per-IP limits in addition to global limits. |
+| `rate_limit.max_requests_per_second_per_ip` | Per-IP per-second limit. |
+| `rate_limit.max_requests_per_minute_per_ip` | Per-IP per-minute limit. |
+| `rate_limit.whitelist` | Comma-separated IP addresses that bypass rate limiting. |
+
+## Batch And Prompt Cache
+
+```yaml
+batch:
+  enabled: true
+  max_concurrent: 4
+  question_timeout_ms: 60000
+  batch_timeout_ms: 300000
+
+prompt_cache:
+  enabled: true
+  max_size: 500
+  ttl_seconds: 1800
+```
+
+`batch.max_concurrent`, `batch.question_timeout_ms`, and `batch.batch_timeout_ms` configure `/api/batch` processing. The current runtime always wires the batch processor when the RAG API is created; `batch.enabled` is retained in the sample config for compatibility and readability but is not currently used as a route switch.
+
+Prompt cache keys:
+
+| Key | Meaning |
+|---|---|
+| `prompt_cache.enabled` | Enables in-process prompt/search-result caching. |
+| `prompt_cache.max_size` | Maximum cached prompt entries. |
+| `prompt_cache.ttl_seconds` | Prompt cache TTL. |
 
 ## Persistent QA And Markdown
 
@@ -428,6 +635,15 @@ rag:
     enabled: true
     directory_path: "qornix_rag/knowledge_base"
     recursive: true
+
+  analytics:
+    max_log_entries: 100000
+    top_n: 20
+    gap_min_search_count: 3
+
+  dedup:
+    similarity_threshold: 0.85
+    auto_remove: false
 ```
 
 SQLite QA pairs store `category`, `aliases`, string `metadata`, and optional `tags` metadata. QA list/export APIs can filter by `query`, `category`, and `tag`; Ask/Search include QA attribution metadata when available. Stored answers are returned both as Markdown text and as a small rendered `answer_html` field for UI display.
@@ -438,6 +654,34 @@ Portable config rewrites these to:
 db_path: "data/rag_kb.db"
 directory_path: "knowledge_base"
 ```
+
+Persistent QA/Markdown keys:
+
+| Key | Meaning |
+|---|---|
+| `rag.sqlite.enabled` | Enables SQLite-backed QA/wiki storage. |
+| `rag.sqlite.db_path` | SQLite database path. |
+| `rag.sqlite.source_id` | Source id assigned to SQLite QA/wiki documents. |
+| `rag.sqlite.name` | Human-readable source name. |
+| `rag.sqlite.auto_migrate` | Creates/updates the SQLite schema on startup. |
+| `rag.markdown.enabled` | Enables Markdown import endpoints/source configuration. |
+| `rag.markdown.directory_path` | Local Markdown knowledge-base directory. |
+| `rag.markdown.recursive` | Recursively import Markdown files from `directory_path`. |
+
+Analytics keys:
+
+| Key | Meaning |
+|---|---|
+| `rag.analytics.max_log_entries` | Maximum in-memory query/feedback log entries. |
+| `rag.analytics.top_n` | Number of top queries shown in reports. |
+| `rag.analytics.gap_min_search_count` | Minimum failed/missing searches before a gap is reported. |
+
+Deduplication keys:
+
+| Key | Meaning |
+|---|---|
+| `rag.dedup.similarity_threshold` | Similarity threshold for duplicate QA detection. |
+| `rag.dedup.auto_remove` | Automatically remove duplicates when a dedup endpoint requests removal. |
 
 ## Runtime Environment
 
@@ -545,6 +789,7 @@ upload:
   async_ingest: false
   overwrite_existing: false
   allowed_extensions: ".txt,.md,.rst,.adoc,.json,.yaml,.yml,.xml,.html,.htm,.csv,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
+  allowed_mime_types: "text/plain,text/markdown,text/csv,text/html,application/json,application/xml,application/pdf,image/png,image/jpeg"
 ```
 
 Generated `rag_app` uses the same keys under `rag.upload` and app-relative paths:
@@ -556,6 +801,20 @@ rag:
 ```
 
 Upload is intentionally allowlist-based. Do not add executables, archives, scripts or arbitrary binary formats unless a separate scanning/sandboxing step is added.
+
+Upload keys:
+
+| Key | Meaning |
+|---|---|
+| `upload.enabled` | Enables upload endpoints. |
+| `upload.uploads_dir` | Directory where uploaded files are stored. |
+| `upload.max_file_size_kb` | Maximum size per uploaded file. |
+| `upload.max_files_per_request` | Maximum multipart files accepted in one request. |
+| `upload.auto_ingest` | Ingest uploaded files after storing them. |
+| `upload.async_ingest` | Queue ingestion in the background when supported by the endpoint. |
+| `upload.overwrite_existing` | Allow uploaded files to replace existing files with the same normalized path. |
+| `upload.allowed_extensions` | Comma-separated extension allowlist. |
+| `upload.allowed_mime_types` | Comma-separated MIME allowlist. |
 
 ## Dependency-to-Feature Matrix
 
