@@ -17,13 +17,13 @@ install_if_available() {
     fi
 }
 
-echo "📦 Установка зависимостей для Qornix RAG..."
+echo "📦 Installing dependencies for Qornix RAG..."
 echo "============================================"
 echo ""
 
 sudo apt-get update
 
-echo "📋 Установка основных build/runtime зависимостей..."
+echo "📋 Installing main build/runtime dependencies..."
 sudo apt-get install -y \
     build-essential \
     cmake \
@@ -49,13 +49,13 @@ sudo apt-get install -y \
     poppler-utils \
     tesseract-ocr
 
-echo "📋 Установка опциональных dev-зависимостей, если они есть в репозиториях..."
+echo "📋 Installing optional development dependencies when available in repositories..."
 install_if_available libpq-dev
 install_if_available postgresql-client
 install_if_available libfaiss-dev
 install_if_available redis-server
 
-echo "🔨 Установка HNSWLIB..."
+echo "🔨 Installing HNSWLIB..."
 WORK_DIR="${SCRIPT_DIR}/.deps"
 mkdir -p "$WORK_DIR"
 if [ ! -d "$WORK_DIR/hnswlib" ]; then
@@ -66,15 +66,15 @@ cmake --build "$WORK_DIR/hnswlib/build" -j"$(nproc)"
 sudo cmake --install "$WORK_DIR/hnswlib/build"
 
 echo ""
-echo "✅ Базовые зависимости установлены."
+echo "✅ Base dependencies installed."
 echo ""
-echo "Следующие компоненты устанавливаются отдельно при необходимости:"
-echo "  - ONNX Runtime C++ SDK для semantic embeddings"
-echo "  - Redis server для cache.backend=redis (depend_install.sh установит пакет, если он есть в apt)"
-echo "  - Qdrant service для vector_store.backend=qdrant"
-echo "  - PostgreSQL + pgvector для vector_store.backend=pgvector"
+echo "The following components are installed separately when needed:"
+echo "  - ONNX Runtime C++ SDK for semantic embeddings"
+echo "  - Redis server for cache.backend=redis (depend_install.sh installs the package if apt provides it)"
+echo "  - Qdrant service for vector_store.backend=qdrant"
+echo "  - PostgreSQL + pgvector for vector_store.backend=pgvector"
 echo "  - Ollama/LM Studio/vLLM/OpenAI-compatible LLM provider"
 echo ""
-echo "Подробности: qornix_rag/doc/FULL_RAG_GUIDE.md"
-echo "Теперь можно запустить:"
+echo "Details: qornix_rag/doc/FULL_RAG_GUIDE.md"
+echo "You can now run:"
 echo "  ./qornix_rag/run.sh"

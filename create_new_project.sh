@@ -328,10 +328,10 @@ rag:
     temperature: 0.2
     max_tokens: 2048
     prompt_template: |
-      Контекст:
+      Context:
       {context}
 
-      Вопрос: {question}
+      Question: {question}
 
   embedding:
     backend: tfidf
