@@ -45,22 +45,22 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 
-echo "🔍 Qornix RAG - Быстрый старт"
+echo "🔍 Qornix RAG - Quick Start"
 echo "=============================="
 echo ""
 
 # Check dependencies
-echo "📋 Проверка зависимостей..."
+echo "📋 Checking dependencies..."
 
 if ! command -v cmake >/dev/null 2>&1; then
-    echo "❌ CMake не найден!"
-    echo "Установите: sudo apt-get install cmake"
+    echo "❌ CMake was not found!"
+    echo "Install it with: sudo apt-get install cmake"
     exit 1
 fi
 
 if ! command -v g++ >/dev/null 2>&1; then
-    echo "❌ G++ не найден!"
-    echo "Установите: sudo apt-get install g++"
+    echo "❌ G++ was not found!"
+    echo "Install it with: sudo apt-get install g++"
     exit 1
 fi
 
@@ -70,7 +70,7 @@ else
     BUILD_JOBS="2"
 fi
 
-echo "✅ Зависимости найдены"
+echo "✅ Dependencies found"
 echo ""
 
 # Prepare local standalone directories. They are intentionally kept outside the
@@ -78,13 +78,13 @@ echo ""
 mkdir -p "${QORNIX_RAG_HOME}/data" "${QORNIX_RAG_HOME}/data/uploads" "${QORNIX_RAG_HOME}/logs" "${QORNIX_RAG_HOME}/knowledge_base"
 
 # Build
-echo "🔨 Сборка проекта..."
+echo "🔨 Building project..."
 echo "   Repository: ${REPO_ROOT}"
 echo "   Build dir:  ${BUILD_DIR}"
 cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" -DQORNIX_BUILD_RAG=ON
 cmake --build "${BUILD_DIR}" --target qornix_rag --parallel "${BUILD_JOBS}"
 
-echo "✅ Сборка завершена"
+echo "✅ Build complete"
 echo ""
 
 # Resolve the standalone executable. With the repository root as the CMake
@@ -108,7 +108,7 @@ if [[ -z "${QORNIX_RAG_EXECUTABLE}" ]]; then
 fi
 
 if [[ -z "${QORNIX_RAG_EXECUTABLE}" ]]; then
-    echo "❌ Не найден исполняемый файл qornix_rag после сборки."
+    echo "❌ qornix_rag executable was not found after the build."
     echo "   Build dir: ${BUILD_DIR}"
     echo "   Expected one of:"
     for candidate in "${EXECUTABLE_CANDIDATES[@]}"; do
@@ -119,8 +119,8 @@ fi
 
 # Run
 if [[ ! -f "${QORNIX_RAG_TEMPLATES_DIR}/rag_interface.html" ]]; then
-    echo "❌ Не найден шаблон web UI: ${QORNIX_RAG_TEMPLATES_DIR}/rag_interface.html"
-    echo "   Проверьте QORNIX_RAG_TEMPLATES_DIR или целостность qornix_rag/templates."
+    echo "❌ Web UI template was not found: ${QORNIX_RAG_TEMPLATES_DIR}/rag_interface.html"
+    echo "   Check QORNIX_RAG_TEMPLATES_DIR or the integrity of qornix_rag/templates."
     exit 1
 fi
 
@@ -128,7 +128,7 @@ export QORNIX_RAG_HOME
 export QORNIX_RAG_TEMPLATES_DIR
 
 # Run
-echo "🚀 Запуск сервера..."
+echo "🚀 Starting server..."
 echo "   Binary: ${QORNIX_RAG_EXECUTABLE}"
 echo "   Config: ${CONFIG_PATH}"
 echo "   Templates: ${QORNIX_RAG_TEMPLATES_DIR}"

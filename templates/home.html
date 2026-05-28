@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -21,47 +21,47 @@
 <div class="container">
     <h1>🦅 Qornix Web Server</h1>
     <p>QORNIX - Query Object Routing Network Integration eXperience</p>
-    <p>Добро пожаловать в расширяемый веб-сервер на C++! Этот сервер построен на архитектуре, которая позволяет легко добавлять новую функциональность.</p>
-    <p>Сервер построен на технологии Boost.Beast и поддерживает современные веб-стандарты.</p>
+    <p>Welcome to an extensible C++ web server. This server uses an architecture that makes it easy to add new functionality.</p>
+    <p>The server is built on Boost.Beast and supports modern web standards.</p>
 
     <div class="features">
         <div class="feature">
-            <h3>🔌 Расширяемость</h3>
-            <p>Добавляйте новые маршруты и функциональность через динамически загружаемые расширения</p>
+            <h3>🔌 Extensibility</h3>
+            <p>Add new routes and functionality through dynamically loaded extensions.</p>
         </div>
         <div class="feature">
             <h3>🔄 Dependency Injection</h3>
-            <p>Управление зависимостями через контейнер с поддержкой различных сроков жизни объектов</p>
+            <p>Manage dependencies through a container with support for different object lifetimes.</p>
         </div>
         <div class="feature">
             <h3>🧩 Middleware</h3>
-            <p>Цепочка middleware для логирования, аутентификации и других задач</p>
+            <p>Use a middleware chain for logging, authentication and other cross-cutting tasks.</p>
         </div>
         <div class="feature">
-            <h3>⚡ Асинхронность</h3>
-            <p>Многопоточная обработка запросов для высокой производительности</p>
+            <h3>⚡ Async Processing</h3>
+            <p>Handle requests across multiple threads for high performance.</p>
         </div>
     </div>
 
     <div class="routes">
-        <h3>🧭 Доступные маршруты:</h3>
+        <h3>🧭 Available Routes:</h3>
         <ul>
-            <li><code>/</code> - эта страница</li>
-            <li><code>GET /health</code> - <a href="/health" class="btn">Проверить состояние сервера</a></li>
-            <li><code>GET /info</code> - <a href="/info" class="btn">Информация о сервере</a></li>
-            <li><code>GET /notfound</code> - <a href="/notfound" class="btn">Страница 404</a></li>
-            <li><code>/users</code> - управление пользователями</li>
-            <li><code>/users/{id}</code> - <a href="/users/1" class="btn">доступ к конкретному пользователю</a></li>
-            <li><code>/api/v1/users</code> - API для работы с пользователями</li>
-            <li><code>/api/v1/users/{id}</code> - API для работы с конкретным пользователем</li>
+            <li><code>/</code> - this page</li>
+            <li><code>GET /health</code> - <a href="/health" class="btn">Check server health</a></li>
+            <li><code>GET /info</code> - <a href="/info" class="btn">Server information</a></li>
+            <li><code>GET /notfound</code> - <a href="/notfound" class="btn">404 page</a></li>
+            <li><code>/users</code> - user management</li>
+            <li><code>/users/{id}</code> - <a href="/users/1" class="btn">access a specific user</a></li>
+            <li><code>/api/v1/users</code> - API for users</li>
+            <li><code>/api/v1/users/{id}</code> - API for a specific user</li>
         </ul>
     </div>
 
     <div style="margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
-        <h3>🛠️ Для разработчиков:</h3>
-        <p>Создавайте свои расширения в папке <code>route_extensions/</code></p>
-        <p>Используйте <code>BaseHandler</code> как основу для своих обработчиков</p>
-        <p>Регистрируйте сервисы через <code>DIContainer</code></p>
+        <h3>🛠️ For Developers:</h3>
+        <p>Create your extensions in the <code>route_extensions/</code> directory.</p>
+        <p>Use <code>BaseHandler</code> as the base for your handlers.</p>
+        <p>Register services through <code>DIContainer</code>.</p>
     </div>
 </div>
 </body>

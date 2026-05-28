@@ -325,7 +325,7 @@
     <main class="shell">
         <section class="hero">
             <h1>Qornix RAG Local Wiki</h1>
-            <p>Локальный standalone-интерфейс для вопросов к проекту и базе знаний. Основной сценарий — Ask с LLM-ответом и источниками; поиск, QA и состояние системы доступны во вкладках.</p>
+            <p>Local standalone interface for questions about the project and knowledge base. The primary workflow is Ask with an LLM answer and sources; search, QA, and system status are available in the tabs.</p>
             <div class="toolbar">
                 <span class="pill" id="hero-llm">LLM: checking...</span>
                 <span class="pill" id="hero-index">Index: checking...</span>
@@ -349,18 +349,18 @@
             <div class="grid">
                 <div class="card">
                     <h2>Ask with LLM</h2>
-                    <p class="muted">Задайте вопрос. Система найдёт локальный контекст и передаст его в LLM.</p>
+                    <p class="muted">Ask a question. The system will retrieve local context and send it to the LLM.</p>
                     <div id="ask-llm-diagnostic" style="margin-top: 12px;"></div>
-                    <label for="ask-input">Вопрос</label>
-                    <textarea id="ask-input" placeholder="Например: Как запускается standalone qornix_rag и какие endpoints доступны?"></textarea>
+                    <label for="ask-input">Question</label>
+                    <textarea id="ask-input" placeholder="Example: How does standalone qornix_rag start, and which endpoints are available?"></textarea>
                     <div class="row" style="margin-top: 10px;">
                         <div class="small">
                             <label for="ask-top-k">Top K</label>
                             <input id="ask-top-k" type="number" min="1" max="20" value="5">
                         </div>
                         <div style="align-self: end;">
-                            <button class="btn" id="ask-btn" onclick="askQuestion()">Получить ответ</button>
-                            <button class="btn secondary" onclick="clearAsk()">Очистить</button>
+                            <button class="btn" id="ask-btn" onclick="askQuestion()">Get answer</button>
+                            <button class="btn secondary" onclick="clearAsk()">Clear</button>
                         </div>
                     </div>
                     <h3>Prompt template</h3>
@@ -382,12 +382,12 @@
                     <textarea id="prompt-template-input" class="prompt-textarea"></textarea>
                     <p class="muted">Use <code>{context}</code> and <code>{question}</code> placeholders.</p>
                     <div class="status-line" id="ask-status"></div>
-                    <div id="answer-box" class="answer">Ответ появится здесь.</div>
+                    <div id="answer-box" class="answer">The answer will appear here.</div>
                 </div>
                 <aside class="card">
                     <h2>Sources</h2>
-                    <p class="muted">Фрагменты, которые были переданы в prompt как контекст.</p>
-                    <div id="ask-sources" class="list"><div class="notice">Пока нет источников.</div></div>
+                    <p class="muted">Chunks passed to the prompt as context.</p>
+                    <div id="ask-sources" class="list"><div class="notice">No sources yet.</div></div>
                 </aside>
             </div>
         </section>
@@ -395,21 +395,21 @@
         <section id="tab-search" class="tab-panel">
             <div class="card">
                 <h2>Search</h2>
-                <p class="muted">Поиск по текущему индексу без генерации ответа.</p>
+                <p class="muted">Search the current index without generating an answer.</p>
                 <div class="row">
                     <div>
-                        <label for="search-input">Запрос</label>
-                        <input id="search-input" placeholder="Например: LLMClient health_check">
+                        <label for="search-input">Query</label>
+                        <input id="search-input" placeholder="Example: LLMClient health_check">
                     </div>
                     <div class="small">
                         <label for="search-top-k">Top K</label>
                         <input id="search-top-k" type="number" min="1" max="30" value="10">
                     </div>
                     <div style="align-self: end; flex: 0 0 auto;">
-                        <button class="btn" id="search-btn" onclick="performSearch()">Найти</button>
+                        <button class="btn" id="search-btn" onclick="performSearch()">Search</button>
                     </div>
                 </div>
-                <div id="search-results" class="list"><div class="notice">Введите запрос для поиска.</div></div>
+                <div id="search-results" class="list"><div class="notice">Enter a search query.</div></div>
             </div>
         </section>
 
@@ -417,7 +417,7 @@
             <div class="grid">
                 <div class="card">
                     <h2>Upload documents</h2>
-                    <p class="muted">Загрузите документы в контролируемую папку uploads. После ingestion они попадут в тот же hybrid index и будут доступны в Search/Ask.</p>
+                    <p class="muted">Upload documents into the controlled uploads directory. After ingestion, they are added to the same hybrid index and become available in Search and Ask.</p>
                     <label for="upload-files">Files</label>
                     <input id="upload-files" type="file" multiple accept=".txt,.md,.rst,.adoc,.json,.yaml,.yml,.xml,.html,.htm,.csv,.pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp">
                     <label class="check-row"><input id="upload-async" type="checkbox"> Run ingestion in background</label>
@@ -429,8 +429,8 @@
                 </div>
                 <aside class="card">
                     <h2>Uploaded files</h2>
-                    <p class="muted">Последняя загрузка. Удаление ограничено configured uploads_dir и после удаления запускает reindex.</p>
-                    <div id="upload-output" class="list"><div class="notice">Файлы ещё не загружались.</div></div>
+                    <p class="muted">Latest uploads. Deletion is limited to the configured uploads_dir and triggers reindexing after removal.</p>
+                    <div id="upload-output" class="list"><div class="notice">No files have been uploaded yet.</div></div>
                 </aside>
             </div>
         </section>
@@ -439,20 +439,20 @@
             <div class="grid qa-grid">
                 <div class="card">
                     <h2>Add QA pair</h2>
-                    <p class="muted">Локальная база знаний для wiki-сценариев. В standalone она хранится в локальной SQLite-базе, если SQLite включён в конфиге.</p>
+                    <p class="muted">Local knowledge base for wiki workflows. In standalone mode, it is stored in a local SQLite database when SQLite is enabled in the configuration.</p>
                     <label for="qa-question">Question</label>
-                    <input id="qa-question" placeholder="Например: Какой порт по умолчанию у qornix_rag standalone?">
+                    <input id="qa-question" placeholder="Example: What is the default port for standalone qornix_rag?">
                     <label for="qa-answer">Answer</label>
-                    <textarea id="qa-answer" placeholder="Например: По умолчанию 8081, но можно передать --port 8082."></textarea>
+                    <textarea id="qa-answer" placeholder="Example: The default is 8081, but you can pass --port 8082."></textarea>
                     <label for="qa-category">Category</label>
                     <input id="qa-category" value="general">
                     <label for="qa-tags">Tags</label>
                     <input id="qa-tags" list="qa-tag-suggestions" placeholder="docs, operations, local">
                     <datalist id="qa-tag-suggestions"></datalist>
                     <div style="margin-top: 12px;">
-                        <button class="btn" id="qa-add-btn" onclick="addQAPair()">Добавить QA</button>
-                        <button class="btn secondary hidden" id="qa-cancel-btn" onclick="cancelQAEdit()">Отменить правку</button>
-                        <button class="btn secondary" onclick="loadQAPairs()">Обновить список</button>
+                        <button class="btn" id="qa-add-btn" onclick="addQAPair()">Add QA</button>
+                        <button class="btn secondary hidden" id="qa-cancel-btn" onclick="cancelQAEdit()">Cancel edit</button>
+                        <button class="btn secondary" onclick="loadQAPairs()">Refresh list</button>
                     </div>
                     <h3>Import / export</h3>
                     <div class="file-row">
@@ -470,11 +470,11 @@
                 </div>
                 <aside class="card">
                     <h2>QA pairs</h2>
-                    <p class="muted">Поиск, категории и страницы загружаются с сервера, поэтому список остаётся быстрым на больших QA-базах.</p>
+                    <p class="muted">Search, categories, and pages are loaded from the server, so the list remains fast for large QA bases.</p>
                     <div class="qa-list-tools">
                         <div>
                             <label for="qa-filter">Search QA</label>
-                            <input id="qa-filter" list="qa-suggestions" placeholder="Вопрос, ответ, категория или id">
+                            <input id="qa-filter" list="qa-suggestions" placeholder="Question, answer, category, or id">
                             <datalist id="qa-suggestions"></datalist>
                         </div>
                         <div>
@@ -499,11 +499,11 @@
                             </select>
                         </div>
                         <div>
-                            <button class="btn secondary" onclick="resetQAFilter()">Сбросить</button>
+                            <button class="btn secondary" onclick="resetQAFilter()">Reset</button>
                         </div>
                     </div>
-                    <div id="qa-list-summary" class="muted qa-summary">Список ещё не загружен.</div>
-                    <div id="qa-list" class="qa-table-wrap"><div class="notice">Список ещё не загружен.</div></div>
+                    <div id="qa-list-summary" class="muted qa-summary">The list has not been loaded yet.</div>
+                    <div id="qa-list" class="qa-table-wrap"><div class="notice">The list has not been loaded yet.</div></div>
                     <div id="qa-pagination" class="qa-pagination hidden"></div>
                 </aside>
             </div>
@@ -513,7 +513,7 @@
             <div class="grid">
                 <div class="card">
                     <h2>Health</h2>
-                    <div id="health-box" class="list"><div class="notice">Загрузка...</div></div>
+                    <div id="health-box" class="list"><div class="notice">Loading...</div></div>
                     <h3>Index stats</h3>
                     <div class="stats-grid">
                         <div class="stat"><strong id="total-files">-</strong><span>Files</span></div>
@@ -526,7 +526,7 @@
                             <label for="scan-path-input">Scan path</label>
                             <input id="scan-path-input" autocomplete="off" placeholder="/path/to/project or knowledge_base">
                         </div>
-                        <button class="btn" id="reindex-btn" onclick="reindexProject()">Переиндексировать путь</button>
+                        <button class="btn" id="reindex-btn" onclick="reindexProject()">Reindex path</button>
                     </div>
                     <h3>Embedding models</h3>
                     <div id="embedding-model-box" class="notice">Loading model registry...</div>
@@ -542,7 +542,7 @@
                 </div>
                 <aside class="card">
                     <h2>Data sources</h2>
-                    <div id="sources-list" class="list"><div class="notice">Загрузка...</div></div>
+                    <div id="sources-list" class="list"><div class="notice">Loading...</div></div>
                 </aside>
             </div>
         </section>
@@ -619,12 +619,12 @@
         const ADMIN_TOKEN_STORAGE_KEY = 'qornix-rag-admin-token';
         const PROMPT_TEMPLATES_STORAGE_KEY = 'qornix-rag-prompt-templates';
         const PROMPT_ACTIVE_STORAGE_KEY = 'qornix-rag-active-prompt-template';
-        const DEFAULT_SYSTEM_PROMPT = `Ты — помощник разработчика, который отвечает на вопросы по локальной базе знаний.
-Отвечай кратко и по делу. Если контекста недостаточно, скажи об этом.`;
-        const DEFAULT_USER_PROMPT_TEMPLATE = `Контекст:
+        const DEFAULT_SYSTEM_PROMPT = `You are a developer assistant that answers questions using the local knowledge base.
+Answer concisely and directly. If the context is insufficient, say so.`;
+        const DEFAULT_USER_PROMPT_TEMPLATE = `Context:
 {context}
 
-Вопрос: {question}`;
+Question: {question}`;
 
         window.addEventListener('load', async () => {
             setupTabs();
@@ -743,11 +743,11 @@
             const systemPrompt = document.getElementById('system-prompt-input').value.trim();
             const promptTemplate = document.getElementById('prompt-template-input').value.trim();
             if (!name) {
-                showAskStatus('Введите имя prompt template.', 'warn');
+                showAskStatus('Enter a prompt template name.', 'warn');
                 return;
             }
             if (!promptTemplate.includes('{question}')) {
-                showAskStatus('Prompt template должен содержать {question}.', 'warn');
+                showAskStatus('Prompt template must contain {question}.', 'warn');
                 return;
             }
             const templates = getPromptTemplates().filter((template) => template.name !== name);
@@ -924,9 +924,9 @@ Available models: ${escapeHtml(modelsText)}</div>
                 const diagnostic = {
                     severity: 'error',
                     heroText: 'LLM: status error',
-                    title: 'Не удалось проверить состояние LLM',
-                    summary: 'Интерфейс не смог получить данные /api/health. Проверьте, что qornix_rag запущен и обновите страницу.',
-                    actions: ['Перезапустите qornix_rag.', 'Откройте /api/health в браузере для быстрой проверки.']
+                    title: 'Could not check LLM status',
+                    summary: 'The interface could not load /api/health. Check that qornix_rag is running and refresh the page.',
+                    actions: ['Restart qornix_rag.', 'Open /api/health in the browser for a quick check.']
                 };
                 currentLlmDiagnostic = diagnostic;
                 renderGlobalLlmDiagnostic(diagnostic);
@@ -948,25 +948,25 @@ Available models: ${escapeHtml(modelsText)}</div>
                 return {
                     severity: 'ok',
                     heroText: `LLM: ready (${configuredModel || provider})`,
-                    title: 'LLM подключена и готова отвечать',
-                    summary: `Сейчас используется ${providerLabel(provider)}. В настройке указана модель ${quoteOrDash(configuredModel)}, и она найдена среди доступных моделей.`,
-                    actions: [`Доступные модели: ${formatAvailableModels(availableModels)}.`],
+                    title: 'LLM is connected and ready',
+                    summary: `${providerLabel(provider)} is currently used. The configured model is ${quoteOrDash(configuredModel)} and it was found among the available models.`,
+                    actions: [`Available models: ${formatAvailableModels(availableModels)}.`],
                     provider, configuredModel, availableModels, apiUrl, status, recommendedModel
                 };
             }
 
             if (providerAvailable && !configuredAvailable && availableModels.length > 0) {
-                const replacementLine = recommendedModel ? `model: "${recommendedModel}"` : 'model: "<имя доступной модели>"';
-                const pullLine = configuredModel ? `ollama pull ${configuredModel}` : 'ollama pull <имя модели>';
+                const replacementLine = recommendedModel ? `model: "${recommendedModel}"` : 'model: "<available model name>"';
+                const pullLine = configuredModel ? `ollama pull ${configuredModel}` : 'ollama pull <model name>';
                 return {
                     severity: 'warn',
                     heroText: 'LLM: model missing',
-                    title: 'Модель из настроек не найдена',
-                    summary: `Сервер ${providerLabel(provider)} отвечает, но в настройке указана модель ${quoteOrDash(configuredModel)}, а среди доступных моделей её нет. Доступные модели: ${formatAvailableModels(availableModels)}.`,
+                    title: 'Configured model was not found',
+                    summary: `${providerLabel(provider)} responds, but the configured model is ${quoteOrDash(configuredModel)} and it is not in the available model list. Available models: ${formatAvailableModels(availableModels)}.`,
                     actions: [
-                        `Самый простой вариант: открыть qornix_rag/config.yaml и заменить llm.model на ${replacementLine}.`,
-                        provider === 'ollama' ? `Или установить нужную модель командой: ${pullLine}.` : 'Или установить/подключить модель с именем из конфигурации.',
-                        'После изменения config.yaml перезапустите qornix_rag.'
+                        `The simplest option is to open qornix_rag/config.yaml and replace llm.model with ${replacementLine}.`,
+                        provider === 'ollama' ? `Or install the required model with: ${pullLine}.` : 'Or install/connect a model with the configured name.',
+                        'Restart qornix_rag after changing config.yaml.'
                     ],
                     provider, configuredModel, availableModels, apiUrl, status, recommendedModel
                 };
@@ -976,11 +976,11 @@ Available models: ${escapeHtml(modelsText)}</div>
                 return {
                     severity: 'warn',
                     heroText: 'LLM: no models reported',
-                    title: 'LLM подключена, но список моделей пустой',
-                    summary: `Сервер ${providerLabel(provider)} отвечает, но не сообщил ни одной доступной модели. В настройке указана модель ${quoteOrDash(configuredModel)}.`,
+                    title: 'LLM is connected, but the model list is empty',
+                    summary: `${providerLabel(provider)} responds, but did not report any available models. The configured model is ${quoteOrDash(configuredModel)}.`,
                     actions: [
-                        provider === 'ollama' ? `Установите модель: ollama pull ${configuredModel || 'llama3'}.` : 'Проверьте настройки provider и доступные модели на стороне LLM сервера.',
-                        'После установки модели обновите страницу или перезапустите qornix_rag.'
+                        provider === 'ollama' ? `Install a model: ollama pull ${configuredModel || 'llama3'}.` : 'Check provider settings and available models on the LLM server.',
+                        'After installing the model, refresh the page or restart qornix_rag.'
                     ],
                     provider, configuredModel, availableModels, apiUrl, status, recommendedModel
                 };
@@ -989,8 +989,8 @@ Available models: ${escapeHtml(modelsText)}</div>
             return {
                 severity: 'error',
                 heroText: 'LLM: unavailable',
-                title: 'LLM не подключена или недоступна',
-                summary: `Qornix RAG запущен, но LLM provider сейчас недоступен. Вопросы могут работать только как поиск по локальному контексту без полноценной генерации ответа.`,
+                title: 'LLM is not connected or unavailable',
+                summary: `Qornix RAG is running, but the LLM provider is currently unavailable. Questions may only work as local-context search without full answer generation.`,
                 actions: buildUnavailableActions(provider, apiUrl, configuredModel),
                 provider, configuredModel, availableModels, apiUrl, status, recommendedModel
             };
@@ -999,16 +999,16 @@ Available models: ${escapeHtml(modelsText)}</div>
         function buildUnavailableActions(provider, apiUrl, configuredModel) {
             if (provider === 'ollama' || (apiUrl && apiUrl.includes('11434'))) {
                 return [
-                    'Запустите Ollama на локальном компьютере.',
-                    `Проверьте адрес LLM API: ${apiUrl || 'http://localhost:11434'}.`,
-                    `Убедитесь, что модель установлена: ollama pull ${configuredModel || 'llama3'}.`,
-                    'После запуска Ollama обновите страницу.'
+                    'Start Ollama on the local machine.',
+                    `Check the LLM API address: ${apiUrl || 'http://localhost:11434'}.`,
+                    `Make sure the model is installed: ollama pull ${configuredModel || 'llama3'}.`,
+                    'Refresh the page after starting Ollama.'
                 ];
             }
             return [
-                'Проверьте LLM API URL в qornix_rag/config.yaml.',
-                'Проверьте API key или параметры подключения, если provider требует авторизацию.',
-                'После исправления настроек перезапустите qornix_rag или обновите страницу.'
+                'Check the LLM API URL in qornix_rag/config.yaml.',
+                'Check the API key or connection parameters if the provider requires authentication.',
+                'After fixing the settings, restart qornix_rag or refresh the page.'
             ];
         }
 
@@ -1024,11 +1024,11 @@ Available models: ${escapeHtml(modelsText)}</div>
             box.className = `system-alert dismissible ${diagnostic.severity || 'warn'}`;
             box.dataset.dismissKey = dismissKey;
             box.innerHTML = `
-                <button class="dismiss-btn" type="button" aria-label="Скрыть сообщение" onclick="dismissDiagnosticById('global-llm-diagnostic')">×</button>
+                <button class="dismiss-btn" type="button" aria-label="Dismiss message" onclick="dismissDiagnosticById('global-llm-diagnostic')">×</button>
                 <strong>${escapeHtml(diagnostic.title)}</strong>
                 <p>${escapeHtml(diagnostic.summary)}</p>
                 ${renderDiagnosticActions(diagnostic.actions, 2)}
-                <div class="diagnostic-footer">Это сообщение можно скрыть. Оно появится снова, если изменится состояние LLM или список моделей.</div>
+                <div class="diagnostic-footer">This message can be dismissed. It will appear again if the LLM status or model list changes.</div>
             `;
             box.classList.remove('hidden');
         }
@@ -1046,14 +1046,14 @@ Available models: ${escapeHtml(modelsText)}</div>
             if (diagnostic.severity === 'ok') {
                 box.innerHTML = `
                     <div class="notice ok dismissible" data-dismiss-key="${escapeAttr(dismissKey)}">
-                        <button class="dismiss-btn" type="button" aria-label="Скрыть сообщение" onclick="dismissInlineDiagnostic(this)">×</button>
+                        <button class="dismiss-btn" type="button" aria-label="Dismiss message" onclick="dismissInlineDiagnostic(this)">×</button>
                         ${escapeHtml(diagnostic.summary)}
                     </div>`;
                 return;
             }
             box.innerHTML = `
                 <div class="notice ${diagnostic.severity || 'warn'} dismissible" data-dismiss-key="${escapeAttr(dismissKey)}">
-                    <button class="dismiss-btn" type="button" aria-label="Скрыть сообщение" onclick="dismissInlineDiagnostic(this)">×</button>
+                    <button class="dismiss-btn" type="button" aria-label="Dismiss message" onclick="dismissInlineDiagnostic(this)">×</button>
                     <strong>${escapeHtml(diagnostic.title)}</strong><br>
                     ${escapeHtml(diagnostic.summary)}
                     ${renderDiagnosticActions(diagnostic.actions, 3)}
@@ -1131,12 +1131,12 @@ Available models: ${escapeHtml(modelsText)}</div>
         }
 
         function quoteOrDash(value) {
-            return value ? `"${value}"` : 'не указана';
+            return value ? `"${value}"` : 'not configured';
         }
 
         function formatAvailableModels(models) {
             const list = Array.isArray(models) ? models.filter(Boolean) : [];
-            return list.length ? list.join(', ') : 'нет данных';
+            return list.length ? list.join(', ') : 'no data';
         }
 
         async function loadSources() {
@@ -1145,7 +1145,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 const data = await api('/api/sources');
                 const sources = data.sources || [];
                 if (!sources.length) {
-                    container.innerHTML = renderNotice('Источники данных пока не зарегистрированы.');
+                    container.innerHTML = renderNotice('No data sources are registered yet.');
                     return;
                 }
                 container.innerHTML = sources.map((source) => `
@@ -1248,21 +1248,21 @@ Available models: ${escapeHtml(modelsText)}</div>
             const question = document.getElementById('ask-input').value.trim();
             const topK = Number(document.getElementById('ask-top-k').value || 5);
             if (!question) {
-                showAskStatus('Введите вопрос.', 'warn');
+                showAskStatus('Enter a question.', 'warn');
                 return;
             }
             const btn = document.getElementById('ask-btn');
             btn.disabled = true;
-            btn.textContent = 'Генерация...';
-            renderAnswer('Ищу контекст и вызываю LLM...');
-            document.getElementById('ask-sources').innerHTML = '<div class="notice">Загрузка источников...</div>';
+            btn.textContent = 'Generating...';
+            renderAnswer('Retrieving context and calling the LLM...');
+            document.getElementById('ask-sources').innerHTML = '<div class="notice">Loading sources...</div>';
             showAskStatus('request in progress', 'warn');
             try {
                 const data = await api('/api/ask', {
                     method: 'POST',
                     body: JSON.stringify({ question, top_k: topK, stream: false, ...currentPromptPayload() })
                 });
-                renderAnswer(data.answer || 'Пустой ответ.');
+                renderAnswer(data.answer || 'Empty answer.');
                 const statusType = data.llm_status === 'ok' ? 'ok' : 'warn';
                 const confidence = formatScore(data.retrieval_confidence ?? 0);
                 const truncation = data.llm_truncated ? ` | finish: ${data.llm_finish_reason || 'truncated'}` : '';
@@ -1273,11 +1273,11 @@ Available models: ${escapeHtml(modelsText)}</div>
                 renderAskSources(data.context || [], data.sources || []);
             } catch (error) {
                 renderAnswer(error.message);
-                document.getElementById('ask-sources').innerHTML = renderNotice('Источники не получены.', 'error');
+                document.getElementById('ask-sources').innerHTML = renderNotice('Sources were not received.', 'error');
                 showAskStatus('request failed', 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'Получить ответ';
+                btn.textContent = 'Get answer';
             }
         }
 
@@ -1382,7 +1382,7 @@ Available models: ${escapeHtml(modelsText)}</div>
         function renderAskSources(context, sources) {
             const container = document.getElementById('ask-sources');
             if (!context.length && !sources.length) {
-                container.innerHTML = renderNotice('Источники не найдены.');
+                container.innerHTML = renderNotice('No sources found.');
                 return;
             }
             container.innerHTML = context.map((item, index) => `
@@ -1413,8 +1413,8 @@ Available models: ${escapeHtml(modelsText)}</div>
 
         function clearAsk() {
             document.getElementById('ask-input').value = '';
-            renderAnswer('Ответ появится здесь.');
-            document.getElementById('ask-sources').innerHTML = '<div class="notice">Пока нет источников.</div>';
+            renderAnswer('The answer will appear here.');
+            document.getElementById('ask-sources').innerHTML = '<div class="notice">No sources yet.</div>';
             document.getElementById('ask-status').innerHTML = '';
         }
 
@@ -1423,13 +1423,13 @@ Available models: ${escapeHtml(modelsText)}</div>
             const topK = Number(document.getElementById('search-top-k').value || 10);
             const container = document.getElementById('search-results');
             if (!query) {
-                container.innerHTML = renderNotice('Введите запрос.', 'error');
+                container.innerHTML = renderNotice('Enter a query.', 'error');
                 return;
             }
             const btn = document.getElementById('search-btn');
             btn.disabled = true;
-            btn.textContent = 'Поиск...';
-            container.innerHTML = '<div class="notice">Идёт поиск...</div>';
+            btn.textContent = 'Searching...';
+            container.innerHTML = '<div class="notice">Searching...</div>';
             try {
                 const data = await api('/api/search', {
                     method: 'POST',
@@ -1437,7 +1437,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 });
                 const results = data.results || [];
                 if (!results.length) {
-                    container.innerHTML = renderNotice('Ничего не найдено.');
+                    container.innerHTML = renderNotice('No results found.');
                     return;
                 }
                 container.innerHTML = results.map((result, index) => `
@@ -1458,7 +1458,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 container.innerHTML = renderNotice(error.message, 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'Найти';
+                btn.textContent = 'Search';
             }
         }
 
@@ -1470,7 +1470,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 `<span class="badge">${formatScore(item.similarity)}</span> ` +
                 `<span class="muted">${escapeHtml(item.reason || 'similar QA entry')}</span></li>`
             ).join('');
-            return `<div class="notice warn"><strong>Возможный дубль QA перед сохранением.</strong><ul>${items}</ul></div>`;
+            return `<div class="notice warn"><strong>Possible duplicate QA before saving.</strong><ul>${items}</ul></div>`;
         }
 
         async function checkQaDuplicateBeforeSave(question, answer, category) {
@@ -1491,7 +1491,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 if (data.warning) {
                     const html = renderQADuplicateWarning(data);
                     if (warning) warning.innerHTML = html;
-                    return confirm('Найдены похожие QA-записи. Всё равно сохранить?');
+                    return confirm('Similar QA entries were found. Save anyway?');
                 }
             } catch (error) {
                 // Duplicate preview is advisory; failed checks must not block QA editing.
@@ -1506,7 +1506,7 @@ Available models: ${escapeHtml(modelsText)}</div>
             const category = document.getElementById('qa-category').value.trim() || 'general';
             const tags = parseCommaList(document.getElementById('qa-tags').value);
             if (!question || !answer) {
-                document.getElementById('qa-message').innerHTML = renderNotice('Question и Answer обязательны.', 'error');
+                document.getElementById('qa-message').innerHTML = renderNotice('Question and Answer are required.', 'error');
                 return;
             }
             const shouldSave = await checkQaDuplicateBeforeSave(question, answer, category);
@@ -1515,7 +1515,7 @@ Available models: ${escapeHtml(modelsText)}</div>
             }
             const btn = document.getElementById('qa-add-btn');
             btn.disabled = true;
-            btn.textContent = editingQaPairId ? 'Обновление...' : 'Сохранение...';
+            btn.textContent = editingQaPairId ? 'Updating...' : 'Saving...';
             try {
                 const endpoint = editingQaPairId ? '/api/qa/update' : '/api/qa/add';
                 const payload = editingQaPairId
@@ -1531,8 +1531,8 @@ Available models: ${escapeHtml(modelsText)}</div>
                 document.getElementById('qa-duplicate-warning').innerHTML = '';
                 document.getElementById('qa-message').innerHTML = renderNotice(
                     editingQaPairId
-                        ? 'QA-пара обновлена. Она сразу будет учитываться в Ask и Search.'
-                        : 'QA-пара добавлена. Она сразу будет учитываться в Ask и Search.',
+                        ? 'QA pair updated. It will be used by Ask and Search immediately.'
+                        : 'QA pair added. It will be used by Ask and Search immediately.',
                     'ok'
                 );
                 cancelQAEdit(false);
@@ -1548,8 +1548,8 @@ Available models: ${escapeHtml(modelsText)}</div>
         async function loadQAPairs() {
             const container = document.getElementById('qa-list');
             const summary = document.getElementById('qa-list-summary');
-            summary.textContent = 'Загрузка QA...';
-            container.innerHTML = '<div class="notice">Загрузка QA...</div>';
+            summary.textContent = 'Loading QA...';
+            container.innerHTML = '<div class="notice">Loading QA...</div>';
             try {
                 qaPageSize = Number(document.getElementById('qa-page-size').value || qaPageSize || 25);
                 const query = document.getElementById('qa-filter').value.trim();
@@ -1574,7 +1574,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 await populateQATagFilter();
                 renderQATable();
             } catch (error) {
-                summary.textContent = 'Ошибка загрузки QA.';
+                summary.textContent = 'Failed to load QA.';
                 container.innerHTML = renderNotice(error.message, 'error');
             }
         }
@@ -1661,7 +1661,7 @@ Available models: ${escapeHtml(modelsText)}</div>
                 summary.textContent = '0 QA pairs';
                 pagination.classList.add('hidden');
                 pagination.innerHTML = '';
-                container.innerHTML = renderNotice('QA-пары по текущему фильтру не найдены. Добавьте первую пару слева или сбросьте фильтр.', 'warn');
+                container.innerHTML = renderNotice('No QA pairs match the current filter. Add the first pair on the left or reset the filter.', 'warn');
                 return;
             }
 
@@ -1671,8 +1671,8 @@ Available models: ${escapeHtml(modelsText)}</div>
             const startIndex = qaTotal === 0 ? 0 : (qaCurrentPage - 1) * qaPageSize;
             const endIndex = Math.min(startIndex + pageItems.length, qaTotal);
             summary.textContent = pageItems.length
-                ? `Показано ${startIndex + 1}–${endIndex} из ${qaTotal} QA-пар.`
-                : `Показано 0 из ${qaTotal} QA-пар.`;
+                ? `Showing ${startIndex + 1}-${endIndex} of ${qaTotal} QA pairs.`
+                : `Showing 0 of ${qaTotal} QA pairs.`;
 
             container.innerHTML = `
                 <table class="qa-table">
@@ -1696,8 +1696,8 @@ Available models: ${escapeHtml(modelsText)}</div>
                                     ${renderTags(pair.tags)}
                                 </td>
                                 <td class="qa-actions-cell">
-                                    <button class="btn secondary" onclick="startQAEdit('${escapeJs(pair.id || '')}')">Править</button>
-                                    <button class="btn danger" onclick="deleteQAPair('${escapeJs(pair.id || '')}')">Удалить</button>
+                                    <button class="btn secondary" onclick="startQAEdit('${escapeJs(pair.id || '')}')">Edit</button>
+                                    <button class="btn danger" onclick="deleteQAPair('${escapeJs(pair.id || '')}')">Delete</button>
                                 </td>
                             </tr>`).join('')}
                     </tbody>
@@ -1716,14 +1716,14 @@ Available models: ${escapeHtml(modelsText)}</div>
             pagination.classList.remove('hidden');
             const pages = buildVisiblePages(qaCurrentPage, totalPages);
             pagination.innerHTML = `
-                <div class="muted">Страница ${qaCurrentPage} из ${totalPages}</div>
+                <div class="muted">Page ${qaCurrentPage} of ${totalPages}</div>
                 <div class="qa-pagination-controls">
-                    <button class="btn secondary" onclick="setQAPage(${qaCurrentPage - 1})" ${qaCurrentPage <= 1 ? 'disabled' : ''}>← Назад</button>
+                    <button class="btn secondary" onclick="setQAPage(${qaCurrentPage - 1})" ${qaCurrentPage <= 1 ? 'disabled' : ''}>← Previous</button>
                     ${pages.map((page) => page === '…'
                         ? '<span class="muted">…</span>'
                         : `<button class="btn ${page === qaCurrentPage ? '' : 'secondary'}" onclick="setQAPage(${page})">${page}</button>`
                     ).join('')}
-                    <button class="btn secondary" onclick="setQAPage(${qaCurrentPage + 1})" ${qaCurrentPage >= totalPages ? 'disabled' : ''}>Вперёд →</button>
+                    <button class="btn secondary" onclick="setQAPage(${qaCurrentPage + 1})" ${qaCurrentPage >= totalPages ? 'disabled' : ''}>Next →</button>
                 </div>`;
         }
 
@@ -1759,7 +1759,7 @@ Available models: ${escapeHtml(modelsText)}</div>
         function startQAEdit(pairId) {
             const pair = lastQAPairs.find((item) => item.id === pairId);
             if (!pair) {
-                document.getElementById('qa-message').innerHTML = renderNotice('QA-пара не найдена в текущем списке. Обновите список и повторите.', 'error');
+                document.getElementById('qa-message').innerHTML = renderNotice('QA pair was not found in the current list. Refresh the list and try again.', 'error');
                 return;
             }
             editingQaPairId = pair.id;
@@ -1769,7 +1769,7 @@ Available models: ${escapeHtml(modelsText)}</div>
             document.getElementById('qa-category').value = pair.category || 'general';
             document.getElementById('qa-tags').value = Array.isArray(pair.tags) ? pair.tags.join(', ') : '';
             document.getElementById('qa-duplicate-warning').innerHTML = '';
-            document.getElementById('qa-message').innerHTML = renderNotice(`Режим правки QA: ${pair.id}`, 'warn');
+            document.getElementById('qa-message').innerHTML = renderNotice(`Editing QA pair: ${pair.id}`, 'warn');
             updateQAFormMode();
             renderQATable();
             document.getElementById('qa-question').focus();
@@ -1791,10 +1791,10 @@ Available models: ${escapeHtml(modelsText)}</div>
             const btn = document.getElementById('qa-add-btn');
             const cancel = document.getElementById('qa-cancel-btn');
             if (editingQaPairId) {
-                btn.textContent = 'Сохранить изменения';
+                btn.textContent = 'Save changes';
                 cancel.classList.remove('hidden');
             } else {
-                btn.textContent = 'Добавить QA';
+                btn.textContent = 'Add QA';
                 cancel.classList.add('hidden');
             }
         }
@@ -1802,7 +1802,7 @@ Available models: ${escapeHtml(modelsText)}</div>
         async function deleteQAPair(pairId) {
             const pair = lastQAPairs.find((item) => item.id === pairId);
             const label = pair?.question || pairId;
-            if (!confirm(`Удалить QA-пару?
+            if (!confirm(`Delete QA pair?
 
 ${label}`)) {
                 return;
@@ -1818,7 +1818,7 @@ ${label}`)) {
                 if (selectedQaPairId === pairId) {
                     selectedQaPairId = null;
                 }
-                document.getElementById('qa-message').innerHTML = renderNotice('QA-пара удалена.', 'ok');
+                document.getElementById('qa-message').innerHTML = renderNotice('QA pair deleted.', 'ok');
                 await loadQAPairs();
             } catch (error) {
                 document.getElementById('qa-message').innerHTML = renderNotice(error.message, 'error');
@@ -1982,12 +1982,12 @@ ${label}`)) {
             const btn = document.getElementById('reindex-btn');
             const scanPath = getScanPathInput();
             if (!scanPath) {
-                document.getElementById('health-box').innerHTML = renderNotice('Укажите scan path для индексации.', 'warn');
+                document.getElementById('health-box').innerHTML = renderNotice('Specify a scan path for indexing.', 'warn');
                 document.getElementById('scan-path-input').focus();
                 return;
             }
             btn.disabled = true;
-            btn.textContent = 'Индексация...';
+            btn.textContent = 'Indexing...';
             try {
                 await api('/api/index', {
                     method: 'POST',
@@ -1999,7 +1999,7 @@ ${label}`)) {
                 document.getElementById('health-box').innerHTML = renderNotice(error.message, 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'Переиндексировать путь';
+                btn.textContent = 'Reindex path';
             }
         }
 
